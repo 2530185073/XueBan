@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="620" height="780" viewBox="0 0 620 780">
+  <defs><pattern id="lines" width="620" height="39" patternUnits="userSpaceOnUse"><path d="M0 38.5H620" stroke="#e9e6df" stroke-width="1"/></pattern></defs>
+  <rect width="620" height="780" fill="#fffef9"/>
+  <rect x="38" y="164" width="544" height="548" fill="url(#lines)"/>
+  <text x="310" y="53" text-anchor="middle" font-size="14" fill="#a18157" font-family="serif" letter-spacing="3">合成样例 · 非真实学生作业</text>
+  <text x="62" y="111" font-size="29" fill="#263e37" font-family="serif">整式的加减</text>
+  <text x="62" y="144" font-size="13" fill="#999589" font-family="sans-serif">用于界面预览 / 不作教材或答案依据</text>
+  <text x="64" y="224" font-size="18" fill="#343e38" font-family="serif">1. 去括号：3(x − 2)。</text>
+  <g font-family="cursive, serif" font-size="31" fill="#536b8a" transform="rotate(-1 120 292)">
+    <text x="103" y="293">3(x − 2) = 3x − 2</text>
+    <path d="M392 310q24 8 46 0" fill="none" stroke="#536b8a" stroke-width="1.5"/>
+    <text x="460" y="299" font-size="29">?</text>
+  </g>
+  <text x="78" y="363" font-size="13" fill="#a39b89" font-family="sans-serif">这个区域对应当前求助题目</text>
+  <text x="64" y="441" font-size="18" fill="#343e38" font-family="serif">2. 合并同类项：2a + 3a。</text>
+  <text x="104" y="506" font-size="31" fill="#536b8a" font-family="cursive, serif">= 5a</text>
+  <text x="64" y="600" font-size="18" fill="#343e38" font-family="serif">3. 化简：5y − 2y。</text>
+  <text x="104" y="664" font-size="31" fill="#536b8a" font-family="cursive, serif">= 3y</text>
+  <text x="310" y="750" text-anchor="middle" font-size="12" fill="#a39b89" font-family="sans-serif">仅为合成设计材料，不含真实学生姓名与数据</text>
+</svg>

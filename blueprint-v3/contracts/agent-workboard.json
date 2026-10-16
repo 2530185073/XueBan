@@ -86,11 +86,30 @@
         "P1-01",
         "P1-15"
       ],
-      "status": "not_started",
+      "status": "artifact_ready",
       "artifact_paths": [
         "evals/correction/"
       ],
-      "acceptance": "开发/校准/保留集分开，题目及拍摄变体分组去泄漏；标注由具备能力的内容审核者核实，阈值在保留集前冻结"
+      "acceptance": "开发/校准/保留集分开，题目及拍摄变体分组去泄漏；标注由具备能力的内容审核者核实，阈值在保留集前冻结",
+      "evidence": "离线CLI、4份Schema、3组合成文件与归一化说明；30项测试通过。尚无真实授权样本/独立标签/供应商实测，不能作为发布证据。"
+    },
+    {
+      "id": "A06",
+      "title": "外部强模型和教育OCR核验与申请清单",
+      "owner_role": "integration_agent",
+      "dependency_ids": [],
+      "phase1_task_ids": [
+        "P1-01",
+        "P1-05",
+        "P1-06",
+        "P1-15"
+      ],
+      "status": "completed",
+      "artifact_paths": [
+        "MODEL_SERVICE_PLAN.md"
+      ],
+      "acceptance": "准确模型ID、视觉/文本区分、OCR现行接口、采购权限与能力缺口均附官方来源；不冒充账户已开通或效果实测",
+      "evidence": "2026-10-16三Agent只读官方资料核验；尚无密钥/付费推理调用"
     },
     {
       "id": "B01",
@@ -103,11 +122,12 @@
         "P1-02",
         "P1-12"
       ],
-      "status": "not_started",
+      "status": "artifact_ready",
       "artifact_paths": [
         "services/backend/"
       ],
-      "acceptance": "生产鉴权、迁移、学生授权、重启持久化与跨生负向测试；演示身份不能替代"
+      "acceptance": "生产鉴权、迁移、学生授权、重启持久化与跨生负向测试；演示身份不能替代",
+      "evidence": "4个实际操作；JWT与数据库授权、Alembic、作业和幂等事务已实现。本机32 passed/2 PG-only skipped；异常日期500已修为422，PG17 CI待执行，真实身份平台未接通。"
     },
     {
       "id": "B02",
@@ -131,7 +151,8 @@
       "owner_role": "correction_engine_agent",
       "dependency_ids": [
         "A02",
-        "A05"
+        "A05",
+        "A06"
       ],
       "phase1_task_ids": [
         "P1-05",
@@ -174,11 +195,12 @@
       "phase1_task_ids": [
         "P1-09"
       ],
-      "status": "not_started",
+      "status": "artifact_ready",
       "artifact_paths": [
         "apps/staff-web/"
       ],
-      "acceptance": "原图/候选/帮助历史同屏，接单/修订/确认/无法判断/冲突；后端真实联调后验收"
+      "acceptance": "原图/候选/帮助历史同屏，接单/修订/确认/无法判断/冲突；后端真实联调后验收",
+      "evidence": "契约生成TS+AJV、工作台与显式合成预览；12项API测试及build通过，浏览器窄屏/三栏与原图交互已检查。真实求助/复核后端、正式登录与刷新恢复未接通。"
     },
     {
       "id": "C01",
@@ -272,5 +294,12 @@
       ],
       "acceptance": "具备实际设备/授权/坐班负责人，真实出勤观察，16项验收与R2后发布，记录未覆盖范围"
     }
-  ]
+  ],
+  "execution_round": 2,
+  "external_provider_decision": {
+    "source": "official_apis",
+    "confirmed_by_user": true,
+    "decided_at": "2026-10-16",
+    "credentials_received": false
+  }
 }

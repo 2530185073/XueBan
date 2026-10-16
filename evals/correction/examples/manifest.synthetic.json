@@ -1,0 +1,681 @@
+{
+  "schema_version": "0.1",
+  "dataset_id": "synthetic_correction_contract",
+  "dataset_version": "fixture-v1",
+  "synthetic_only": true,
+  "description": "Entirely synthetic status fixtures. No photos, textbook content, student data, or actual model responses. Not performance evidence.",
+  "samples": [
+    {
+      "sample_id": "synthetic_01",
+      "question_group_id": "question_01",
+      "capture_group_id": "capture_01",
+      "split": "holdout",
+      "stage": "initial",
+      "parent_sample_id": null,
+      "curriculum": {
+        "stage": "junior_middle_school",
+        "publisher": "PEP-context-only",
+        "grade": 7,
+        "term": "upper",
+        "textbook_revision": null
+      },
+      "question_type": "linear_equation",
+      "image_conditions": [
+        "synthetic_no_image",
+        "clear"
+      ],
+      "authorization": {
+        "status": "synthetic",
+        "basis_ref": "synthetic_fixture_authored_for_evaluator"
+      },
+      "asset_ref": null,
+      "source_asset_sha256": null,
+      "input_versions": {
+        "question_id": "question_01",
+        "question_revision": 1,
+        "attempt_id": "attempt_01",
+        "attempt_recognition_revision": 1,
+        "fingerprint": "9c41a25d999dcb94906047efc594b257763b4e6b86a81afe58f2b218edaa54cf"
+      },
+      "label": {
+        "status": "reviewed",
+        "verdict": "correct",
+        "basis_kind": "synthetic_fixture",
+        "basis_ref": "fixture_arithmetic_case_01",
+        "reviewer_id": "synthetic_author",
+        "reviewer_role": "synthetic_fixture",
+        "adjudication_ref": null
+      }
+    },
+    {
+      "sample_id": "synthetic_02",
+      "question_group_id": "question_02",
+      "capture_group_id": "capture_01",
+      "split": "holdout",
+      "stage": "initial",
+      "parent_sample_id": null,
+      "curriculum": {
+        "stage": "junior_middle_school",
+        "publisher": "PEP-context-only",
+        "grade": 7,
+        "term": "upper",
+        "textbook_revision": null
+      },
+      "question_type": "linear_equation",
+      "image_conditions": [
+        "synthetic_no_image",
+        "clear"
+      ],
+      "authorization": {
+        "status": "synthetic",
+        "basis_ref": "synthetic_fixture_authored_for_evaluator"
+      },
+      "asset_ref": null,
+      "source_asset_sha256": null,
+      "input_versions": {
+        "question_id": "question_02",
+        "question_revision": 1,
+        "attempt_id": "attempt_02",
+        "attempt_recognition_revision": 1,
+        "fingerprint": "728ef474a74a4aa182e2b654a197cd0b0c75f29e2ad647f4f453c0fdfff275e6"
+      },
+      "label": {
+        "status": "reviewed",
+        "verdict": "correct",
+        "basis_kind": "synthetic_fixture",
+        "basis_ref": "fixture_arithmetic_case_02",
+        "reviewer_id": "synthetic_author",
+        "reviewer_role": "synthetic_fixture",
+        "adjudication_ref": null
+      }
+    },
+    {
+      "sample_id": "synthetic_03",
+      "question_group_id": "question_03",
+      "capture_group_id": "capture_03",
+      "split": "holdout",
+      "stage": "initial",
+      "parent_sample_id": null,
+      "curriculum": {
+        "stage": "junior_middle_school",
+        "publisher": "PEP-context-only",
+        "grade": 7,
+        "term": "upper",
+        "textbook_revision": null
+      },
+      "question_type": "linear_equation",
+      "image_conditions": [
+        "synthetic_no_image",
+        "clear"
+      ],
+      "authorization": {
+        "status": "synthetic",
+        "basis_ref": "synthetic_fixture_authored_for_evaluator"
+      },
+      "asset_ref": null,
+      "source_asset_sha256": null,
+      "input_versions": {
+        "question_id": "question_03",
+        "question_revision": 1,
+        "attempt_id": "attempt_03",
+        "attempt_recognition_revision": 1,
+        "fingerprint": "652621d14d3b66fb553db2fa67d73c7236d67c7a73235f4e8654822618581a2f"
+      },
+      "label": {
+        "status": "reviewed",
+        "verdict": "incorrect",
+        "basis_kind": "synthetic_fixture",
+        "basis_ref": "fixture_arithmetic_case_03",
+        "reviewer_id": "synthetic_author",
+        "reviewer_role": "synthetic_fixture",
+        "adjudication_ref": null
+      }
+    },
+    {
+      "sample_id": "synthetic_04",
+      "question_group_id": "question_04",
+      "capture_group_id": "capture_04",
+      "split": "holdout",
+      "stage": "initial",
+      "parent_sample_id": null,
+      "curriculum": {
+        "stage": "junior_middle_school",
+        "publisher": "PEP-context-only",
+        "grade": 7,
+        "term": "upper",
+        "textbook_revision": null
+      },
+      "question_type": "linear_equation",
+      "image_conditions": [
+        "synthetic_no_image",
+        "clear"
+      ],
+      "authorization": {
+        "status": "synthetic",
+        "basis_ref": "synthetic_fixture_authored_for_evaluator"
+      },
+      "asset_ref": null,
+      "source_asset_sha256": null,
+      "input_versions": {
+        "question_id": "question_04",
+        "question_revision": 1,
+        "attempt_id": "attempt_04",
+        "attempt_recognition_revision": 1,
+        "fingerprint": "44c13fbb00cc89909df60d2a2f9b82c2a7818591a646281d3f8a37f108120888"
+      },
+      "label": {
+        "status": "reviewed",
+        "verdict": "incorrect",
+        "basis_kind": "synthetic_fixture",
+        "basis_ref": "fixture_arithmetic_case_04",
+        "reviewer_id": "synthetic_author",
+        "reviewer_role": "synthetic_fixture",
+        "adjudication_ref": null
+      }
+    },
+    {
+      "sample_id": "synthetic_05",
+      "question_group_id": "question_05",
+      "capture_group_id": "capture_05",
+      "split": "holdout",
+      "stage": "initial",
+      "parent_sample_id": null,
+      "curriculum": {
+        "stage": "junior_middle_school",
+        "publisher": "PEP-context-only",
+        "grade": 7,
+        "term": "upper",
+        "textbook_revision": null
+      },
+      "question_type": "fraction",
+      "image_conditions": [
+        "synthetic_no_image",
+        "blur"
+      ],
+      "authorization": {
+        "status": "synthetic",
+        "basis_ref": "synthetic_fixture_authored_for_evaluator"
+      },
+      "asset_ref": null,
+      "source_asset_sha256": null,
+      "input_versions": {
+        "question_id": "question_05",
+        "question_revision": 1,
+        "attempt_id": "attempt_05",
+        "attempt_recognition_revision": 1,
+        "fingerprint": "b4e440a53f88444536130d3274a2fe74474cfaa20ae24aee070b32fbcebfa21b"
+      },
+      "label": {
+        "status": "reviewed",
+        "verdict": "incorrect",
+        "basis_kind": "synthetic_fixture",
+        "basis_ref": "fixture_arithmetic_case_05",
+        "reviewer_id": "synthetic_author",
+        "reviewer_role": "synthetic_fixture",
+        "adjudication_ref": null
+      }
+    },
+    {
+      "sample_id": "synthetic_06",
+      "question_group_id": "question_06",
+      "capture_group_id": "capture_06",
+      "split": "holdout",
+      "stage": "initial",
+      "parent_sample_id": null,
+      "curriculum": {
+        "stage": "junior_middle_school",
+        "publisher": "PEP-context-only",
+        "grade": 7,
+        "term": "upper",
+        "textbook_revision": null
+      },
+      "question_type": "geometry_proof",
+      "image_conditions": [
+        "synthetic_no_image",
+        "missing_steps"
+      ],
+      "authorization": {
+        "status": "synthetic",
+        "basis_ref": "synthetic_fixture_authored_for_evaluator"
+      },
+      "asset_ref": null,
+      "source_asset_sha256": null,
+      "input_versions": {
+        "question_id": "question_06",
+        "question_revision": 1,
+        "attempt_id": "attempt_06",
+        "attempt_recognition_revision": 1,
+        "fingerprint": "ed5ce0fb5047650994a069c612d6c4f2ae7c935359219b61d50ed553aa7fd94d"
+      },
+      "label": {
+        "status": "reviewed",
+        "verdict": "incorrect",
+        "basis_kind": "synthetic_fixture",
+        "basis_ref": "fixture_arithmetic_case_06",
+        "reviewer_id": "synthetic_author",
+        "reviewer_role": "synthetic_fixture",
+        "adjudication_ref": null
+      }
+    },
+    {
+      "sample_id": "synthetic_07",
+      "question_group_id": "question_07",
+      "capture_group_id": "capture_07",
+      "split": "holdout",
+      "stage": "initial",
+      "parent_sample_id": null,
+      "curriculum": {
+        "stage": "junior_middle_school",
+        "publisher": "PEP-context-only",
+        "grade": 7,
+        "term": "upper",
+        "textbook_revision": null
+      },
+      "question_type": "linear_equation",
+      "image_conditions": [
+        "synthetic_no_image",
+        "clear"
+      ],
+      "authorization": {
+        "status": "synthetic",
+        "basis_ref": "synthetic_fixture_authored_for_evaluator"
+      },
+      "asset_ref": null,
+      "source_asset_sha256": null,
+      "input_versions": {
+        "question_id": "question_07",
+        "question_revision": 1,
+        "attempt_id": "attempt_07",
+        "attempt_recognition_revision": 1,
+        "fingerprint": "64f036118684c0c4889138ece5347a0cd356ccd2d521ed020a9e17cfb70c7b5e"
+      },
+      "label": {
+        "status": "reviewed",
+        "verdict": "incorrect",
+        "basis_kind": "synthetic_fixture",
+        "basis_ref": "fixture_arithmetic_case_07",
+        "reviewer_id": "synthetic_author",
+        "reviewer_role": "synthetic_fixture",
+        "adjudication_ref": null
+      }
+    },
+    {
+      "sample_id": "synthetic_08",
+      "question_group_id": "question_08",
+      "capture_group_id": "capture_08",
+      "split": "holdout",
+      "stage": "initial",
+      "parent_sample_id": null,
+      "curriculum": {
+        "stage": "junior_middle_school",
+        "publisher": "PEP-context-only",
+        "grade": 7,
+        "term": "upper",
+        "textbook_revision": null
+      },
+      "question_type": "multi_part",
+      "image_conditions": [
+        "synthetic_no_image",
+        "missed_segmentation"
+      ],
+      "authorization": {
+        "status": "synthetic",
+        "basis_ref": "synthetic_fixture_authored_for_evaluator"
+      },
+      "asset_ref": null,
+      "source_asset_sha256": null,
+      "input_versions": {
+        "question_id": "question_08",
+        "question_revision": 1,
+        "attempt_id": "attempt_08",
+        "attempt_recognition_revision": 1,
+        "fingerprint": "6d4239d7b34b50233aae7d067ddfa3323aac9c40397630fedecdc71f73f5657f"
+      },
+      "label": {
+        "status": "reviewed",
+        "verdict": "incorrect",
+        "basis_kind": "synthetic_fixture",
+        "basis_ref": "fixture_arithmetic_case_08",
+        "reviewer_id": "synthetic_author",
+        "reviewer_role": "synthetic_fixture",
+        "adjudication_ref": null
+      }
+    },
+    {
+      "sample_id": "synthetic_09",
+      "question_group_id": "question_09",
+      "capture_group_id": "capture_09",
+      "split": "holdout",
+      "stage": "initial",
+      "parent_sample_id": null,
+      "curriculum": {
+        "stage": "junior_middle_school",
+        "publisher": "PEP-context-only",
+        "grade": 7,
+        "term": "upper",
+        "textbook_revision": null
+      },
+      "question_type": "linear_equation",
+      "image_conditions": [
+        "synthetic_no_image",
+        "clear"
+      ],
+      "authorization": {
+        "status": "synthetic",
+        "basis_ref": "synthetic_fixture_authored_for_evaluator"
+      },
+      "asset_ref": null,
+      "source_asset_sha256": null,
+      "input_versions": {
+        "question_id": "question_09",
+        "question_revision": 1,
+        "attempt_id": "attempt_09",
+        "attempt_recognition_revision": 1,
+        "fingerprint": "23bb777b85818b1121049d2ca73614c39a7e017c7abb2281178f9bcdfbd98d9d"
+      },
+      "label": {
+        "status": "reviewed",
+        "verdict": "incorrect",
+        "basis_kind": "synthetic_fixture",
+        "basis_ref": "fixture_arithmetic_case_09",
+        "reviewer_id": "synthetic_author",
+        "reviewer_role": "synthetic_fixture",
+        "adjudication_ref": null
+      }
+    },
+    {
+      "sample_id": "synthetic_10",
+      "question_group_id": "question_03",
+      "capture_group_id": "capture_10",
+      "split": "holdout",
+      "stage": "correction",
+      "parent_sample_id": "synthetic_03",
+      "curriculum": {
+        "stage": "junior_middle_school",
+        "publisher": "PEP-context-only",
+        "grade": 7,
+        "term": "upper",
+        "textbook_revision": null
+      },
+      "question_type": "linear_equation",
+      "image_conditions": [
+        "synthetic_no_image",
+        "clear"
+      ],
+      "authorization": {
+        "status": "synthetic",
+        "basis_ref": "synthetic_fixture_authored_for_evaluator"
+      },
+      "asset_ref": null,
+      "source_asset_sha256": null,
+      "input_versions": {
+        "question_id": "question_03",
+        "question_revision": 1,
+        "attempt_id": "attempt_10",
+        "attempt_recognition_revision": 1,
+        "fingerprint": "466b3aaffe9f2faecea4e208b1ed138eaf9d34131587bde5429eb33028efb6dd"
+      },
+      "label": {
+        "status": "reviewed",
+        "verdict": "incorrect",
+        "basis_kind": "synthetic_fixture",
+        "basis_ref": "fixture_arithmetic_case_10",
+        "reviewer_id": "synthetic_author",
+        "reviewer_role": "synthetic_fixture",
+        "adjudication_ref": null
+      }
+    },
+    {
+      "sample_id": "synthetic_11",
+      "question_group_id": "question_04",
+      "capture_group_id": "capture_11",
+      "split": "holdout",
+      "stage": "correction",
+      "parent_sample_id": "synthetic_04",
+      "curriculum": {
+        "stage": "junior_middle_school",
+        "publisher": "PEP-context-only",
+        "grade": 7,
+        "term": "upper",
+        "textbook_revision": null
+      },
+      "question_type": "equivalent_answer",
+      "image_conditions": [
+        "synthetic_no_image",
+        "shadow"
+      ],
+      "authorization": {
+        "status": "synthetic",
+        "basis_ref": "synthetic_fixture_authored_for_evaluator"
+      },
+      "asset_ref": null,
+      "source_asset_sha256": null,
+      "input_versions": {
+        "question_id": "question_04",
+        "question_revision": 1,
+        "attempt_id": "attempt_11",
+        "attempt_recognition_revision": 1,
+        "fingerprint": "348a5c65a44132d3f54169ed583aa44d91d26eca6ff2f0c289fbedb8122e8251"
+      },
+      "label": {
+        "status": "reviewed",
+        "verdict": "incorrect",
+        "basis_kind": "synthetic_fixture",
+        "basis_ref": "fixture_arithmetic_case_11",
+        "reviewer_id": "synthetic_author",
+        "reviewer_role": "synthetic_fixture",
+        "adjudication_ref": null
+      }
+    },
+    {
+      "sample_id": "synthetic_12",
+      "question_group_id": "question_07",
+      "capture_group_id": "capture_12",
+      "split": "holdout",
+      "stage": "correction",
+      "parent_sample_id": "synthetic_07",
+      "curriculum": {
+        "stage": "junior_middle_school",
+        "publisher": "PEP-context-only",
+        "grade": 7,
+        "term": "upper",
+        "textbook_revision": null
+      },
+      "question_type": "linear_equation",
+      "image_conditions": [
+        "synthetic_no_image",
+        "clear"
+      ],
+      "authorization": {
+        "status": "synthetic",
+        "basis_ref": "synthetic_fixture_authored_for_evaluator"
+      },
+      "asset_ref": null,
+      "source_asset_sha256": null,
+      "input_versions": {
+        "question_id": "question_07",
+        "question_revision": 1,
+        "attempt_id": "attempt_12",
+        "attempt_recognition_revision": 1,
+        "fingerprint": "ff3e5892459e63bf4e7157937bcf24a21e97222177295cc8ff99c68e49c16290"
+      },
+      "label": {
+        "status": "reviewed",
+        "verdict": "correct",
+        "basis_kind": "synthetic_fixture",
+        "basis_ref": "fixture_arithmetic_case_12",
+        "reviewer_id": "synthetic_author",
+        "reviewer_role": "synthetic_fixture",
+        "adjudication_ref": null
+      }
+    },
+    {
+      "sample_id": "synthetic_13",
+      "question_group_id": "question_13",
+      "capture_group_id": "capture_13",
+      "split": "holdout",
+      "stage": "initial",
+      "parent_sample_id": null,
+      "curriculum": {
+        "stage": "junior_middle_school",
+        "publisher": "PEP-context-only",
+        "grade": 7,
+        "term": "upper",
+        "textbook_revision": null
+      },
+      "question_type": "linear_equation",
+      "image_conditions": [
+        "synthetic_no_image",
+        "clear"
+      ],
+      "authorization": {
+        "status": "synthetic",
+        "basis_ref": "synthetic_fixture_authored_for_evaluator"
+      },
+      "asset_ref": null,
+      "source_asset_sha256": null,
+      "input_versions": {
+        "question_id": "question_13",
+        "question_revision": 1,
+        "attempt_id": "attempt_13",
+        "attempt_recognition_revision": 1,
+        "fingerprint": "43d2f33b75145216878f80d96eeaf4e5d52c05240350fb3b5b74645f761e6528"
+      },
+      "label": {
+        "status": "disputed",
+        "verdict": "uncertain",
+        "basis_kind": "pending",
+        "basis_ref": null,
+        "reviewer_id": null,
+        "reviewer_role": null,
+        "adjudication_ref": null
+      }
+    },
+    {
+      "sample_id": "synthetic_14",
+      "question_group_id": "question_14",
+      "capture_group_id": "capture_14",
+      "split": "holdout",
+      "stage": "initial",
+      "parent_sample_id": null,
+      "curriculum": {
+        "stage": "junior_middle_school",
+        "publisher": "PEP-context-only",
+        "grade": 7,
+        "term": "upper",
+        "textbook_revision": null
+      },
+      "question_type": "linear_equation",
+      "image_conditions": [
+        "synthetic_no_image",
+        "clear"
+      ],
+      "authorization": {
+        "status": "synthetic",
+        "basis_ref": "synthetic_fixture_authored_for_evaluator"
+      },
+      "asset_ref": null,
+      "source_asset_sha256": null,
+      "input_versions": {
+        "question_id": "question_14",
+        "question_revision": 1,
+        "attempt_id": "attempt_14",
+        "attempt_recognition_revision": 1,
+        "fingerprint": "5136e5d4279bd4c8808951aef622c59d8f23c4dcc0bb6f4154c9d3c27b06a046"
+      },
+      "label": {
+        "status": "reviewed",
+        "verdict": "incorrect",
+        "basis_kind": "synthetic_fixture",
+        "basis_ref": "fixture_arithmetic_case_14",
+        "reviewer_id": "synthetic_author",
+        "reviewer_role": "synthetic_fixture",
+        "adjudication_ref": null
+      }
+    },
+    {
+      "sample_id": "synthetic_15",
+      "question_group_id": "question_15",
+      "capture_group_id": "capture_15",
+      "split": "development",
+      "stage": "initial",
+      "parent_sample_id": null,
+      "curriculum": {
+        "stage": "junior_middle_school",
+        "publisher": "PEP-context-only",
+        "grade": 7,
+        "term": "upper",
+        "textbook_revision": null
+      },
+      "question_type": "linear_equation",
+      "image_conditions": [
+        "synthetic_no_image",
+        "clear"
+      ],
+      "authorization": {
+        "status": "synthetic",
+        "basis_ref": "synthetic_fixture_authored_for_evaluator"
+      },
+      "asset_ref": null,
+      "source_asset_sha256": null,
+      "input_versions": {
+        "question_id": "question_15",
+        "question_revision": 1,
+        "attempt_id": "attempt_15",
+        "attempt_recognition_revision": 1,
+        "fingerprint": "25c6526fff134397f7c05670ecc6347fa8afdc2015d2ce752d2838904182b963"
+      },
+      "label": {
+        "status": "reviewed",
+        "verdict": "correct",
+        "basis_kind": "synthetic_fixture",
+        "basis_ref": "fixture_arithmetic_case_15",
+        "reviewer_id": "synthetic_author",
+        "reviewer_role": "synthetic_fixture",
+        "adjudication_ref": null
+      }
+    },
+    {
+      "sample_id": "synthetic_16",
+      "question_group_id": "question_16",
+      "capture_group_id": "capture_16",
+      "split": "calibration",
+      "stage": "initial",
+      "parent_sample_id": null,
+      "curriculum": {
+        "stage": "junior_middle_school",
+        "publisher": "PEP-context-only",
+        "grade": 7,
+        "term": "upper",
+        "textbook_revision": null
+      },
+      "question_type": "linear_equation",
+      "image_conditions": [
+        "synthetic_no_image",
+        "clear"
+      ],
+      "authorization": {
+        "status": "synthetic",
+        "basis_ref": "synthetic_fixture_authored_for_evaluator"
+      },
+      "asset_ref": null,
+      "source_asset_sha256": null,
+      "input_versions": {
+        "question_id": "question_16",
+        "question_revision": 1,
+        "attempt_id": "attempt_16",
+        "attempt_recognition_revision": 1,
+        "fingerprint": "5ed9f6d6aeee2997abec12129947714b46395c1d073a3a2c33bce398166bc9fd"
+      },
+      "label": {
+        "status": "reviewed",
+        "verdict": "correct",
+        "basis_kind": "synthetic_fixture",
+        "basis_ref": "fixture_arithmetic_case_16",
+        "reviewer_id": "synthetic_author",
+        "reviewer_role": "synthetic_fixture",
+        "adjudication_ref": null
+      }
+    }
+  ]
+}

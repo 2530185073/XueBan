@@ -1,0 +1,350 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xueban.invalid/evals/correction/manifest.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "0.1"
+    },
+    "dataset_id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$"
+    },
+    "dataset_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "synthetic_only": {
+      "type": "boolean"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "samples": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "sample_id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$"
+          },
+          "question_group_id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$"
+          },
+          "capture_group_id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$"
+          },
+          "split": {
+            "$ref": "common.schema.json#/$defs/split"
+          },
+          "stage": {
+            "enum": [
+              "initial",
+              "correction"
+            ]
+          },
+          "parent_sample_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "curriculum": {
+            "type": "object",
+            "properties": {
+              "stage": {
+                "const": "junior_middle_school"
+              },
+              "publisher": {
+                "type": "string",
+                "minLength": 1
+              },
+              "grade": {
+                "enum": [
+                  7,
+                  8,
+                  9,
+                  "unknown"
+                ]
+              },
+              "term": {
+                "enum": [
+                  "upper",
+                  "lower",
+                  "unknown"
+                ]
+              },
+              "textbook_revision": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1
+              }
+            },
+            "required": [
+              "stage",
+              "publisher",
+              "grade",
+              "term",
+              "textbook_revision"
+            ],
+            "additionalProperties": false
+          },
+          "question_type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "image_conditions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "authorization": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "enum": [
+                  "synthetic",
+                  "authorized",
+                  "pending",
+                  "withdrawn"
+                ]
+              },
+              "basis_ref": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1
+              }
+            },
+            "required": [
+              "status",
+              "basis_ref"
+            ],
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "status": {
+                      "enum": [
+                        "synthetic",
+                        "authorized"
+                      ]
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "basis_ref": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "asset_ref": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "source_asset_sha256": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "input_versions": {
+            "$ref": "common.schema.json#/$defs/versions"
+          },
+          "label": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "enum": [
+                  "reviewed",
+                  "pending",
+                  "disputed"
+                ]
+              },
+              "verdict": {
+                "enum": [
+                  "correct",
+                  "incorrect",
+                  "partially_correct",
+                  "unanswered",
+                  "uncertain"
+                ]
+              },
+              "basis_kind": {
+                "enum": [
+                  "synthetic_fixture",
+                  "human_verified_solution",
+                  "reviewed_reference",
+                  "pending"
+                ]
+              },
+              "basis_ref": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1
+              },
+              "reviewer_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1
+              },
+              "reviewer_role": {
+                "enum": [
+                  "independent_subject_reviewer",
+                  "synthetic_fixture",
+                  null
+                ]
+              },
+              "adjudication_ref": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1
+              }
+            },
+            "required": [
+              "status",
+              "verdict",
+              "basis_kind",
+              "basis_ref",
+              "reviewer_id",
+              "reviewer_role",
+              "adjudication_ref"
+            ],
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "status": {
+                      "const": "reviewed"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "verdict": {
+                      "$ref": "common.schema.json#/$defs/verdict"
+                    },
+                    "basis_kind": {
+                      "enum": [
+                        "synthetic_fixture",
+                        "human_verified_solution",
+                        "reviewed_reference"
+                      ]
+                    },
+                    "basis_ref": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "reviewer_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "reviewer_role": {
+                      "enum": [
+                        "independent_subject_reviewer",
+                        "synthetic_fixture"
+                      ]
+                    }
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "verdict": {
+                      "const": "uncertain"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "required": [
+          "sample_id",
+          "question_group_id",
+          "capture_group_id",
+          "split",
+          "stage",
+          "parent_sample_id",
+          "curriculum",
+          "question_type",
+          "image_conditions",
+          "authorization",
+          "asset_ref",
+          "source_asset_sha256",
+          "input_versions",
+          "label"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "stage": {
+                  "const": "initial"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "parent_sample_id": {
+                  "type": "null"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "parent_sample_id": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        ]
+      },
+      "minItems": 1
+    }
+  },
+  "required": [
+    "schema_version",
+    "dataset_id",
+    "dataset_version",
+    "synthetic_only",
+    "description",
+    "samples"
+  ],
+  "additionalProperties": false
+}

@@ -3,7 +3,7 @@
   "product_version": "3.5",
   "source_document": "../../PHASE1.md",
   "scope": "phase1_correction_app",
-  "status_note": "16 项均为一期 P0。P1-01/P1-03 已启动契约候选及安卓源码工作，均未验收完成；其余任务待实施。Agent 子任务与生产验收分别记录。",
+  "status_note": "16项均为一期P0。契约/安卓源码、后端身份与持久化、坐班工作台和评测框架已分批开工；均未通过一期生产验收。Agent子任务与C0/R1/R2分别记录。",
   "platform_decision": {
     "status": "confirmed_by_user",
     "target": "android_tablet_app",
@@ -49,7 +49,7 @@
       "title": "真实账号、学生归属与授权",
       "owner_hint": "BE",
       "priority": "P0",
-      "status": "not_started",
+      "status": "in_progress",
       "dependency_ids": [
         "P1-01"
       ],
@@ -184,7 +184,7 @@
       "title": "坐班核实与现场接手工作台",
       "owner_hint": "FE",
       "priority": "P0",
-      "status": "not_started",
+      "status": "in_progress",
       "dependency_ids": [
         "P1-02",
         "P1-06"
@@ -245,7 +245,7 @@
       "title": "生产纠错记录、版本与事件底座",
       "owner_hint": "BE",
       "priority": "P0",
-      "status": "not_started",
+      "status": "in_progress",
       "dependency_ids": [
         "P1-01",
         "P1-02"
@@ -311,7 +311,7 @@
       "title": "纠错评测、性能与模型版本回归",
       "owner_hint": "QA",
       "priority": "P0",
-      "status": "not_started",
+      "status": "in_progress",
       "dependency_ids": [
         "P1-06",
         "P1-07",

@@ -1,0 +1,57 @@
+{
+  "schema_version": "0.1",
+  "dataset_id": "synthetic_correction_contract",
+  "dataset_version": "fixture-v1",
+  "synthetic_only": true,
+  "split": "holdout",
+  "run_id": "synthetic_human_001",
+  "output_kind": "human_final",
+  "applies_to_model_run_id": "synthetic_run_001",
+  "decisions": [
+    {
+      "sample_id": "synthetic_01",
+      "input_versions": {
+        "question_id": "question_01",
+        "question_revision": 1,
+        "attempt_id": "attempt_01",
+        "attempt_recognition_revision": 1,
+        "fingerprint": "9c41a25d999dcb94906047efc594b257763b4e6b86a81afe58f2b218edaa54cf"
+      },
+      "decision_id": "synthetic_decision_synthetic_01",
+      "outcome": "confirmed",
+      "verdict": "correct",
+      "reviewer_id": "synthetic_staff",
+      "basis_ref": "synthetic_review_example"
+    },
+    {
+      "sample_id": "synthetic_03",
+      "input_versions": {
+        "question_id": "question_03",
+        "question_revision": 1,
+        "attempt_id": "attempt_03",
+        "attempt_recognition_revision": 1,
+        "fingerprint": "652621d14d3b66fb553db2fa67d73c7236d67c7a73235f4e8654822618581a2f"
+      },
+      "decision_id": "synthetic_decision_synthetic_03",
+      "outcome": "confirmed",
+      "verdict": "incorrect",
+      "reviewer_id": "synthetic_staff",
+      "basis_ref": "synthetic_review_example"
+    },
+    {
+      "sample_id": "synthetic_10",
+      "input_versions": {
+        "question_id": "question_03",
+        "question_revision": 1,
+        "attempt_id": "attempt_10",
+        "attempt_recognition_revision": 1,
+        "fingerprint": "466b3aaffe9f2faecea4e208b1ed138eaf9d34131587bde5429eb33028efb6dd"
+      },
+      "decision_id": "synthetic_decision_synthetic_10",
+      "outcome": "confirmed",
+      "verdict": "incorrect",
+      "reviewer_id": "synthetic_staff",
+      "basis_ref": "synthetic_review_example"
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+name: Phase-one engineering checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-evaluation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: pip
+          cache-dependency-path: evals/correction/requirements.txt
+      - run: python -m pip install -r evals/correction/requirements.txt
+      - name: Test evaluation denominators and split isolation
+        run: python -m unittest discover -s evals/correction/tests -v
+      - name: Generate synthetic-only report
+        run: >-
+          python evals/correction/evaluate.py
+          evals/correction/examples/manifest.synthetic.json
+          evals/correction/examples/predictions.synthetic.json
+          --human-decisions evals/correction/examples/human-decisions.synthetic.json
+          --allow-missing
+          --output /tmp/correction-synthetic-report.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: correction-synthetic-tool-check
+          path: /tmp/correction-synthetic-report.json
+          retention-days: 14
+
+  staff-web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/staff-web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/staff-web/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  backend-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: xueban_ci
+          POSTGRES_PASSWORD: ephemeral_ci_only
+          POSTGRES_DB: xueban_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U xueban_ci -d xueban_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+psycopg://xueban_ci:ephemeral_ci_only@localhost:5432/xueban_ci
+      BACKEND_TEST_DATABASE_URL: postgresql+psycopg://xueban_ci:ephemeral_ci_only@localhost:5432/xueban_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: pip
+          cache-dependency-path: services/backend/requirements.txt
+      - run: python -m pip install -r services/backend/requirements.txt
+      - name: Upgrade PostgreSQL schema twice
+        run: |
+          python -m alembic -c services/backend/alembic.ini upgrade head
+          python -m alembic -c services/backend/alembic.ini upgrade head
+      - name: Verify authentication, isolation, persistence and idempotency
+        run: python -m pytest services/backend/tests -q --require-postgres
