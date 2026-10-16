@@ -6,7 +6,7 @@
 
 **先把学校作业检查准确、帮助孩子自己改明白，再让纠错证据进入个人图谱和家长报告。** 首个交付关口是照片识别、错误定位、分层提示、孩子订正和重新检查，详见 [纠错核心规格](blueprint-v3/10-纠错核心流程与首发验收.md)。
 
-技术团队接手请先阅读 [开发交接说明](DEVELOPMENT.md)。**网页优先入口：双击 `启动网页版.command`，打开本机 `http://127.0.0.1:8000/learn/`**，详见 [网页运行说明](docs/WEB_LOCAL_RUN.md)。学生网页与已实现的 Android 0.2.0 共用设备配对、私有照片、纯模型识别与检查、提示、订正再检、PostgreSQL 和历史证据；现有 Android 工程保留。实际通过的检查和剩余边界见 [验证记录](VALIDATION.md)。这仍是开发联调版，尚未完成正式手写质量与现场验收。
+技术团队接手请先阅读 [开发交接说明](DEVELOPMENT.md)。**网页优先入口：双击 `启动网页版.command`，打开本机 `http://127.0.0.1:8000/learn/`，使用个人账号密码登录。** 每名学员拥有固定学员身份，换设备或改密码不改变学习数据归属；托管班管理员负责开户与重置密码，见 [账号与长期学习档案](docs/ACCOUNT_FOUNDATION.md) 和 [网页运行说明](docs/WEB_LOCAL_RUN.md)。网页共用既有私有照片、纯模型识别与检查、提示、订正再检、PostgreSQL 和历史证据；原 Android 0.2.0 配对客户端作为历史工程保留，后续封装须采用账号登录。实际通过的检查和剩余边界见 [验证记录](VALIDATION.md)。这仍是开发联调版，尚未完成正式手写质量与现场验收。
 
 ## 阅读和开发入口
 
@@ -19,7 +19,7 @@
 | [Agent 执行计划](AI_AGENT_EXECUTION.md) / [任务看板](blueprint-v3/contracts/agent-workboard.json) | 已派发工作、后续任务、并发分工与验收边界 |
 | [教材资源核验](CURRICULUM_RESOURCES.md) | 初中人教资源、版本证据、可用范围和缺口 |
 | [安卓工程](apps/android/README.md) / [一期契约](contracts/phase1/README.md) | 联网纠错源码与接口契约；构建和实调状态分别记录 |
-| [后端基础服务](services/backend/README.md) / [坐班工作台](apps/staff-web/README.md) | 设备配对、私有上传、纠错任务与历史；工作台的契约客户端与显式合成预览 |
+| [后端基础服务](services/backend/README.md) / [坐班工作台](apps/staff-web/README.md) | 长期账号、学员授权、私有上传、纠错任务与历史；工作台的契约客户端与显式合成预览 |
 | [纠错评测工具](evals/correction/README.md) | 漏题/失败保留分母、模型与人工分列、同题分组隔离、时延及成本 |
 | [00 产品总纲](blueprint-v3/00-产品总纲与开发入口.md) | 定位、核心价值、完整产品边界与已交付内容 |
 | [01 市场研究与竞争优势](blueprint-v3/01-市场研究与竞争优势.md) | 六个可比案例、研究证据、优势和服务组合 |

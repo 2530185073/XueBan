@@ -78,6 +78,42 @@ def enroll(session: Session, cfg: Settings, *, tenant_id: str, campus_id: str, s
     session.flush()
 
 
+def bootstrap_admin(session, cfg, *, tenant_id, campus_id, principal_id, subject, username, password_file):
+    """Explicit local-operator setup; no fake student or inherited student grants."""
+    from .account_auth import grant_campus, set_password_account
+    from .passwords import read_password_file
+    for value in (tenant_id, campus_id, principal_id):
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{2,63}", value):
+            raise ValueError("Invalid resource identifier")
+    if not cfg.auth_configured or not 1 <= len(subject) <= 255:
+        raise ValueError("Configured issuer and subject are required")
+    password = read_password_file(password_file)
+    if session.get(Tenant, tenant_id) is None:
+        session.add(Tenant(id=tenant_id)); session.flush()
+    campus = session.get(Campus, campus_id)
+    if campus is None:
+        session.add(Campus(id=campus_id, tenant_id=tenant_id)); session.flush()
+    elif campus.tenant_id != tenant_id:
+        raise ValueError("Campus belongs to a different tenant")
+    principal = session.get(Principal, principal_id)
+    if principal is None:
+        session.add(Principal(id=principal_id, tenant_id=tenant_id, issuer=cfg.oidc_issuer, subject=subject, active=True)); session.flush()
+    elif (principal.tenant_id, principal.issuer, principal.subject, principal.active) != (tenant_id, cfg.oidc_issuer, subject, True):
+        raise ValueError("Existing principal differs; refusing to overwrite")
+    roles = set(session.scalars(select(PrincipalRole.role).where(PrincipalRole.principal_id == principal_id)))
+    if roles and roles != {"campus_admin"}:
+        raise ValueError("Existing role differs; refusing to elevate privileges")
+    if not roles:
+        session.add(PrincipalRole(principal_id=principal_id, role="campus_admin")); session.flush()
+    # Re-running bootstrap must never reset an already established account.
+    from .account_models import PasswordAccount
+    if session.scalar(select(PasswordAccount).where(PasswordAccount.principal_id == principal_id)) is not None:
+        raise ValueError("Account already exists; use explicit password account administration")
+    grant_campus(session, principal_id, campus_id)
+    return set_password_account(session, cfg, principal_id=principal_id, username_value=username,
+                                password_value=password, must_change=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -93,6 +129,19 @@ def main():
     pair.add_argument("--ttl", type=int, default=900)
     revoke = commands.add_parser("revoke-session")
     revoke.add_argument("--session-id", required=True)
+    account = commands.add_parser("set-password-account")
+    account.add_argument("--principal-id", required=True)
+    account.add_argument("--student-id")
+    account.add_argument("--username", required=True)
+    account.add_argument("--password-file", type=Path, required=True)
+    account.add_argument("--no-must-change", action="store_true", help="Explicit operator override for a permanent password")
+    grant = commands.add_parser("grant-campus")
+    grant.add_argument("--principal-id", required=True)
+    grant.add_argument("--campus-id", required=True)
+    bootstrap = commands.add_parser("bootstrap-admin")
+    for field in ("tenant-id", "campus-id", "principal-id", "subject", "username"):
+        bootstrap.add_argument("--" + field, required=True)
+    bootstrap.add_argument("--password-file", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "init-issuer":
         initialize_issuer(args.directory)
@@ -117,6 +166,18 @@ def main():
                     values = vars(args).copy()
                     values.pop("command")
                     enroll(session, cfg, **values)
+                elif args.command == "set-password-account":
+                    from .account_auth import set_password_account
+                    from .passwords import read_password_file
+                    set_password_account(session, cfg, principal_id=args.principal_id, student_id=args.student_id,
+                                         username_value=args.username, password_value=read_password_file(args.password_file),
+                                         must_change=not args.no_must_change)
+                elif args.command == "grant-campus":
+                    from .account_auth import grant_campus
+                    grant_campus(session, args.principal_id, args.campus_id)
+                elif args.command == "bootstrap-admin":
+                    values = vars(args).copy(); values.pop("command")
+                    bootstrap_admin(session, cfg, **values)
                 else:
                     device = session.get(DeviceSession, args.session_id)
                     if device is None:

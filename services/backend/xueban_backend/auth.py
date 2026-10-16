@@ -17,6 +17,7 @@ class Actor:
     id: str
     tenant_id: str
     roles: tuple[str, ...]
+    bound_student_id: str | None = None
 
 
 class TokenVerifier:
@@ -62,12 +63,22 @@ class TokenVerifier:
     def subject(self, token: str | None) -> str:
         return self._claims(token)["sub"]
 
-    def actor(self, token: str | None, session: Session) -> Actor:
+    def actor(self, token: str | None, session: Session, *, allow_password_change: bool = False) -> Actor:
         claims = self._claims(token)
         subject = claims["sub"]
         principal = session.scalar(select(Principal).where(Principal.issuer == self.settings.oidc_issuer, Principal.subject == subject, Principal.active.is_(True)))
         if principal is None:
             raise Problem(403, "authorization", "access_denied", "该身份尚未获得项目授权或授权已撤回。")
+        from .account_models import PasswordAccount
+        account = session.scalar(select(PasswordAccount).where(PasswordAccount.principal_id == principal.id))
+        if account is not None:
+            if not account.active or "device_session_id" not in claims:
+                raise Problem(401, "authorization", "authentication_required", "账号会话不可用，请重新登录。")
+            if account.student_id is not None:
+                from .models import Student, StudentGrant
+                bound = session.scalar(select(Student.id).join(StudentGrant, StudentGrant.student_id == Student.id).where(Student.id == account.student_id, Student.active.is_(True), StudentGrant.principal_id == principal.id, StudentGrant.active.is_(True), Student.tenant_id == principal.tenant_id))
+                if bound is None:
+                    raise Problem(403, "authorization", "access_denied", "学员授权已停用。")
         if "device_session_id" in claims:
             from datetime import datetime, timezone
             from .device_models import DeviceSession
@@ -77,8 +88,10 @@ class TokenVerifier:
             if expires is not None and expires.tzinfo is None:
                 expires = expires.replace(tzinfo=timezone.utc)
             if device is None or device.principal_id != principal.id or device.revoked or expires <= datetime.now(timezone.utc):
-                raise Problem(401, "authorization", "authentication_required", "设备授权已过期或撤回，请重新配对。")
+                raise Problem(401, "authorization", "authentication_required", "会话已过期或撤回，请重新登录。")
+        if account is not None and account.must_change_password and not allow_password_change:
+            raise Problem(403, "authorization", "password_change_required", "请先修改初始密码再进入作业。")
         roles = tuple(session.scalars(select(PrincipalRole.role).where(PrincipalRole.principal_id == principal.id).order_by(PrincipalRole.role)))
         if not set(roles).intersection({"student", "sitting_teacher", "campus_admin"}):
             raise Problem(403, "authorization", "access_denied", "该身份没有此接口权限。")
-        return Actor(principal.id, principal.tenant_id, roles)
+        return Actor(principal.id, principal.tenant_id, roles, account.student_id if account else None)

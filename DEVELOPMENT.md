@@ -4,6 +4,8 @@
 
 **最新执行决定（2026-10-17）：学生网页先运行，App后封装。** 当前客户端开发入口为 `apps/student-web`，Mac启动入口为 `启动网页版.command`，详见 [网页运行说明](docs/WEB_LOCAL_RUN.md)。后端、数据与质量要求共用；下文安卓安装/真机条目保留到封装阶段，不阻塞本轮网页联调。
 
+**身份主线已明确：每名学员独立长期账号密码，固定学员ID串起作业、订正、后续知识图谱与智能体记忆。** 新客户端采用 `/v1/auth/*`，管理页面开户/重置密码；不把旧配对协议当产品登录。迁移和后续模块的绑定约束见 [ACCOUNT_FOUNDATION](docs/ACCOUNT_FOUNDATION.md)。
+
 ## 先读什么
 
 1. [一期 App 规格](PHASE1.md) 与 [16 项一期任务](blueprint-v3/contracts/phase1-backlog.json)：这是当前最高优先范围和独立发布依据。

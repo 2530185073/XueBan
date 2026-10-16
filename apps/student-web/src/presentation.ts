@@ -20,7 +20,6 @@ export function casePresentation(row: CaseDetail): { label: string; tone: Tone; 
 }
 export const stageLabels: Record<DraftStage, string> = { local: '照片已备好', creating: '保存作业', uploading: '上传照片', recognizing: '读题与作答', checking: '逐题检查', complete: '可查看结果', failed: '这次尚未完成', waiting: '进度已保留' }
 export function dateLabel(value: string): string { const date = new Date(value); return Number.isNaN(date.getTime()) ? '时间待确认' : new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(date) }
-export function pairingFromHash(hash: string): string | null { const code = new URLSearchParams(hash.replace(/^#/, '')).get('pair')?.trim(); return code && code.length >= 6 && code.length <= 200 && !/\s/.test(code) ? code : null }
 
 export interface CorrectionTarget { caseId: string; parentAttemptId: string }
 export function correctionTarget(row: CaseDetail): CorrectionTarget { return { caseId: row.case.id, parentAttemptId: row.attempt.id } }

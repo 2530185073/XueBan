@@ -1,6 +1,8 @@
 import { StudentError } from './errors'
 import { valid } from './validation'
 
+const accountErrorStatus: Record<string, number> = { invalid_credentials: 401, login_rate_limited: 429, password_change_required: 403, username_conflict: 409 }
+
 export class StudentApi {
   constructor(readonly origin: string, private token: () => string | null, private revoked: () => void, private transport: typeof fetch = (...args) => globalThis.fetch(...args)) {}
   private async bounded(response: Response, maximum = 2_000_000): Promise<Uint8Array> {
@@ -11,25 +13,35 @@ export class StudentApi {
     const output = new Uint8Array(size); let offset = 0; for (const part of parts) { output.set(part, offset); offset += part.length } return output
   }
   async request<T>(path: string, shape: string, body?: string, key?: string, publicRequest = false): Promise<T> {
-    if (!path.startsWith('/v1/') || path.includes('..') || path.includes('#')) throw new StudentError('invalid_path', 422)
+    if (!path.startsWith('/v1/') || path.split('?')[0].includes('..') || path.includes('#') || path.includes('\\')) throw new StudentError('invalid_path', 422)
     const token = this.token(); if (!publicRequest && !token) throw new StudentError('authentication_required', 401)
     const headers: Record<string, string> = { Accept: 'application/json' }
     if (!publicRequest) headers.Authorization = `Bearer ${token}`
+    if (body !== undefined && !key) throw new StudentError('missing_idempotency_key', 422)
     if (body !== undefined) { headers['Content-Type'] = 'application/json'; headers['Idempotency-Key'] = key! }
     let response: Response
     try { response = await this.transport(this.origin + path, { method: body === undefined ? 'GET' : 'POST', headers, body, cache: 'no-store', credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(30_000) }) }
     catch { throw new StudentError('network_unknown') }
     if (!response.ok) {
-      if (response.status === 401 && !publicRequest) this.revoked()
       let code = `http_${response.status}`
-      try { const problem = JSON.parse(new TextDecoder().decode(await this.bounded(response))) as { code: string; status: number }; if (valid('Problem', problem) && problem.status === response.status) code = problem.code } catch { /* No provider/body text escapes to the UI. */ }
+      try { const problem = JSON.parse(new TextDecoder().decode(await this.bounded(response))) as { code: string; status: number }; if (problem && problem.status === response.status && (valid('Problem', problem) || (path.startsWith('/v1/auth/') || path.startsWith('/v1/admin/')) && accountErrorStatus[problem.code] === response.status)) code = problem.code } catch { /* No provider/body text escapes to the UI. */ }
+      // A mistyped current password does not revoke an otherwise valid session.
+      if (response.status === 401 && !publicRequest && !(path === '/v1/auth/change-password' && code === 'invalid_credentials')) this.revoked()
       throw new StudentError(code, response.status)
     }
     let value: unknown
     try { value = JSON.parse(new TextDecoder().decode(await this.bounded(response))) } catch { throw new StudentError('invalid_response', 502) }
-    if (shape === 'PairSession') {
-      const p = value as { access_token?: unknown; expires_at?: unknown }
-      if (!p || typeof p.access_token !== 'string' || p.access_token.length > 16384 || typeof p.expires_at !== 'string' || !Number.isFinite(Date.parse(p.expires_at))) throw new StudentError('invalid_response', 502)
+    if (shape === 'AuthSession') {
+      const p = value as { access_token?: unknown; expires_at?: unknown; must_change_password?: unknown }
+      if (!p || typeof p.access_token !== 'string' || !p.access_token || p.access_token.length > 16384 || typeof p.expires_at !== 'string' || !Number.isFinite(Date.parse(p.expires_at)) || typeof p.must_change_password !== 'boolean') throw new StudentError('invalid_response', 502)
+    } else if (shape === 'Account') {
+      const p = value as { username?: unknown; must_change_password?: unknown; student_id?: unknown }
+      if (!p || typeof p.username !== 'string' || !p.username || p.username.length > 64 || typeof p.must_change_password !== 'boolean' || !(p.student_id === null || typeof p.student_id === 'string' && !!p.student_id && p.student_id.length <= 200)) throw new StudentError('invalid_response', 502)
+    } else if (shape === 'LoggedOut') {
+      if (!value || (value as { logged_out?: unknown }).logged_out !== true) throw new StudentError('invalid_response', 502)
+    } else if (shape === 'AdminResponse') {
+      // Admin components validate their bounded, independently versioned DTOs.
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new StudentError('invalid_response', 502)
     } else if (!valid(shape, value)) throw new StudentError('invalid_response', 502)
     return value as T
   }

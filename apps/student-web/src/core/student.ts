@@ -1,4 +1,4 @@
-import type { Accepted, AssetAccess, AttemptRead, CaseDetail, CheckRun, CorrectionCase, CreateCorrection, CreateHelp, DraftView, HelpRequest, Hint, HomeworkDetail, HomeworkPage, HomeworkSession, IdentityContext, ImageAsset, InputVersions, Job, JournalEntry, NormalizedPhoto, QuestionRead, RequestHint, StoredDraft, UploadTicket } from './types'
+import type { Account, AdminRequestOptions, AuthSession, Accepted, AssetAccess, AttemptRead, CaseDetail, CheckRun, CorrectionCase, CreateCorrection, CreateHelp, DraftView, HelpRequest, Hint, HomeworkDetail, HomeworkPage, HomeworkSession, IdentityContext, ImageAsset, InputVersions, Job, JournalEntry, NormalizedPhoto, QuestionRead, RequestHint, StoredDraft, UploadTicket } from './types'
 import { StudentApi } from './api'
 import { StudentError, safeError } from './errors'
 import { DraftStore } from './store'
@@ -19,11 +19,14 @@ export function decisionLabel(row: CaseDetail): string {
   return `${d.validity === 'confirmed' && d.origin === 'staff' ? '老师确认' : 'AI 初判'} · ${text}`
 }
 interface Context { scope: string; student: string; epoch: number }
-interface Session { access_token: string; expires_at: string }
-interface PendingPair { code: string; key: string }
+interface Session { access_token: string; expires_at: string; kind: 'account' }
+interface PendingAuth { body: string; key: string }
 export interface ClientOptions { origin?: string; transport?: typeof fetch; storage?: Storage; store?: DraftStore; normalize?: (file: Blob) => Promise<NormalizedPhoto>; sleep?: (ms: number) => Promise<void> }
 export class StudentClient {
   private session: Session | null = null
+  private currentAccount: Account | null = null
+  // Credentials live only during an unresolved request in memory. Never journal them.
+  private pendingAuth = new Map<string, PendingAuth>()
   private currentIdentity: IdentityContext | null = null
   private student: string | null = null
   private epoch = 0
@@ -42,8 +45,9 @@ export class StudentClient {
     if (url.origin !== this.origin || !['http:', 'https:'].includes(url.protocol)) throw new StudentError('invalid_origin', 422)
     this.storage = options.storage ?? sessionStorage; this.store = options.store ?? new DraftStore()
     this.normalize = options.normalize ?? normalizePhoto; this.sleep = options.sleep ?? (ms => new Promise(resolve => setTimeout(resolve, ms)))
-    this.api = new StudentApi(this.origin, () => this.session?.access_token ?? null, () => this.disconnect(), options.transport)
+    this.api = new StudentApi(this.origin, () => this.token(), () => this.disconnect(), options.transport)
   }
+  get account() { return this.currentAccount }
   get identity() { return this.currentIdentity }
   get selectedStudentId() { return this.student }
   subscribe(listener: () => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
@@ -51,8 +55,10 @@ export class StudentClient {
   private storageKey(name: string) { return `xueban:${this.origin}:${name}` }
   private load<T>(name: string): T | null { try { return JSON.parse(this.storage.getItem(this.storageKey(name)) ?? 'null') as T | null } catch { return null } }
   private persist(name: string, value: unknown) { try { this.storage.setItem(this.storageKey(name), JSON.stringify(value)) } catch { throw new StudentError('session_storage_unavailable', 0, '无法保存本次会话，请允许浏览器会话存储后重试。') } }
-  disconnect() { this.epoch++; this.session = null; this.currentIdentity = null; this.student = null; this.images.clear(); this.storage.removeItem(this.storageKey('session')); this.storage.removeItem(this.storageKey('selected')); this.storage.removeItem(this.storageKey('pair')); this.changed() }
-  selectStudent(id: string) { if (!this.currentIdentity?.authorized_students.some(s => s.student_id === id)) throw new StudentError('access_denied', 403); this.epoch++; this.student = id; this.images.clear(); this.persist('selected', { actor: this.currentIdentity.actor_id, student: id }); this.changed() }
+  private token() { if (this.session && Date.parse(this.session.expires_at) <= Date.now()) this.disconnect(); return this.session?.access_token ?? null }
+  private clearSession(clearPending = true) { this.epoch++; this.session = null; this.currentAccount = null; this.currentIdentity = null; this.student = null; this.images.clear(); if (clearPending) this.pendingAuth.clear(); this.storage.removeItem(this.storageKey('session')); this.storage.removeItem(this.storageKey('selected')); this.storage.removeItem(this.storageKey('pair')); this.changed() }
+  disconnect() { this.clearSession() }
+  selectStudent(id: string) { if (!this.currentAccount || this.currentAccount.student_id !== id || !this.currentIdentity?.authorized_students.some(s => s.student_id === id)) throw new StudentError('access_denied', 403); if (id !== this.student) { this.epoch++; this.student = id; this.images.clear(); this.changed() } }
   private check(ctx: Context) { if (this.epoch !== ctx.epoch || !this.session || this.student !== ctx.student) throw new StudentError('session_changed', 401) }
   private async read<T>(ctx: Context, path: string, shape: string) { this.check(ctx); const value = await this.api.request<T>(path, shape); this.check(ctx); return value }
   private async verifyIdentity(): Promise<IdentityContext> {
@@ -68,41 +74,80 @@ export class StudentClient {
     }
     const changed = JSON.stringify(identity) !== JSON.stringify(this.currentIdentity)
     this.currentIdentity = identity
-    // Initial pairing/restoration publishes once selection is ready. Emitting
+    // Initial login/restoration publishes once selection is ready. Emitting
     // earlier lets subscribers race authorize() against student selection.
     if (changed && this.student) this.changed(); return identity
   }
-  async restore(): Promise<IdentityContext | null> {
-    const pending = this.load<PendingPair>('pair'); if (pending?.code && pending.key) return this.pair(pending.code)
-    const session = this.load<Session>('session')
-    if (!session || typeof session.access_token !== 'string' || Date.parse(session.expires_at) <= Date.now()) { this.disconnect(); return null }
-    this.session = session
-    try {
-      const identity = await this.verifyIdentity(); const selected = this.load<{ actor: string; student: string }>('selected')
-      const student = selected?.actor === identity.actor_id && identity.authorized_students.some(s => s.student_id === selected.student) ? selected.student : identity.authorized_students[0]?.student_id
-      if (student) this.selectStudent(student); return identity
-    } catch (e) { this.currentIdentity = null; this.student = null; this.changed(); throw e }
-  }
-  async pair(code: string): Promise<IdentityContext> {
-    const trimmed = code.trim(); if (!trimmed || trimmed.length > 256) throw new StudentError('invalid_pair_code', 422)
-    let pending = this.load<PendingPair>('pair')
-    if (pending && pending.code !== trimmed) throw new StudentError('pair_unknown', 409, '上一配对尚未确认，请先重试原配对码。')
-    pending ??= { code: trimmed, key: crypto.randomUUID() }
-    this.persist('pair', pending) // Synchronous before the first await: UI may now remove its URL fragment.
-    this.epoch++; this.currentIdentity = null; this.student = null; this.images.clear(); this.changed()
+  private async readyAccount(): Promise<IdentityContext | null> {
     const epoch = this.epoch
-    try {
-      const session = await this.api.request<Session>('/v1/device-sessions', 'PairSession', JSON.stringify({ pairing_code: pending.code }), pending.key, true)
-      if (epoch !== this.epoch) throw new StudentError('session_changed', 401)
-      this.session = session
-      this.persist('session', this.session)
-      const identity = await this.verifyIdentity(); this.storage.removeItem(this.storageKey('pair'))
-      if (identity.authorized_students[0]) this.selectStudent(identity.authorized_students[0].student_id)
-      return identity
-    } catch (e) { if (e instanceof StudentError && [401, 403, 422].includes(e.status)) this.storage.removeItem(this.storageKey('pair')); throw e }
+    const account = await this.api.request<Account>('/v1/auth/account', 'Account')
+    if (epoch !== this.epoch) throw new StudentError('session_changed', 401)
+    this.currentAccount = account
+    if (account.must_change_password) { this.currentIdentity = null; this.student = null; this.changed(); return null }
+    const identity = await this.verifyIdentity()
+    if (account.student_id) {
+      if (!identity.authorized_students.some(s => s.student_id === account.student_id)) { this.disconnect(); throw new StudentError('access_denied', 403) }
+      this.student = account.student_id
+    } else if (identity.roles.includes('student')) { this.disconnect(); throw new StudentError('access_denied', 403) }
+    this.changed(); return identity
+  }
+  async restore(): Promise<IdentityContext | null> {
+    // Pairing is no longer a product login path. Never redeem an old pending code.
+    this.storage.removeItem(this.storageKey('pair')); this.storage.removeItem(this.storageKey('selected'))
+    const session = this.load<Session>('session')
+    if (!session || session.kind !== 'account' || typeof session.access_token !== 'string' || !session.access_token || !Number.isFinite(Date.parse(session.expires_at)) || Date.parse(session.expires_at) <= Date.now()) { this.disconnect(); return null }
+    this.session = session
+    try { return await this.readyAccount() }
+    catch (error) { this.currentAccount = null; this.currentIdentity = null; this.student = null; this.images.clear(); this.changed(); throw error }
+  }
+  private async authWrite<T>(path: string, payload: unknown, shape: string, publicRequest = false): Promise<T> {
+    const body = JSON.stringify(payload), previous = this.pendingAuth.get(path)
+    if (previous && previous.body !== body) throw new StudentError('auth_request_unknown', 409, '上次操作的结果还未确认，请用刚才相同的内容重试；也可以刷新后重新登录。')
+    const pending = previous ?? { body, key: crypto.randomUUID() }; this.pendingAuth.set(path, pending)
+    try { const result = await this.api.request<T>(path, shape, pending.body, pending.key, publicRequest); this.pendingAuth.delete(path); return result }
+    catch (error) { if (error instanceof StudentError && [400, 401, 403, 422, 429].includes(error.status)) this.pendingAuth.delete(path); throw error }
+  }
+  private acceptSession(value: AuthSession) {
+    if (Date.parse(value.expires_at) <= Date.now()) throw new StudentError('authentication_required', 401)
+    this.session = { access_token: value.access_token, expires_at: value.expires_at, kind: 'account' }
+    this.persist('session', this.session)
+  }
+  async login(username: string, password: string): Promise<IdentityContext | null> {
+    const normalized = username.trim().toLowerCase()
+    if (!/^[a-z0-9][a-z0-9._-]{2,63}$/.test(normalized) || !password || [...password].length > 128 || new TextEncoder().encode(password).length > 512) throw new StudentError('invalid_login', 422, '请填写正确的账号和密码。')
+    this.clearSession(false); const epoch = this.epoch
+    const result = await this.authWrite<AuthSession>('/v1/auth/login', { username: normalized, password }, 'AuthSession', true)
+    if (epoch !== this.epoch) throw new StudentError('session_changed', 401)
+    this.acceptSession(result)
+    return this.readyAccount()
+  }
+  async changePassword(currentPassword: string, newPassword: string): Promise<IdentityContext | null> {
+    if (!this.session) throw new StudentError('authentication_required', 401)
+    if (!currentPassword || [...currentPassword].length > 128 || new TextEncoder().encode(currentPassword).length > 512 || [...newPassword].length < 15 || [...newPassword].length > 128 || new TextEncoder().encode(newPassword).length > 512) throw new StudentError('invalid_password', 422, '新密码请使用 15–128 个字符，可以包含空格；当前密码也需要填写。')
+    const epoch = this.epoch
+    const result = await this.authWrite<AuthSession>('/v1/auth/change-password', { current_password: currentPassword, new_password: newPassword }, 'AuthSession')
+    if (epoch !== this.epoch) throw new StudentError('session_changed', 401)
+    this.epoch++; this.currentIdentity = null; this.student = null; this.images.clear(); this.acceptSession(result)
+    return this.readyAccount()
+  }
+  async logout(): Promise<void> {
+    if (!this.session) { this.disconnect(); return }
+    try { await this.authWrite('/v1/auth/logout', {}, 'LoggedOut') }
+    catch (error) { if (!(error instanceof StudentError) || error.status !== 401) throw new StudentError('logout_unconfirmed', 0, '本设备已退出，但服务器尚未确认会话撤销。网络恢复后，原会话仍可能有效直到到期。') }
+    finally { this.disconnect() }
+  }
+  async adminRequest<T>(path: string, options: AdminRequestOptions = {}): Promise<T> {
+    if (!/^\/v1\/admin\/[a-z0-9/_?=&.%+-]+$/i.test(path)) throw new StudentError('invalid_path', 422)
+    if (!this.currentIdentity?.roles.includes('campus_admin') || this.currentAccount?.must_change_password) throw new StudentError('access_denied', 403)
+    const epoch = this.epoch, post = options.method === 'POST'
+    if (post && !options.idempotencyKey || !post && options.body !== undefined) throw new StudentError('invalid_request', 422)
+    const result = await this.api.request<T>(path, 'AdminResponse', post ? JSON.stringify(options.body ?? {}) : undefined, options.idempotencyKey)
+    if (epoch !== this.epoch) throw new StudentError('session_changed', 401)
+    return result
   }
   private async authorize(): Promise<Context> {
     if (!this.session) throw new StudentError('authentication_required', 401)
+    if (this.currentAccount?.must_change_password) throw new StudentError('password_change_required', 403)
     if (!this.student) throw new StudentError('access_denied', 403)
     const wanted = this.student, identity = await this.verifyIdentity()
     if (!wanted || this.student !== wanted || !identity.authorized_students.some(s => s.student_id === wanted)) { this.student = null; this.images.clear(); this.changed(); throw new StudentError('access_denied', 403) }

@@ -1,0 +1,15 @@
+{
+  "steps": [
+    "initial password blocks work; changing password revokes initial session",
+    "existing student account retains all 7 homework IDs",
+    "browser refresh restores account and history",
+    "administrator works with campus authorization and zero student grants",
+    "administrator creates a separate learner account through UI",
+    "second student cannot read first student work or administrator API",
+    "administrator reset revokes previous student session",
+    "reset, forced change and relogin preserve original student and history",
+    "logout clears browser session and revokes backend token",
+    "mobile login has no horizontal overflow"
+  ],
+  "browserErrors": []
+}

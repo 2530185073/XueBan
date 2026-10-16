@@ -1,17 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createStudentClient, remoteDraftId } from './core'
-import { pairingFromHash, type CorrectionTarget } from './presentation'
-import type { CaseDetail, DraftSummary, DraftView, Hint, HomeworkDetail, HomeworkSession, IdentityContext } from './core/types'
+import { createStudentClient, remoteDraftId, safeError } from './core'
+import { type CorrectionTarget } from './presentation'
+import type { Account, CaseDetail, DraftSummary, DraftView, Hint, HomeworkDetail, HomeworkSession, IdentityContext } from './core/types'
 
 export function useStudentWorkspace() {
-  const [{ client, initialPair }] = useState(() => {
-    const client = createStudentClient()
-    const code = pairingFromHash(window.location.hash)
-    // pair synchronously journals its key/code before the fragment disappears.
-    const initialPair = code ? client.pair(code).then(identity => ({ identity }), error => ({ error })) : null
+  const [client] = useState(() => {
+    // Clear a retired pairing fragment without redeeming or persisting it.
     if (new URLSearchParams(window.location.hash.slice(1)).has('pair')) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
-    return { client, initialPair }
+    return createStudentClient()
   })
+  const [account, setAccount] = useState<Account | null>(null)
   const [identity, setIdentity] = useState<IdentityContext | null>(null)
   const [studentId, setStudentId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -30,13 +28,14 @@ export function useStudentWorkspace() {
 
   const clearWork = useCallback(() => { ++syncSequence.current; activeDraft.current = null; setDraft(null); setDetail(null); setDrafts([]); setHistory([]); setCursor(null); setHint(null) }, [])
   const fail = useCallback((failure: unknown) => {
-    setError(failure instanceof Error ? failure.message : '暂时没有连接上，请稍后再试。')
-    setIdentity(client.identity); setStudentId(client.selectedStudentId)
+    setError(safeError(failure).message)
+    setAccount(client.account); setIdentity(client.identity); setStudentId(client.selectedStudentId)
     if (!client.identity) clearWork()
   }, [client, clearWork])
   const sync = useCallback(async () => {
     const sequence = ++syncSequence.current
-    if (!client.identity) { setIdentity(null); setStudentId(null); clearWork(); return }
+    setAccount(client.account); setIdentity(client.identity); setStudentId(client.selectedStudentId)
+    if (!client.identity || !client.selectedStudentId) { clearWork(); return }
     const list = await client.listDrafts()
     const currentId = activeDraft.current
     const current = currentId ? await client.getDraft(currentId) : null
@@ -46,28 +45,23 @@ export function useStudentWorkspace() {
   }, [client, clearWork])
   useEffect(() => {
     let live = true
-    const restore = async () => {
-      const paired = initialPair ? await initialPair : null
-      if (paired && 'error' in paired) throw paired.error
-      return paired && 'identity' in paired ? paired.identity : await client.restore()
-    }
-    void restore().then(async (me) => { if (!live) return; setIdentity(me); setStudentId(client.selectedStudentId); if (me) await sync() }).catch((e: unknown) => { if (live) fail(e) }).finally(() => { if (live) setLoading(false) })
+    void client.restore().then(async () => { if (live) await sync() }).catch((e: unknown) => { if (live) fail(e) }).finally(() => { if (live) setLoading(false) })
     const unsubscribe = client.subscribe(() => { void sync().catch(fail) })
     return () => { live = false; unsubscribe() }
-  }, [client, initialPair, fail, sync])
+  }, [client, fail, sync])
   const action = useCallback(async (label: string, task: () => Promise<void>) => {
     if (busyRef.current) return
     busyRef.current = true; setBusy(label); setError(null); setNotice(null)
-    try { await task() } catch (e) { fail(e) } finally { busyRef.current = false; setBusy('') }
+    try { await task(); return true } catch (e) { fail(e); return false } finally { busyRef.current = false; setBusy('') }
   }, [fail])
   const selectDraft = useCallback(async (id: string) => { activeDraft.current = id; const next = await client.getDraft(id); setDraft(next); setDetail(next.detail); setHint(null) }, [client])
   return {
-    client, identity, studentId, loading, busy, error, notice, drafts, history, cursor, draft, detail, hint,
+    client, account, identity, studentId, loading, busy, error, notice, drafts, history, cursor, draft, detail, hint,
     clearError: () => setError(null),
-    pair: (code: string) => action('正在配对', async () => { const me = await client.pair(code); setIdentity(me); setStudentId(client.selectedStudentId); clearWork(); await sync(); setNotice('配对好了，先确认自己的名字，再开始今天的作业。') }),
-    reconnect: () => action('正在恢复连接', async () => { const me = await client.restore(); setIdentity(me); setStudentId(client.selectedStudentId); if (me) await sync(); else setNotice('请向老师获取新的配对码。') }),
-    logout: () => { if (busyRef.current) return; client.disconnect(); setIdentity(null); setStudentId(null); clearWork(); setError(null); setNotice(null) },
-    selectStudent: (id: string) => action('切换作业本', async () => { client.selectStudent(id); setStudentId(client.selectedStudentId); clearWork(); await sync() }),
+    login: (username: string, password: string) => action('正在登录', async () => { clearWork(); await client.login(username, password); await sync() }),
+    changePassword: (currentPassword: string, newPassword: string) => action('正在保存新密码', async () => { await client.changePassword(currentPassword, newPassword); await sync(); setNotice('密码已更新，以后用新密码登录同一个作业本。') }),
+    reconnect: () => action('正在恢复连接', async () => { await client.restore(); await sync() }),
+    logout: () => action('正在退出登录', async () => { await client.logout(); clearWork(); await sync(); setError(null); setNotice(null) }),
     newWork: () => { if (busyRef.current) return; activeDraft.current = null; setDraft(null); setDetail(null); setHint(null); setError(null); setNotice(null) },
     importPhoto: (file: File, correction?: CorrectionTarget) => action('正在准备照片', async () => { const next = correction ? await client.createCorrection(correction.caseId, file, 'unknown', correction.parentAttemptId) : await client.createDraft(file); activeDraft.current = next.id; setDraft(next); setDetail(next.detail); setHint(null); await sync() }),
     openDraft: (id: string) => action('正在打开作业', () => selectDraft(id)),

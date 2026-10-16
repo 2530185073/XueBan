@@ -54,3 +54,24 @@ def test_automatic_browser_pairing_refuses_nonlocal_or_embedded_credentials(orig
 
 def test_automatic_browser_pairing_accepts_clean_loopback_origin():
     assert local_origin('http://127.0.0.1:8000/') == 'http://127.0.0.1:8000'
+
+
+def test_web_launcher_opens_login_without_issuing_identity(monkeypatch, tmp_path):
+    from scripts import mac_web
+
+    (tmp_path / 'apps/student-web/node_modules').mkdir(parents=True)
+    runtime = tmp_path / 'runtime'
+    runtime.mkdir()
+    config = {'host': '127.0.0.1', 'environment': {'PUBLIC_BASE_URL': 'http://127.0.0.1:8000'}}
+    calls, opened = [], []
+    monkeypatch.setattr(mac_web, 'REPO', tmp_path)
+    monkeypatch.setattr(mac_web, 'load', lambda path: (config, {}))
+    monkeypatch.setattr(mac_web, 'ready', lambda origin: True)
+    monkeypatch.setattr(mac_web.subprocess, 'run', lambda args, **kwargs: calls.append(args))
+    monkeypatch.setattr(mac_web.webbrowser, 'open', lambda url: opened.append(url) or True)
+    monkeypatch.setattr(mac_web.sys, 'argv', ['mac_web.py', '--runtime', str(runtime)])
+    mac_web.main()
+    assert opened == ['http://127.0.0.1:8000/learn/']
+    assert not list(runtime.iterdir())
+    assert len(calls) == 2
+    assert all('pair' not in command and 'admin' not in command for command in calls)

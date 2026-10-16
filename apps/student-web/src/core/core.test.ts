@@ -28,11 +28,12 @@ function setup() {
   const asset: ImageAsset = { ...fixture<ImageAsset>('asset'), id: 'asset_one', homework_id: hw.id, status: 'awaiting_upload', revision: 1, width: 20, height: 20, sha256: photo.sha256, byte_size: photo.size, mime_type: photo.mime }
   const job: Job = { id: 'job_recognition', revision: 1, kind: 'recognize_homework', status: 'succeeded', created_at: now, updated_at: now, retry_after_seconds: null, failure: null, result: { resource_type: 'homework', resource_id: hw.id } }
   const calls: { path: string; init: RequestInit }[] = []
-  let losePair = false, loseRecognition = false, revoke = false, imageTicket = 0, conflictCode: string | null = null
+  let loseLogin = false, loseRecognition = false, revoke = false, imageTicket = 0, conflictCode: string | null = null
   let extra: ((path: string, init: RequestInit) => Response | undefined) | undefined
   const transport = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input)), path = url.pathname; calls.push({ path, init: init ?? {} })
-    if (path === '/v1/device-sessions') { if (losePair) { losePair = false; throw new TypeError('synthetic lost response') } return json({ access_token: 'synthetic.access.token', expires_at: '2099-01-01T00:00:00Z' }) }
+    if (path === '/v1/auth/login') { if (loseLogin) { loseLogin = false; throw new TypeError('synthetic lost response') } return json({ access_token: 'synthetic.access.token', expires_at: '2099-01-01T00:00:00Z', must_change_password: false }) }
+    if (path === '/v1/auth/account') return json({ username: 'synthetic.student', student_id: 'student_one', must_change_password: false })
     if (path === '/v1/me') return revoke ? json({}, 403) : json(identity)
     const extraResponse = extra?.(path, init ?? {}); if (extraResponse) return extraResponse
     if (path === '/v1/students/student_one/homeworks' && init?.method === 'POST') return json(hw, 201)
@@ -50,39 +51,41 @@ function setup() {
     throw new Error(`Unexpected synthetic route ${path}`)
   }) as unknown as typeof fetch
   const options = { origin: 'http://localhost', storage, store, transport, normalize: async () => photo, sleep: async () => undefined }
-  return { options, client: new StudentClient(options), storage, store, identity, hw, job, calls, losePair: () => { losePair = true }, loseRecognition: () => { loseRecognition = true }, revoke: () => { revoke = true }, conflict: (code: string) => { conflictCode = code }, route: (handler: typeof extra) => { extra = handler } }
+  return { options, client: new StudentClient(options), storage, store, identity, hw, job, calls, loseLogin: () => { loseLogin = true }, loseRecognition: () => { loseRecognition = true }, revoke: () => { revoke = true }, conflict: (code: string) => { conflictCode = code }, route: (handler: typeof extra) => { extra = handler } }
 }
 
 describe('student session and durable corrections', () => {
-  it('persists pairing key before returning and restores an uncertain exchange with identical code/key', async () => {
-    const s = setup(); s.losePair(); const attempt = s.client.pair('synthetic-pair')
-    expect(s.storage.getItem('xueban:http://localhost:pair')).toContain('synthetic-pair')
-    await expect(attempt).rejects.toMatchObject({ code: 'network_unknown' })
-    const next = new StudentClient(s.options); await next.restore()
-    const posts = s.calls.filter(c => c.path === '/v1/device-sessions')
+  it('retries uncertain login with the same in-memory key without storing credentials', async () => {
+    const s = setup(); s.loseLogin()
+    await expect(s.client.login('synthetic.student', 'synthetic password only')).rejects.toMatchObject({ code: 'network_unknown' })
+    expect(s.storage.length).toBe(0)
+    await s.client.login('synthetic.student', 'synthetic password only')
+    const posts = s.calls.filter(c => c.path === '/v1/auth/login')
     expect(posts).toHaveLength(2); expect(posts[0].init.body).toBe(posts[1].init.body); expect(posts[0].init.headers).toEqual(posts[1].init.headers)
-    expect(next.selectedStudentId).toBe('student_one'); expect(s.storage.getItem('xueban:http://localhost:pair')).toBeNull()
+    expect(s.storage.getItem('xueban:http://localhost:session')).not.toContain('synthetic password')
+    expect(s.storage.getItem('xueban:http://localhost:session')).not.toContain('synthetic.student')
+    const next = new StudentClient(s.options); await next.restore(); expect(next.selectedStudentId).toBe('student_one')
   })
   it('does not notify on unchanged authorization reads, including a subscriber that reads drafts', async () => {
-    const s = setup(); await s.client.pair('synthetic-pair'); let reads = 0
+    const s = setup(); await s.client.login('synthetic.student', 'synthetic password only'); let reads = 0
     const unsubscribe = s.client.subscribe(() => { reads++; if (reads < 5) void s.client.listDrafts() })
     await s.client.createDraft(photo.blob); await new Promise(resolve => setTimeout(resolve, 30)); unsubscribe()
     expect(reads).toBe(1)
     expect(s.calls.filter(c => c.path === '/v1/me').length).toBeLessThan(6)
   })
   it('isolates draft and blobs by actor and student, and clears authorization on a revoked me', async () => {
-    const s = setup(); await s.client.pair('synthetic-pair'); const d = await s.client.createDraft(photo.blob)
-    s.client.selectStudent('student_two'); expect(await s.client.listDrafts()).toEqual([]); await expect(s.client.getDraft(d.id)).rejects.toMatchObject({ status: 404 })
+    const s = setup(); await s.client.login('synthetic.student', 'synthetic password only'); const d = await s.client.createDraft(photo.blob)
+    expect(() => s.client.selectStudent('student_two')).toThrow();
     s.client.selectStudent('student_one'); expect((await s.client.getDraft(d.id)).photo).toBeInstanceOf(Blob)
     s.identity.actor_id = 'actor_other'; const other = new StudentClient(s.options); await other.restore(); expect(await other.listDrafts()).toEqual([])
     s.revoke(); await expect(s.client.listDrafts()).rejects.toMatchObject({ status: 403 }); expect(s.client.identity).toBeNull(); expect(s.client.selectedStudentId).toBeNull()
   })
   it('revoked student grants hide cached data even when other students stay authorized', async () => {
-    const s = setup(); await s.client.pair('synthetic-pair'); const d = await s.client.createDraft(photo.blob)
+    const s = setup(); await s.client.login('synthetic.student', 'synthetic password only'); const d = await s.client.createDraft(photo.blob)
     s.identity.authorized_students.shift(); await expect(s.client.getDraft(d.id)).rejects.toMatchObject({ status: 403 }); expect(s.client.identity).toBeNull()
   })
   it('normalizes/imports locally and starts no homework or model job until explicitly run', async () => {
-    const s = setup(); await s.client.pair('synthetic-pair'); const d = await s.client.createDraft(photo.blob)
+    const s = setup(); await s.client.login('synthetic.student', 'synthetic password only'); const d = await s.client.createDraft(photo.blob)
     expect(d.stage).toBe('local'); expect(s.calls.filter(c => c.init.method === 'POST')).toHaveLength(1)
     const result = await s.client.runDraft(d.id)
     expect(result.stage).toBe('complete'); expect(result.detail?.cases).toEqual([]); expect(result.detail?.homework.coverage.collection_scope).not.toBe('declared_complete')
@@ -90,7 +93,7 @@ describe('student session and durable corrections', () => {
     expect(put.init.headers).not.toHaveProperty('Authorization'); expect(put.init.credentials).toBe('omit'); expect(put.init.redirect).toBe('error')
   })
   it('history opening preserves the original draft and unknown recognition journal across reload', async () => {
-    const s = setup(); await s.client.pair('synthetic-pair'); const d = await s.client.createDraft(photo.blob)
+    const s = setup(); await s.client.login('synthetic.student', 'synthetic password only'); const d = await s.client.createDraft(photo.blob)
     s.loseRecognition(); const failed = await s.client.runDraft(d.id); expect(failed.stage).toBe('failed')
     const restored = new StudentClient(s.options); await restored.restore()
     const detail = await restored.openHomework(s.hw.id); expect(detail.draftId).toBe(d.id)
@@ -100,13 +103,13 @@ describe('student session and durable corrections', () => {
     expect((await restored.listDrafts()).map(d => d.id)).toEqual([d.id])
   })
   it('uses one asset single-flight and retries a replaced ticket without revoking JWT', async () => {
-    const s = setup(); await s.client.pair('synthetic-pair')
+    const s = setup(); await s.client.login('synthetic.student', 'synthetic password only')
     const [one, two] = await Promise.all([s.client.assetBlob('asset_one'), s.client.assetBlob('asset_one')])
     expect(one).toBe(two); expect(s.calls.filter(c => c.path.endsWith('/access'))).toHaveLength(2)
     expect(s.client.identity).not.toBeNull(); await s.client.assetBlob('asset_one'); expect(s.calls.filter(c => c.path.endsWith('/access'))).toHaveLength(2)
   })
   it.each(['revision_conflict', 'idempotency_conflict'])('only rotates a known unaccepted CAS conflict, not %s arbitrarily', async code => {
-    const s = setup(); await s.client.pair('synthetic-pair'); const d = await s.client.createDraft(photo.blob)
+    const s = setup(); await s.client.login('synthetic.student', 'synthetic password only'); const d = await s.client.createDraft(photo.blob)
     s.conflict(code); expect((await s.client.runDraft(d.id)).error?.code).toBe(code)
     await s.client.runDraft(d.id, { retryFailed: true })
     const uploads = s.calls.filter(c => c.path.endsWith('/uploads'))
@@ -141,7 +144,7 @@ function correctionSetup() {
 }
 
 it('explicit retry of failed correction recognition chains to that failed attempt without overwriting a newer one', async () => {
-  const s = correctionSetup(); await s.client.pair('synthetic-pair'); const d = await s.client.createCorrection(s.c.id, photo.blob)
+  const s = correctionSetup(); await s.client.login('synthetic.student', 'synthetic password only'); const d = await s.client.createCorrection(s.c.id, photo.blob)
   expect(d.correction?.parentAttemptId).toBe('attempt_correction')
   const failed = await s.client.runDraft(d.id); expect(failed.stage).toBe('failed')
   const result = await s.client.runDraft(d.id, { retryFailed: true }); expect(result.stage).toBe('complete'); expect(s.current().parent_attempt_id).toBe('attempt_retry1')
@@ -149,7 +152,7 @@ it('explicit retry of failed correction recognition chains to that failed attemp
 })
 
 it('correction retry and replacing its preview refuse a newer parent from another device', async () => {
-  const s = correctionSetup(); await s.client.pair('synthetic-pair'); const d = await s.client.createCorrection(s.c.id, photo.blob)
+  const s = correctionSetup(); await s.client.login('synthetic.student', 'synthetic password only'); const d = await s.client.createCorrection(s.c.id, photo.blob)
   await s.client.runDraft(d.id); s.replaceAttempt()
   const result = await s.client.runDraft(d.id, { retryFailed: true }); expect(result.error?.code).toBe('newer_correction_exists')
   await expect(s.client.createCorrection(s.c.id, photo.blob, 'unknown', d.correction!.parentAttemptId)).rejects.toMatchObject({ code: 'newer_correction_exists' })
@@ -157,7 +160,7 @@ it('correction retry and replacing its preview refuse a newer parent from anothe
 })
 
 it('reconciles a pending recognition even when remote cases already exist', async () => {
-  const s = correctionSetup(); s.hw.case_ids = []; await s.client.pair('synthetic-pair'); const d = await s.client.createDraft(photo.blob)
+  const s = correctionSetup(); s.hw.case_ids = []; await s.client.login('synthetic.student', 'synthetic password only'); const d = await s.client.createDraft(photo.blob)
   s.loseRecognition(); await s.client.runDraft(d.id)
   s.hw.case_ids = [s.c.id]; s.current().recognition_status = 'needs_revision'
   const client = new StudentClient(s.options); await client.restore(); const detail = await client.openHomework(s.hw.id)
@@ -176,7 +179,7 @@ it('preserves unknown creation key across a later authorization denial and regra
     }
     return original(input, init)
   }
-  const client = new StudentClient({ ...s.options, transport }); await client.pair('synthetic-pair'); const d = await client.createDraft(photo.blob)
+  const client = new StudentClient({ ...s.options, transport }); await client.login('synthetic.student', 'synthetic password only'); const d = await client.createDraft(photo.blob)
   expect((await client.runDraft(d.id)).stage).toBe('failed')
   expect((await client.runDraft(d.id, { retryFailed: true })).error?.code).toBe('http_403')
   expect((await client.runDraft(d.id, { retryFailed: true })).stage).toBe('complete')
@@ -204,7 +207,7 @@ it('allows an explicit second hint request after known terminal failure with a n
     if (path === `/v1/hints/${hint.id}`) return json(hint)
     if (path.startsWith('/v1/jobs/')) return json(jobs.get(path.split('/').at(-1)!))
   })
-  await s.client.pair('synthetic-pair'); await expect(s.client.requestHint(c.id, 'direction')).rejects.toMatchObject({ code: 'job_failed' }); expect(count).toBe(1)
+  await s.client.login('synthetic.student', 'synthetic password only'); await expect(s.client.requestHint(c.id, 'direction')).rejects.toMatchObject({ code: 'job_failed' }); expect(count).toBe(1)
   await expect(s.client.requestHint(c.id, 'direction')).resolves.toMatchObject({ id: hint.id }); expect(count).toBe(2)
   const posts = s.calls.filter(c => c.path.endsWith('/hints')); expect(posts[0].init.headers).not.toEqual(posts[1].init.headers)
 })

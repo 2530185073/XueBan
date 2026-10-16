@@ -18,3 +18,7 @@ export interface StoredDraft extends DraftSummary {
   correction?: { caseId: string; parentAttemptId: string; reportedHelp: 'unknown' | 'none_reported' | 'staff_help' | 'answer_shown' }
 }
 export interface JournalEntry { scope: string; id: string; key: string; path: string; body: string; shape: string; response?: unknown }
+
+export interface Account { username: string; must_change_password: boolean; student_id: string | null }
+export interface AuthSession { access_token: string; expires_at: string; must_change_password: boolean }
+export interface AdminRequestOptions { method?: 'GET' | 'POST'; body?: unknown; idempotencyKey?: string }

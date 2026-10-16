@@ -1,22 +1,20 @@
 """Build and open the local student website; model secrets never enter its build."""
 import argparse
-from datetime import datetime, timezone
-import json
 import os
 from pathlib import Path
 import signal
 import subprocess
 import sys
 import time
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlsplit
 import webbrowser
 
 import httpx
 
 if __package__:
-    from .mac_local import BACKEND, REPO, alive, load, read_private, spawn, wait_ready, write_private
+    from .mac_local import BACKEND, REPO, alive, load, spawn, wait_ready
 else:
-    from mac_local import BACKEND, REPO, alive, load, read_private, spawn, wait_ready, write_private
+    from mac_local import BACKEND, REPO, alive, load, spawn, wait_ready
 
 
 def local_origin(value):
@@ -24,7 +22,7 @@ def local_origin(value):
     parts = urlsplit(origin)
     if (parts.scheme not in {'http', 'https'} or parts.hostname not in {'127.0.0.1', 'localhost', '::1'}
             or parts.username or parts.password or parts.path or parts.query or parts.fragment):
-        raise ValueError('Automatic browser pairing is only available on a loopback API origin')
+        raise ValueError('The local browser launcher requires a loopback API origin')
     return origin
 
 
@@ -32,7 +30,7 @@ def ready(origin):
     try:
         with httpx.Client(timeout=3, trust_env=False, follow_redirects=False) as client:
             response = client.get(origin + '/learn/')
-            return response.status_code == 200 and response.headers.get('X-Xueban-Web') == 'student-v1'
+            return response.status_code == 200 and response.headers.get('X-Xueban-Web') == 'student-v2-accounts'
     except httpx.HTTPError:
         return False
 
@@ -62,14 +60,13 @@ def restart_api(runtime, config, env):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--runtime', type=Path, default=Path.home() / '.local/share/xueban/local-dev')
-    parser.add_argument('--principal-id', default='tablet_actor', help='Existing locally authorized demo identity')
-    parser.add_argument('--no-open', action='store_true', help='Save a private launch link without opening a browser')
+    parser.add_argument('--no-open', action='store_true', help='Start the website without opening a browser')
     args = parser.parse_args()
     runtime = args.runtime.expanduser().resolve()
     config, _ = load(runtime)
     origin = local_origin(config['environment']['PUBLIC_BASE_URL'])
     if config['host'] not in {'127.0.0.1', 'localhost', '::1'}:
-        raise ValueError('Automatic pairing requires a loopback-bound local API')
+        raise ValueError('The local launcher requires a loopback-bound API')
     web = REPO / 'apps/student-web'
     # Read model configuration only in the backend launcher, never pass it to npm.
     build_env = {k: v for k, v in os.environ.items() if not k.startswith(('ARK_', 'OPENAI_', 'ZYAI_', 'DATABASE_', 'JWT_', 'SIGNING_'))}
@@ -81,23 +78,14 @@ def main():
     if not ready(origin):
         restart_api(runtime, config, env)
     if not ready(origin):
-        raise RuntimeError('Student web is not ready; no pairing credential was issued')
-
-    # Administrator-only CLI issues the same short-lived, single-use device grant as Android.
-    stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
-    pair_file = runtime / ('web-pair-' + stamp + '.json')
-    subprocess.run([sys.executable, str(BACKEND / 'scripts/mac_local.py'), '--runtime', str(runtime), 'admin',
-                    'pair', '--principal-id', args.principal_id, '--output', str(pair_file), '--ttl', '900'], check=True)
-    code = json.loads(read_private(pair_file))['pairing_code']
-    launch = origin + '/learn/#' + urlencode({'pair': code})
-    launch_file = runtime / ('web-launch-' + stamp + '.json')
-    write_private(launch_file, json.dumps({'url': launch, 'pair_file': str(pair_file)}, ensure_ascii=False))
+        raise RuntimeError('Student web is not ready')
+    # Startup never signs in, selects a child, or issues an identity credential.
+    launch = origin + '/learn/'
     if not args.no_open:
         if not webbrowser.open(launch):
-            raise RuntimeError('Browser did not open; the short-lived launch link is in the private runtime')
+            raise RuntimeError('Browser did not open; open the local /learn/ address manually')
     print('Student web ready: ' + origin + '/learn/')
-    print('Private launch file: ' + str(launch_file))
-    print('Pairing uses an existing authorized identity; no model key is present in the URL or browser.')
+    print('Sign in with your own learner or administrator account. Startup does not auto-login.')
 
 
 if __name__ == '__main__':

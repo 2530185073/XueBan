@@ -66,12 +66,13 @@ def homework_json(row: Homework) -> dict:
 
 
 def accessible_students(actor: Actor):
-    return select(Student).join(StudentGrant, and_(StudentGrant.student_id == Student.id, StudentGrant.tenant_id == Student.tenant_id)).where(
+    query = select(Student).join(StudentGrant, and_(StudentGrant.student_id == Student.id, StudentGrant.tenant_id == Student.tenant_id)).where(
         StudentGrant.principal_id == actor.id,
         StudentGrant.active.is_(True),
         Student.tenant_id == actor.tenant_id,
         Student.active.is_(True),
     )
+    return query.where(Student.id == actor.bound_student_id) if actor.bound_student_id else query
 
 
 def require_student(session: Session, actor: Actor, student_id: str) -> Student:
@@ -258,6 +259,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from .device_auth import install_device_auth
     from .correction_api import install_correction
     install_device_auth(app, engine, cfg)
+    from .account_auth import install_account_auth
+    install_account_auth(app, engine, cfg)
     install_correction(app, engine, cfg, database_session, current_actor)
     from .student_web import install_student_web
     install_student_web(app, cfg.student_web_dist)

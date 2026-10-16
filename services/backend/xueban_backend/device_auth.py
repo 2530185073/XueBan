@@ -46,6 +46,9 @@ def issue_pairing(session: Session, cfg: Settings, principal_id: str, *, lifetim
     principal = session.get(Principal, principal_id)
     if principal is None or not principal.active or principal.issuer != cfg.oidc_issuer:
         raise ValueError("An active principal under the configured issuer is required")
+    from .account_models import PasswordAccount
+    if session.scalar(select(PasswordAccount.username).where(PasswordAccount.principal_id == principal_id)) is not None:
+        raise ValueError("Password accounts use login; pairing is disabled")
     if session.scalar(select(StudentGrant.student_id).where(StudentGrant.principal_id == principal_id, StudentGrant.active.is_(True)).limit(1)) is None:
         raise ValueError("The principal needs an explicit active student grant")
     alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
@@ -59,9 +62,9 @@ def issue_pairing(session: Session, cfg: Settings, principal_id: str, *, lifetim
 
 def signing_key(cfg: Settings):
     if not cfg.auth_configured or not cfg.signing_private_key_file or cfg.oidc_jwks_url:
-        raise Problem(503, "service", "service_unavailable", "设备配对服务尚未配置。")
+        raise Problem(503, "service", "service_unavailable", "账号签名服务尚未配置。")
     if not 300 <= cfg.device_session_ttl_seconds <= 86400:
-        raise Problem(503, "service", "service_unavailable", "设备配对服务配置无效。")
+        raise Problem(503, "service", "service_unavailable", "账号签名服务配置无效。")
     try:
         path = Path(cfg.signing_private_key_file)
         mode = path.lstat().st_mode
@@ -75,7 +78,7 @@ def signing_key(cfg: Settings):
             raise ValueError("Signing and verification keys differ")
         return key
     except (OSError, ValueError, TypeError, AttributeError):
-        raise Problem(503, "service", "service_unavailable", "设备配对服务配置不可用。") from None
+        raise Problem(503, "service", "service_unavailable", "账号签名服务配置不可用。") from None
 
 
 class PairingRequest(BaseModel):
@@ -117,8 +120,11 @@ def install_device_auth(app, engine, cfg: Settings):
             pairing = session.scalar(select(DevicePairing).where(DevicePairing.code_hash == code_hash).with_for_update())
             if pairing is None:
                 raise denied
-            principal = session.get(Principal, pairing.principal_id)
+            principal = session.scalar(select(Principal).where(Principal.id == pairing.principal_id).with_for_update())
             if principal is None or not principal.active or principal.issuer != cfg.oidc_issuer:
+                raise denied
+            from .account_models import PasswordAccount
+            if session.scalar(select(PasswordAccount.username).where(PasswordAccount.principal_id == principal.id)) is not None:
                 raise denied
             roles = set(session.scalars(select(PrincipalRole.role).where(PrincipalRole.principal_id == principal.id)))
             if not roles.intersection({"student", "sitting_teacher", "campus_admin"}):

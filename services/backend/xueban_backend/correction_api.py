@@ -150,7 +150,11 @@ def install_correction(app, engine, cfg, database_session, current_actor):
         roles = tuple(session.scalars(select(PrincipalRole.role).where(PrincipalRole.principal_id == actor_id)))
         if principal is None or not principal.active or not set(roles) & {"student", "sitting_teacher", "campus_admin"}:
             raise Problem(401, "authorization", "invalid_asset_ticket", "图片票据已失效。")
-        actor = Actor(principal.id, principal.tenant_id, roles)
+        from .account_models import PasswordAccount
+        account = session.scalar(select(PasswordAccount).where(PasswordAccount.principal_id == principal.id))
+        if account is not None and (not account.active or account.must_change_password):
+            raise Problem(401, "authorization", "invalid_asset_ticket", "账号状态变化，图片票据已失效。")
+        actor = Actor(principal.id, principal.tenant_id, roles, account.student_id if account else None)
         authorize(session, actor, asset.homework_id)
         return actor
 

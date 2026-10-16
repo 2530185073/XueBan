@@ -36,7 +36,7 @@ def install_student_web(app, directory: Path | None):
             response.headers['Referrer-Policy'] = 'no-referrer'
             response.headers['X-Content-Type-Options'] = 'nosniff'
             response.headers['Permissions-Policy'] = 'camera=(self), microphone=(), geolocation=()'
-            response.headers['X-Xueban-Web'] = 'student-v1'
+            response.headers['X-Xueban-Web'] = 'student-v2-accounts'
         return response
 
     @app.get('/', include_in_schema=False)
