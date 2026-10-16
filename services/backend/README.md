@@ -46,7 +46,7 @@ PYTHONPATH=services/backend services/backend/.venv/bin/python -m xueban_backend.
 
 ## 已实现接口
 
-除以下长期账号接口外，已实现原32项纠错契约中的29项：
+除以下长期账号接口外，已实现原32项纠错契约全部操作（含人工重切/拆合题目与学生数据删除），并有坐班队列、运维与学习层扩展接口：
 
 | 路径 | 行为 |
 |---|---|
@@ -62,7 +62,23 @@ PYTHONPATH=services/backend services/backend/.venv/bin/python -m xueban_backend.
 | `POST /v1/cases/{id}/help-requests`；`GET /v1/help-requests`；`POST /v1/help-requests/{id}/claim`；`POST /v1/help-requests/{id}/complete` | 学生求助、老师授权待办、领取和处理 |
 | `POST /v1/cases/{id}/reviews` | 受权老师确认/替换/撤回判断，模型失败时可人工初判 |
 | `POST /v1/questions/{id}/revisions`；`POST /v1/attempts/{id}/recognition-revisions` | 老师修正题干/题区或答案识别，保存旧版本并使旧依据失效 |
-| `POST /v1/cases/{id}/progress` | 暂停/继续，不能据此确认完成 |
+| `POST /v1/cases/{id}/progress` | 暂停/继续，不能据此确认完成；继续后错题恢复为待订正 |
+
+后续阶段学习层（设计与规则见 [LEARNING_LAYER](../../docs/LEARNING_LAYER.md)）：
+
+| 路径 | 行为 |
+|---|---|
+| `GET /v1/curriculum/graph`；`GET/PUT /v1/students/{id}/learning-profile` | 已发布课程图谱；年级、学期与当前课次 |
+| `GET /v1/students/{id}/knowledge`；`GET /v1/students/{id}/knowledge/{kid}` | 个人知识状态（无百分比）、章节汇总、证据与前置知识 |
+| `GET/POST /v1/questions/{id}/knowledge-links`；`GET /v1/knowledge-link-queue` | 模型候选与老师确认的题目知识点链接 |
+| `POST /v1/attempts/{id}/condition`；`POST /v1/students/{id}/knowledge/{kid}/diagnoses`；`POST /v1/diagnoses/{id}/retract` | 老师记录帮助/独立条件与诊断 |
+| `GET/POST /v1/students/{id}/memories`；`POST /v1/memories/{id}/confirm`、`/retract` | 专属 AI 记忆：有证据、可确认、可撤回、证据撤销即失效 |
+| `GET /v1/cases/{id}/agent-context`；`POST/GET /v1/students/{id}/agent-runs` | 当前题“学伴记得”提醒；引用证据的坐班学情摘要 |
+| `GET/POST /v1/students/{id}/reports`；`GET /v1/reports`；`GET/PATCH /v1/reports/{id}`；`POST /v1/reports/{id}/publish` | 半月报告草稿、编辑、发布与更正版本 |
+| `POST/GET /v1/reports/{id}/share-links`；`POST /v1/report-share-links/{id}/revoke`；`GET /r/{token}` | 家长分享链接与只读报告页 |
+| `GET/POST /v1/practice-items`；`POST /v1/practice-items/{id}/review`；`POST /v1/practice-items/generate` | 已审核题库、模型候选与老师审核 |
+| `PUT /v1/students/{id}/optional-window`；`GET /v1/students/{id}/optional-activities` | 今日余力与额外分钟数；三项门禁状态与可选活动 |
+| `POST/GET /v1/students/{id}/practice-sessions`；`GET /v1/practice-sessions/{id}`；`…/responses`、`…/items/{item}/hint`、`…/exit` | 自愿举一反三、预习与小测，随时结束不记欠账 |
 
 `GET question/attempt/decision` 支持 `?revision=N`，返回历史快照及当前有效性。`GET homework` 返回实际 `asset_ids/question_ids/case_ids/job_ids`；从历史即可恢复，不能用安卓本地演示数据代替服务端结果。
 
@@ -74,7 +90,7 @@ PYTHONPATH=services/backend services/backend/.venv/bin/python -m xueban_backend.
 
 所有业务写入要求 `Idempotency-Key`，作用域为真实主体、授权学生、实际操作路径；同键同载荷重放原响应，同键不同载荷409。聚合写入先锁作业，再核验 `expected_revision`；幂等记录、业务变动、任务及事件同一事务提交。客户端应在新的操作前读取最新 aggregate；重试旧操作保持原键和原载荷。
 
-`0001_identity_homeworks → 0002_device_pairing → 0003_correction → 0004_password_accounts` 是显式迁移。0003新增私有资产、当前文档、不可变版本快照、任务和事件。应用不使用 `create_all` 绕过迁移。授权仍由服务层强制执行，数据库通过原作业归属外键组织业务记录；此切片没有宣称已部署 PostgreSQL RLS。
+`0001_identity_homeworks → 0002_device_pairing → 0003_correction → 0004_password_accounts → 0005_deletion_requests → 0006_learning_graph → 0007_agent_memory → 0008_learning_reports → 0009_optional_practice` 是显式迁移。0003新增私有资产、当前文档、不可变版本快照、任务和事件。应用不使用 `create_all` 绕过迁移。授权仍由服务层强制执行，数据库通过原作业归属外键组织业务记录；此切片没有宣称已部署 PostgreSQL RLS。
 
 任务表是事务持久队列。PG通过 `FOR UPDATE SKIP LOCKED` 领取，提交租约后再执行模型，模型调用期间不持有数据库事务。进程崩溃、重启后可重新领取过期租约；完成时校验租约 token 和期限，旧 Worker 不能覆盖新结果。最多执行3次；429/5xx等暂时失败有限退避，超时保留费用未知并终止，等待用户明确重试。重启恢复可能重复一次已计费推理，不能保证外部模型恰好调用一次；每次执行的开始、元数据及费用未知记录持久保存，业务结果不会重复生成。
 

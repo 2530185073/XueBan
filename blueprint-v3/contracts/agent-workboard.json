@@ -1,7 +1,7 @@
 {
   "schema_version": "agent-workboard.v1",
   "product_version": "3.5",
-  "updated_at": "2026-10-16",
+  "updated_at": "2026-10-17",
   "execution_mode": "interactive_ai_agent_team",
   "max_parallel_subagents_this_session": 3,
   "status_semantics": {
@@ -13,7 +13,8 @@
   "release_gate_status": {
     "C0": "not_passed",
     "R1": "not_passed",
-    "R2": "not_passed"
+    "R2": "not_passed",
+    "note": "C0 系统行为已自动化（services/backend/tests/test_c0_acceptance.py）；模型质量须在冻结样本上评测，R1/R2 需真机与现场试点。"
   },
   "items": [
     {
@@ -38,7 +39,7 @@
       "phase1_task_ids": [
         "P1-01"
       ],
-      "status": "artifact_ready",
+      "status": "completed",
       "artifact_paths": [
         "contracts/phase1/"
       ],
@@ -123,7 +124,7 @@
         "P1-02",
         "P1-12"
       ],
-      "status": "artifact_ready",
+      "status": "completed",
       "artifact_paths": [
         "services/backend/"
       ],
@@ -140,7 +141,7 @@
       "phase1_task_ids": [
         "P1-04"
       ],
-      "status": "not_started",
+      "status": "completed",
       "artifact_paths": [
         "services/backend/"
       ],
@@ -159,7 +160,7 @@
         "P1-05",
         "P1-06"
       ],
-      "status": "in_progress",
+      "status": "artifact_ready",
       "artifact_paths": [
         "services/backend/xueban_backend/providers/",
         "services/backend/scripts/",
@@ -200,7 +201,7 @@
       "phase1_task_ids": [
         "P1-09"
       ],
-      "status": "artifact_ready",
+      "status": "completed",
       "artifact_paths": [
         "apps/staff-web/"
       ],
@@ -222,7 +223,7 @@
         "P1-08",
         "P1-11"
       ],
-      "status": "not_started",
+      "status": "completed",
       "artifact_paths": [
         "apps/android/",
         "apps/staff-web/",
@@ -240,7 +241,7 @@
       "phase1_task_ids": [
         "P1-10"
       ],
-      "status": "not_started",
+      "status": "completed",
       "artifact_paths": [
         "services/backend/",
         "apps/staff-web/"
@@ -258,7 +259,7 @@
         "P1-13",
         "P1-14"
       ],
-      "status": "not_started",
+      "status": "artifact_ready",
       "artifact_paths": [
         "infra/",
         "docs/runbooks/",

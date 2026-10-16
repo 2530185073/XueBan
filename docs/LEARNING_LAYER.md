@@ -1,0 +1,65 @@
+# 后续阶段学习层：个人知识图谱、长期专属 AI、家长报告、举一反三、预习小测
+
+本文记录后续阶段在生产后端中的实现方式、遵守的蓝图规则和仍需现场完成的事项。规则来源：[02 个人知识图谱](../blueprint-v3/02-个人知识图谱与成长证据.md)、[04 页面流程](../blueprint-v3/04-完整产品需求与页面流程.md)、[05 专属智能体](../blueprint-v3/05-专属智能体与系统架构.md)、[账号与长期档案](ACCOUNT_FOUNDATION.md)。
+
+## 数据流
+
+```
+纠错记录（作业/题目/作答/判断/提示/求助/更正事件）
+  └─► 学习投影（按学生指纹判定需重算，全量重建，幂等）
+        ├─ 题目↔知识点链接（模型候选，老师确认）
+        ├─ 有效证据 learning_evidence（只追加，失效保留原因）
+        ├─ 知识状态 student_knowledge_states（规则 R1.2，无百分比）
+        └─ 投影后续：规则记忆、报告草稿刷新、映射候选
+  ├─► 专属 AI：agent_memory_items / agent_runs
+  ├─► 半月报告：learning_reports / report_share_links
+  └─► 选做：practice_items / optional_windows / practice_sessions / practice_responses
+```
+
+纠错代码不依赖学习层。学习层通过 `learning_outbox` 持久任务（事务性 outbox，至少一次、消费幂等）与共用 Worker 进程运行；学生删除时由 `register_downstream_purger` 注册的清除函数逐表删除。迁移为 `0006_learning_graph` 至 `0009_optional_practice`。
+
+## 个人知识图谱
+
+- 课程图谱 `pep-math-junior-pilot-1`：人教版初中数学 81 个知识点、76 条前置边，`review_status=pilot_seed_unreviewed`，需教研审核后才能宣称覆盖准确。
+- 证据只来自坐班老师确认的判断与确认的知识点链接；模型候选永远不成为证据。订正作答不算独立；只有老师标记、且作答前未看过提示的首次作答才算独立。帮助只计入看到之后的作答（R1.2）。
+- 状态为 `needs_help_now / consolidating / stable_for_now / no_judgment`，附原因码、证据充足度与未知项，不显示百分比掌握度。改判后旧证据标 `superseded/withdrawn`，状态从有效证据重算。
+
+## 长期专属 AI
+
+- 一名学生一个“专属智能体”是应用状态，不是单独训练的模型。记忆分六类，每条带来源（system_rule/model/staff/student）、证据 ID、有效期和状态。
+- 事实性记忆由确定性规则生成（反复出错 → `recurring_difficulty`，阶段性较稳 → `progress_milestone`），按证据集合去重；模型只能提出 `proposed` 记忆，老师确认后生效。学生只能设置自己的界面偏好和学习目标。
+- 证据被撤销时，引用它的记忆变为 `invalidated`，依赖它的 `agent_run` 变为 `stale`。
+- `GET /v1/cases/{id}/agent-context` 为当前题生成“学伴记得”提醒，引用记忆与证据，不含答案，并记录一次 `agent_run`。
+- 坐班“学情摘要”使用 decision.v1 结构，`evidence_ids` 在输出 Schema 中被限制为本次提供的证据枚举，模型无法引用不存在的证据；上下文使用化名 `learner_1`，不含学生姓名或 ID。
+
+## 半月家长报告
+
+- 周期为 Asia/Shanghai 自然月 1–15 日、16 日至月末，左闭右开；每个活跃学生每期由 Worker 自动生成草稿，不依赖小测。
+- 快照包含实际观察天数、不足完整周期标记、学校任务真实分母、帮助与提示、具体问题证据卡（日期、页码、帮助条件、老师说明、可信程度、反证）、已核实范围与“可能原因（未核实）”分列、仍不知道的、最小下一步与限制说明。
+- 草稿随事实自动刷新；发布要求投影已追平且内容未变化（乐观并发）。已发布版本不改写，事实变化生成更正版本，发布时必须写更正说明；旧版本变为 `superseded`。
+- 家长没有账号：老师生成可吊销、有期限的分享链接（只存令牌摘要），`/r/{token}` 服务端渲染页面，`no-store`、`no-referrer`、严格 CSP、`noindex`，始终显示最新发布版本及更正记录。
+
+## 举一反三与预习小测
+
+- 额外活动默认 0 分钟。服务端在开始前重新校验三项门禁：学校任务完成（今日已拍作业全部解决，或老师现场确认）、老师观察有余力并开放今日额外分钟数、孩子本次明确表示愿意；未知按未满足处理，预算用完自动结束。
+- 题库为租户共享、不含学生数据的已审核题目，按知识点标注；模型只生成候选，老师审核后可用。选题优先未做过、不同题族、由易到难。
+- 举一反三只对当前有练习依据（需要帮助/正在巩固）的知识点开放，可看提示；预习需要学习档案中的当前课次，课程未知不猜课，显示目标与前置知识状态（仅供参考），可选小测最多 3 题且不提供提示。
+- 作答按规则判分（数值、选项、文本精确比较，无法判断记为 `unscorable`），单独记录为 `optional_variant / optional_quiz`，**不计入知识状态**，因此参加或退出都不会让孩子显得更弱；报告只汇总自愿参与情况。
+
+## 参考的开源项目与标准
+
+| 参考 | 借鉴点 | 本项目的取舍 |
+|---|---|---|
+| [pyBKT](https://github.com/CAHLR/pyBKT)（贝叶斯知识追踪） | 以知识点为单位追踪学生状态 | 蓝图要求可解释、无百分比，首期采用规则 R1.2；保留证据结构以便日后离线评估 BKT |
+| [OATutor](https://github.com/CAHLR/OATutor) | 题目—提示—知识组件（KC）标注的开源题库结构 | `practice_items` 按知识点标注并带提示/解析，人工审核后上线 |
+| [FSRS](https://github.com/open-spaced-repetition/fsrs4anki) | 延迟复习与间隔的建模 | 蓝图不允许强制复测排程；只记录自然出现的延迟验证 |
+| [mem0](https://github.com/mem0ai/mem0)、[Letta](https://github.com/letta-ai/letta) | 长期记忆的增删改与来源追溯 | 记忆必须引用证据、模型只提议、老师确认、证据撤销即失效 |
+| [W3C Capability URLs](https://www.w3.org/TR/capability-urls/) | 无账号分享链接的安全做法 | 高熵令牌、仅存摘要、可吊销、过期、no-referrer |
+| [Transactional Outbox](https://microservices.io/patterns/data/transactional-outbox.html) | 业务写入与异步任务一致 | `learning_outbox` 与投影同库事务、幂等消费 |
+
+实现直接使用标准库与既有依赖（`zoneinfo`、`fractions`、`secrets`、SQLAlchemy、Alembic、FastAPI），没有引入新的运行时依赖。
+
+## 验证与待现场完成
+
+- 自动化：`tests/test_learning_rules.py`、`test_learning.py`、`test_agent_memory.py`、`test_learning_reports.py`、`test_practice.py`、`test_c0_acceptance.py`，SQLite 与 PostgreSQL 双库运行。
+- 待现场：课程图谱教研审核；真实学生数据下的映射工作量与记忆有用性；家长对报告的理解度访谈；题库首批审核题目；额外活动门禁在托管现场的操作负担。这些不能由自动化测试替代。

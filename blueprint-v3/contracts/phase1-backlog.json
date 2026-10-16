@@ -3,7 +3,7 @@
   "product_version": "3.5",
   "source_document": "../../PHASE1.md",
   "scope": "phase1_correction_app",
-  "status_note": "16项均为一期P0。契约/安卓源码、后端身份与持久化、坐班工作台和评测框架已分批开工；均未通过一期生产验收。Agent子任务与C0/R1/R2分别记录。",
+  "status_note": "16项均为一期P0。engineering_complete 表示工程实现、自动化测试（SQLite+PostgreSQL 全量回归、C0 系统行为用例）与 CI 已通过，仍待真实设备、冻结评测样本或现场试点验收；不代表一期生产验收通过。C0/R1/R2 门槛均未通过。",
   "platform_decision": {
     "status": "confirmed_by_user",
     "target": "android_tablet_app",
@@ -42,14 +42,15 @@
       "acceptance_failure": "未确认项标明负责人和阻塞范围；不得把网页或未测准确率记为 App 交付",
       "delivery_waves": [
         "A"
-      ]
+      ],
+      "implementation_note": "接口与数据规范已由 contracts/phase1 校验并在 CI 执行；设备型号、最低系统版本、安装渠道与冻结评测样本需现场确定。"
     },
     {
       "id": "P1-02",
       "title": "真实账号、学生归属与授权",
       "owner_hint": "BE",
       "priority": "P0",
-      "status": "in_progress",
+      "status": "engineering_complete",
       "dependency_ids": [
         "P1-01"
       ],
@@ -61,7 +62,8 @@
       "acceptance_failure": "改请求参数、旧会话和缓存不能跨学生读取或写入；未授权照片不能上传",
       "delivery_waves": [
         "B"
-      ]
+      ],
+      "implementation_note": "学生/坐班/校区账号、口令策略、会话吊销与学生授权已实现；学生端在账号失效或切换时清除本机数据。监护书面同意流程待现场落实。"
     },
     {
       "id": "P1-03",
@@ -81,14 +83,15 @@
       "delivery_waves": [
         "A",
         "B"
-      ]
+      ],
+      "implementation_note": "安卓相机源码与 CI 构建已具备，学生网页端可拍照上传；声明设备实际安装运行待真机验收。"
     },
     {
       "id": "P1-04",
       "title": "可靠上传与异步检查进度",
       "owner_hint": "BE",
       "priority": "P0",
-      "status": "not_started",
+      "status": "engineering_complete",
       "dependency_ids": [
         "P1-03",
         "P1-12"
@@ -102,14 +105,15 @@
       "acceptance_failure": "超时、重复点击、断网重试和局部失败不丢记录、不重复产生业务作答，不把漏题视为已检查",
       "delivery_waves": [
         "B"
-      ]
+      ],
+      "implementation_note": "私有上传票据、SHA-256 完整性校验、幂等提交与逐页任务账本已实现并有 PG 并发测试；学生端区分本地草稿与已接收。"
     },
     {
       "id": "P1-05",
       "title": "真实识别、切题与识别更正",
       "owner_hint": "AI",
       "priority": "P0",
-      "status": "in_progress",
+      "status": "engineering_complete",
       "dependency_ids": [
         "P1-04"
       ],
@@ -121,14 +125,14 @@
       "delivery_waves": [
         "B"
       ],
-      "implementation_note": "已实现Ark候选适配器并完成合成图片实调用；尚无生产图片上传/题区版本/纠错公开接口/真实手写验收，依赖任务仍未放行。"
+      "implementation_note": "Ark 识别适配器、题区与作答版本、坐班识别更正与重切/拆合题目已实现，旧分析随版本过期；真实手写识别准确率待冻结样本评测。"
     },
     {
       "id": "P1-06",
       "title": "按题型检查与可核实错误定位",
       "owner_hint": "AI",
       "priority": "P0",
-      "status": "in_progress",
+      "status": "engineering_complete",
       "dependency_ids": [
         "P1-05"
       ],
@@ -140,14 +144,14 @@
       "delivery_waves": [
         "B"
       ],
-      "implementation_note": "已实现Ark候选适配器并完成合成图片实调用；尚无生产图片上传/题区版本/纠错公开接口/真实手写验收，依赖任务仍未放行。"
+      "implementation_note": "检查/再检查候选含依据与首错区域，无法判断转人工；正确率、错步定位等质量指标需冻结评测集（evals/correction）实测。"
     },
     {
       "id": "P1-07",
       "title": "当前题分层提示与求助入口",
       "owner_hint": "AI",
       "priority": "P0",
-      "status": "not_started",
+      "status": "engineering_complete",
       "dependency_ids": [
         "P1-06"
       ],
@@ -158,14 +162,15 @@
       "acceptance_failure": "不默认给整页答案，不无限反问，不拒绝休息，不追加强制新题；旧判定撤销后不继续使用旧提示",
       "delivery_waves": [
         "C"
-      ]
+      ],
+      "implementation_note": "方向/关键步骤分层提示、查看记录与坐班求助已实现，帮助条件随作答保存；不依赖图谱或长期智能体。"
     },
     {
       "id": "P1-08",
       "title": "订正关联与再次检查",
       "owner_hint": "BE",
       "priority": "P0",
-      "status": "not_started",
+      "status": "engineering_complete",
       "dependency_ids": [
         "P1-06",
         "P1-07",
@@ -179,14 +184,15 @@
       "acceptance_failure": "点击完成不算通过；关联不能跨生跨题、循环或无源；重传去重，实际新订正保留；帮助后正确不标独立掌握",
       "delivery_waves": [
         "C"
-      ]
+      ],
+      "implementation_note": "订正作答以 parent/root 关联原作答，再检查给出通过/仍错/待核实；仅坐班确认可标记订正通过（C0 用例覆盖）。"
     },
     {
       "id": "P1-09",
       "title": "坐班核实与现场接手工作台",
       "owner_hint": "FE",
       "priority": "P0",
-      "status": "in_progress",
+      "status": "engineering_complete",
       "dependency_ids": [
         "P1-02",
         "P1-06"
@@ -200,14 +206,15 @@
       "delivery_waves": [
         "B",
         "C"
-      ]
+      ],
+      "implementation_note": "坐班工作台已接入真实接口：登录、复核队列、原图与题区查看、提示历史、求助接单、确认/改判、识别更正与题目重切。"
     },
     {
       "id": "P1-10",
       "title": "误判申诉、更正与失效传播",
       "owner_hint": "BE",
       "priority": "P0",
-      "status": "not_started",
+      "status": "engineering_complete",
       "dependency_ids": [
         "P1-08",
         "P1-09",
@@ -221,14 +228,15 @@
       "delivery_waves": [
         "C",
         "D"
-      ]
+      ],
+      "implementation_note": "学生申请重查、坐班新决定替代旧判断、历史保留、旧提示失效并发出 evidence.invalidated 更正事件；下游知识证据、记忆与报告据此更正。"
     },
     {
       "id": "P1-11",
       "title": "每生作业历史与继续订正",
       "owner_hint": "FE",
       "priority": "P0",
-      "status": "not_started",
+      "status": "engineering_complete",
       "dependency_ids": [
         "P1-08",
         "P1-10"
@@ -240,14 +248,15 @@
       "acceptance_failure": "只采到部分作业不显示全作业正确率；无知识点映射仍可回看；未实现的图谱和报告不放空入口",
       "delivery_waves": [
         "C"
-      ]
+      ],
+      "implementation_note": "学生端历史按日期/科目/状态筛选，版本时间线可继续未解决事项。"
     },
     {
       "id": "P1-12",
       "title": "生产纠错记录、版本与事件底座",
       "owner_hint": "BE",
       "priority": "P0",
-      "status": "in_progress",
+      "status": "engineering_complete",
       "dependency_ids": [
         "P1-01",
         "P1-02"
@@ -261,14 +270,15 @@
       "acceptance_failure": "不依赖知识点非空、完整图谱或 student_agent 才可存原题；模型失败不能写确认成功；后续消费者可重放有效事件",
       "delivery_waves": [
         "B"
-      ]
+      ],
+      "implementation_note": "Alembic 迁移 0001–0009、文档实体与快照、事件与持久任务账本，事务与幂等在 SQLite/PostgreSQL 双库测试。"
     },
     {
       "id": "P1-13",
       "title": "设备生命周期与故障恢复",
       "owner_hint": "FE",
       "priority": "P0",
-      "status": "not_started",
+      "status": "in_progress",
       "dependency_ids": [
         "P1-03",
         "P1-04",
@@ -283,14 +293,15 @@
       "acceptance_failure": "不丢服务器已确认数据、不串人、不假完成；纯本地未上传记录明确提示；离线不能假装完成云端判断",
       "delivery_waves": [
         "D"
-      ]
+      ],
+      "implementation_note": "服务端租约回收、Worker 重启恢复、健康/就绪探针与部署烟测已完成；安卓后台终止、弱网与 App 更新恢复待真机。"
     },
     {
       "id": "P1-14",
       "title": "权限、删除与数据恢复演练",
       "owner_hint": "TL",
       "priority": "P0",
-      "status": "not_started",
+      "status": "engineering_complete",
       "dependency_ids": [
         "P1-02",
         "P1-12",
@@ -306,14 +317,15 @@
       "acceptance_failure": "越权访问、删除后可读或恢复后资料复活均阻断；真实账号和数据流程不可被演示身份替代",
       "delivery_waves": [
         "D"
-      ]
+      ],
+      "implementation_note": "跨学生隔离、撤权、学生数据导出与删除执行（含下游学习数据清除）、备份/恢复脚本与重放删除清单已实现；生产环境恢复演练待执行。"
     },
     {
       "id": "P1-15",
       "title": "纠错评测、性能与模型版本回归",
       "owner_hint": "QA",
       "priority": "P0",
-      "status": "in_progress",
+      "status": "engineering_complete",
       "dependency_ids": [
         "P1-06",
         "P1-07",
@@ -334,7 +346,8 @@
         "B",
         "D",
         "E"
-      ]
+      ],
+      "implementation_note": "评测重放运行器、Wilson 区间回归比较门槛与线上服务指标接口已实现；冻结保留测试集与真实样本评测待执行。"
     },
     {
       "id": "P1-16",
@@ -359,7 +372,8 @@
       "delivery_waves": [
         "D",
         "E"
-      ]
+      ],
+      "implementation_note": "技术交付件（部署、迁移、配置模板、回滚与运维手册）已具备；C0/R1/R2 证据与连续真实使用需现场试点。"
     }
   ],
   "implementation_document": "../../ANDROID_PHASE1.md",
@@ -389,5 +403,10 @@
       "textbook_revision",
       "supported_subjects_and_question_types"
     ]
+  },
+  "status_semantics": {
+    "engineering_complete": "工程实现与自动化验证完成，待真实设备/样本/现场验收",
+    "in_progress": "已在执行，工程或外部条件尚未完成",
+    "not_started": "尚未执行"
   }
 }
