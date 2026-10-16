@@ -422,7 +422,12 @@ def install_correction(app, engine, cfg, database_session, current_actor):
         rows = list(session.scalars(query.order_by(Entity.id).limit(limit + 1)))
         return checked("HelpPage", {"items": [row.document for row in rows[:limit]], "next_cursor": rows[limit - 1].id if len(rows) > limit else None})
 
+    def repair_layout(session, actor, homework, _, payload):
+        from .layout_repair import accept_repair
+        return accept_repair(session, contracts, actor, homework, payload)
+
     mutate("/v1/homeworks/{homework_id}/uploads", "createUpload", "homework", "CreateUpload", "UploadTicket", upload, 201)
+    mutate("/v1/homeworks/{homework_id}/layout-revisions", "repairQuestionLayout", "homework", "RepairLayout", "Accepted", repair_layout, 202, True)
     mutate("/v1/assets/{asset_id}/upload-ticket", "renewUploadTicket", "asset", "RenewUpload", "UploadTicket", renew)
     mutate("/v1/assets/{asset_id}/complete", "completeUpload", "asset", "CompleteUpload", "ImageAsset", complete)
     mutate("/v1/homeworks/{homework_id}/recognitions", "startRecognition", "homework", "StartRecognition", "Accepted", recognize, 202)

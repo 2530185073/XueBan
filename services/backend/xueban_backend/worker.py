@@ -25,6 +25,7 @@ from .correction_core import (assets_for, create_task, event, get_entity, input_
 from .correction_models import Asset, Entity, Task
 from .db import create_database_engine
 from .errors import Problem
+from .layout_repair import apply_repair, recognize_replacements
 from .models import Homework, Student
 from .providers import ProviderError
 from .providers.correction_pipeline import CorrectionPipeline, PipelineImage, normalize_field_for_comparison
@@ -76,6 +77,8 @@ class CorrectionWorker:
             if homework.processing_blocked or student is None or not student.active:
                 raise Problem(409, "conflict", "processing_blocked", "处理已停止。")
             assets = assets_for(session, homework.id, task.inputs["asset_ids"])
+            if task.kind == "repair_layout":
+                return task.kind, {"assets": assets, "replacements": task.inputs["replacements"]}
             images = tuple(PipelineImage(a.id, "data:" + a.document["mime_type"] + ";base64," + base64.b64encode(self.store.read(a.id, a.document)).decode(), a.document["width"], a.document["height"]) for a in assets)
             context = {"images": images}
             if task.kind in {"check", "hint"}:
@@ -126,6 +129,8 @@ class CorrectionWorker:
                 result = method(**context)
             elif kind == "hint":
                 result = self.pipeline.hint(**context)
+            elif kind == "repair_layout":
+                result = recognize_replacements(self.pipeline, self.store, context["assets"], context["replacements"])
             else:
                 raise ProviderError("invalid_input")
             self.finish(identifier, token, result=result)
@@ -208,6 +213,8 @@ class CorrectionWorker:
             return True
 
     def _apply(self, session, task, homework, result):
+        if task.kind == "repair_layout":
+            return apply_repair(session, self.contracts, task, homework, result)
         if task.kind == "recognize_homework":
             # Unknown-located items remain in private audit, never get invented boxes.
             located = [item for item in result.data["items"] if item["regions"] and item.get("location_status", "located") == "located"]
@@ -224,7 +231,7 @@ class CorrectionWorker:
         if task.kind == "recognize_attempt":
             attempt = get_entity(session, task.inputs["attempt_id"], "attempt")
             case = get_entity(session, task.inputs["case_id"], "case")
-            if case.document["current_attempt_id"] != attempt.id or case.document["current_question_revision"] != task.inputs["question_revision"] or attempt.document["recognition_status"] != "pending":
+            if case.document["lifecycle"] != "active" or case.document["current_attempt_id"] != attempt.id or case.document["current_question_revision"] != task.inputs["question_revision"] or attempt.document["recognition_status"] != "pending":
                 return None
             # A new correction photo must isolate its target. Multiple items cannot
             # silently be attached to an unrelated parent attempt.

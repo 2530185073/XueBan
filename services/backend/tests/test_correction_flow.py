@@ -48,7 +48,7 @@ class SyntheticPipeline:
         if self.error:
             raise self.error
         image = images[0]
-        region = {"asset_id": image.asset_id, "x": 1, "y": 1, "width": 100, "height": 60, "coordinate_space": "original_pixels"}
+        region = {"asset_id": image.asset_id, "x": 1, "y": 1, "width": min(100, image.width_px - 1), "height": min(60, image.height_px - 1), "coordinate_space": "original_pixels"}
         result = PipelineResult({"items": [{"asset_id": image.asset_id, "label": self.label, "stem_text": self.stem, "answer_text": "3", "answer_status": "present", "regions": [] if self.unknown_location else [region], "answer_regions": [] if self.unknown_location else [region], "recognition_status": "ready", "location_status": "unknown" if self.unknown_location else "located", "uncertainties": []}], "coverage": {"collection_scope": "partial", "unrecognized_regions": [], "note": None}}, self.metadata)
         if self.extra_item_label:
             result.data["items"].append({**deepcopy(result.data["items"][0]), "label": self.extra_item_label})
