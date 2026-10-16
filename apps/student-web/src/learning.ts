@@ -97,6 +97,7 @@ export const wrapUps: Record<Exclude<PracticeStatus, 'active'>, { title: string;
   time_up: { title: '今天的时间用完啦', text: '没做完的题不用补，也不会记欠账。休息一下吧。' },
   exited: { title: '已经结束啦', text: '随时结束都可以，不会记欠账，也不影响知识地图。' },
 }
+export const readingDone = { title: '预习看完啦', text: '先有个印象就好，上课时再认真听。' }
 export const exitChoices: { reason: ExitReason; label: string }[] = [
   { reason: 'tired', label: '有点累了' }, { reason: 'not_now', label: '现在不想做' }, { reason: 'done', label: '做得差不多了' }, { reason: 'other', label: '就是想结束' },
 ]

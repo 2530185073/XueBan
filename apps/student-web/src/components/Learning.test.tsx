@@ -85,5 +85,6 @@ describe('practice runner pieces', () => {
     expect(renderToStaticMarkup(<WrapUp session={{ ...base, status: 'exited' }} now={now} onClose={noop} />)).toContain('不会记欠账')
     expect(renderToStaticMarkup(<WrapUp session={{ ...base, budget_ends_at: '2026-10-16T07:00:00Z' }} now={now} onClose={noop} />)).toContain('今天的时间用完啦')
     expect(renderToStaticMarkup(<WrapUp session={base} now={now} onClose={noop} />)).toBe('')
+    expect(renderToStaticMarkup(<WrapUp session={{ ...base, status: 'completed', items: [] }} now={now} onClose={noop} />)).toContain('预习看完啦')
   })
 })

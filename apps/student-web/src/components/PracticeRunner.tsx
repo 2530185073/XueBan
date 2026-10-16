@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useState, type FormEvent } from 'react'
 import { ArrowLeft, Check, Clock3, Lightbulb, LoaderCircle, LogOut } from 'lucide-react'
 import { PRACTICE_ANSWER_MAX, safeError, StudentError, type ExitReason, type PracticeItem, type PracticeSession, type PreviewTarget } from '../core'
 import type { Workspace } from '../useStudentWorkspace'
-import { answerFeedback, choiceLetters, effectiveStatus, exitChoices, practiceMessage, remainingLabel, statusLabels, wrapUps } from '../learning'
+import { answerFeedback, choiceLetters, effectiveStatus, exitChoices, practiceMessage, readingDone, remainingLabel, statusLabels, wrapUps } from '../learning'
 
 export function PreviewReading({ targets }: { targets: PreviewTarget[] }) {
   if (!targets.length) return null
@@ -45,7 +45,7 @@ export function PracticeItemCard({ item, index, active, hintsAllowed, hint, busy
 export function WrapUp({ session, now, onClose }: { session: PracticeSession; now: number; onClose: () => void }) {
   const status = effectiveStatus(session, now)
   if (status === 'active') return null
-  const copy = wrapUps[status]
+  const copy = status === 'completed' && !session.items.length ? readingDone : wrapUps[status]
   return <div className="wrap-up" role="status"><span className="ready-symbol"><Check size={24} /></span><h2>{copy.title}</h2><p>{copy.text}</p><button className="button primary" onClick={onClose}><ArrowLeft size={17} /> 回到作业本</button></div>
 }
 

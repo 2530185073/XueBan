@@ -611,6 +611,7 @@ def install_practice(app, engine, cfg, database_session, current_actor):
         row = load_session(session, actor, session_id, lock=True)
         _expire(row, now())
         if row.status == "active":
-            row.status, row.exit_reason, row.ended_at = "exited", payload.reason, now()
+            finished_reading = row.purpose == "preview" and not row.item_ids and payload.reason == "done"
+            row.status, row.exit_reason, row.ended_at = "completed" if finished_reading else "exited", payload.reason, now()
         session.commit()
         return session_dict(session, row, staff=is_staff(actor))

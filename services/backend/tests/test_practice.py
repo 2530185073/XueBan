@@ -151,6 +151,8 @@ def test_preview_quiz_has_no_hints_and_leaving_creates_no_debt(flow, clock):
     assert left["status"] == "exited" and left["exit_reason"] == "tired"
     reading = start(flow, purpose="preview")
     assert reading.status_code == 201 and reading.json()["items"] == []
+    finished = flow.client.post(f"/v1/practice-sessions/{reading.json()['id']}/exit", json={"reason": "done"}).json()
+    assert finished["status"] == "completed" and finished["exit_reason"] == "done"
 
 
 def test_budget_runs_out_and_closes_the_gate(flow, clock):
