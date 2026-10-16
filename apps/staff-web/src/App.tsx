@@ -1,174 +1,322 @@
-import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, BookOpen, CircleHelp, Eye, FileImage, Focus, Inbox, Link2, LoaderCircle, LockKeyhole, LogOut, Maximize2, MessageCircle, RefreshCw, Search, ShieldCheck, Sparkles, X } from 'lucide-react'
-import { ApiError, errorMessage, StaffApi } from './api/client'
-import type { HelpRequest, IdentityContext, SubmitReview } from './api/contracts.generated'
-import { loadWorkspace, type CaseWorkspace } from './workspace'
-import { sampleHelp, sampleIdentity, sampleWorkspace } from './sample'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { BookOpen, CircleHelp, Eye, LoaderCircle, LockKeyhole, LogOut, ShieldCheck, Sparkles, X } from 'lucide-react'
+import { ApiError, errorMessage, isConflict, StaffApi } from './api/client'
+import type { Accepted, HelpRequest, IdentityContext, ImageAsset, QuestionRead, RepairLayout, ReviseAnswer, ReviseQuestion, SubmitReview } from './api/contracts.generated'
+import type { ReviewQueueItem } from './api/types'
+import { isTerminal, pollJob } from './jobs'
+import { applyPage, emptyQueue, helpId, reviewId, type QueueState, type QueueTab, type Selection } from './queue'
+import { sampleCaseId, sampleHelp, sampleIdentity, sampleImage, sampleQuestions, sampleReviewItem, sampleWorkspace } from './sample'
+import { currentAttempt, editBlock, focusHelp, loadHomeworkQuestions, loadWorkspace, newCaseIds, type CaseWorkspace } from './workspace'
+import CaseDesk, { type RepairState } from './components/CaseDesk'
+import { LoginScreen, PasswordScreen } from './components/LoginScreen'
+import QueuePanel from './components/QueuePanel'
 import ReviewPanel from './components/ReviewPanel'
 
-const kindLabels = { question: '作业答疑', recognition: '识别待核实', judgment: '判断待核实', appeal: '申请重查' }
-const statusLabels = { waiting: '待接手', claimed: '处理中', resolved: '帮助已结束', unresolved: '仍需帮助', cancelled: '已取消' }
+type Phase = 'login' | 'password' | 'ready' | 'sample'
+const STAFF_ROLES = ['sitting_teacher', 'campus_admin']
+// setTimeout delays above 2^31-1 ms overflow and fire immediately.
+const MAX_TIMER = 2_147_000_000
 
 export default function App() {
-  const [mode, setMode] = useState<'offline' | 'live' | 'sample'>('offline')
-  const [api, setApi] = useState<StaffApi | null>(null)
+  const api = useMemo(() => new StaffApi(window.location.origin, { proxyLoopbackAssets: import.meta.env.DEV }), [])
+  const [phase, setPhase] = useState<Phase>('login')
+  const [username, setUsername] = useState('')
+  const [expiresAt, setExpiresAt] = useState<number | null>(null)
   const [identity, setIdentity] = useState<IdentityContext | null>(null)
-  const [queue, setQueue] = useState<HelpRequest[]>([])
-  const [nextCursor, setNextCursor] = useState<string | null>(null)
-  const [selected, setSelected] = useState<string | null>(null)
-  const [workspace, setWorkspace] = useState<CaseWorkspace | null>(null)
-  const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState<'all' | 'waiting' | 'claimed'>('all')
-  const [connecting, setConnecting] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [tab, setTab] = useState<QueueTab>('help')
+  const [help, setHelp] = useState<QueueState<HelpRequest>>(emptyQueue)
+  const [review, setReview] = useState<QueueState<ReviewQueueItem>>(emptyQueue)
+  const [names, setNames] = useState<Map<string, string>>(new Map())
+  const [selection, setSelection] = useState<Selection | null>(null)
+  const [ws, setWs] = useState<CaseWorkspace | null>(null)
+  const [attemptId, setAttemptId] = useState('')
+  const [queueLoading, setQueueLoading] = useState(false)
+  const [wsLoading, setWsLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [writeUncertain, setWriteUncertain] = useState(false)
+  const [repair, setRepair] = useState<RepairState | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [showConnect, setShowConnect] = useState(false)
-  const [baseUrl, setBaseUrl] = useState('')
-  const [token, setToken] = useState('')
-  const [showRegion, setShowRegion] = useState(true)
-  const [zoom, setZoom] = useState(false)
-  const [assetIndex, setAssetIndex] = useState(0)
-  const [imageSize, setImageSize] = useState({ width: 0, height: 0 })
-  const [imageFailed, setImageFailed] = useState(false)
-  const connectionAbort = useRef<AbortController | null>(null)
-  const detailAbort = useRef<AbortController | null>(null)
   const epoch = useRef(0)
-  const sample = mode === 'sample'
+  const images = useRef(new Map<string, string>())
+  const imageHomework = useRef<string | null>(null)
+  const wsAbort = useRef<AbortController | null>(null)
+  const pollAbort = useRef<AbortController | null>(null)
+  const checkAbort = useRef<AbortController | null>(null)
+  const selectionRef = useRef<Selection | null>(null)
+  const sample = phase === 'sample'
+  const ready = phase === 'ready'
 
-  function disconnect() {
+  const dropImages = useCallback(() => { for (const url of images.current.values()) URL.revokeObjectURL(url); images.current.clear(); imageHomework.current = null }, [])
+
+  const reset = useCallback((next: Phase, message: string | null = null) => {
     epoch.current += 1
-    connectionAbort.current?.abort(); detailAbort.current?.abort(); api?.disconnect()
-    setApi(null); setIdentity(null); setQueue([]); setNextCursor(null); setSelected(null); setWorkspace(null)
-    setMode('offline'); setToken(''); setError(null); setNotice(null); setLoading(false); setConnecting(false); setBusy(false); setWriteUncertain(false)
-  }
-  function fail(cause: unknown) {
-    if (cause instanceof ApiError && cause.status === 401) disconnect()
-    if (cause instanceof ApiError && cause.status === 403) { setQueue([]); setSelected(null); setWorkspace(null) }
-    setError(errorMessage(cause))
-  }
-  function startSample() {
-    disconnect(); setShowConnect(false); setMode('sample'); setIdentity(sampleIdentity); setQueue([sampleHelp]); setSelected(sampleHelp.id); setWorkspace(sampleWorkspace)
-  }
-  async function connect(event: React.FormEvent) {
-    event.preventDefault(); setError(null); setConnecting(true)
-    const controller = new AbortController(); connectionAbort.current?.abort(); connectionAbort.current = controller
-    const activeEpoch = ++epoch.current
-    let client: StaffApi | undefined
-    try {
-      client = new StaffApi(baseUrl, token)
-      const context = await client.me(controller.signal)
-      if (!context.roles.some(role => ['sitting_teacher', 'campus_admin'].includes(role))) throw new ApiError(403, 'Staff access required')
-      if (activeEpoch !== epoch.current) return
-      api?.disconnect(); setApi(client); setIdentity(context); setMode('live'); setQueue([]); setSelected(null); setWorkspace(null); setShowConnect(false); setToken('')
-      const page = await client.helpQueue(undefined, controller.signal)
-      if (activeEpoch !== epoch.current) return
-      setQueue(page.items); setNextCursor(page.next_cursor)
-    } catch (cause) {
-      if (!controller.signal.aborted && activeEpoch === epoch.current) {
-        if (cause instanceof ApiError && cause.status === 401) { client?.disconnect(); disconnect() }
-        if (cause instanceof ApiError && cause.status === 403) { client?.disconnect(); disconnect() }
-        setError(cause instanceof ApiError ? errorMessage(cause) : cause instanceof Error ? cause.message : '无法建立连接')
-      }
-    }
-    finally { if (activeEpoch === epoch.current) setConnecting(false) }
-  }
-  async function refresh(append = false) {
-    if (!api || sample) return
-    setLoading(true); setError(null); setNotice(null)
-    const activeEpoch = epoch.current
-    try {
-      const page = await api.helpQueue(append ? nextCursor ?? undefined : undefined)
-      if (activeEpoch !== epoch.current) return
-      setQueue(old => append ? [...old, ...page.items.filter(item => !old.some(previous => previous.id === item.id))] : page.items)
-      setNextCursor(page.next_cursor)
-      if (!append) { setSelected(null); setWorkspace(null) }
-    } catch (cause) { if (activeEpoch === epoch.current) fail(cause) }
-    finally { if (activeEpoch === epoch.current) setLoading(false) }
-  }
+    wsAbort.current?.abort(); pollAbort.current?.abort(); checkAbort.current?.abort(); dropImages()
+    selectionRef.current = null
+    setPhase(next); setExpiresAt(null); setIdentity(null); setHelp(emptyQueue()); setReview(emptyQueue()); setNames(new Map())
+    setSelection(null); setWs(null); setAttemptId(''); setQueueLoading(false); setWsLoading(false); setBusy(false); setWriteUncertain(false); setRepair(null)
+    setNotice(null); setError(message)
+  }, [dropImages])
 
   useEffect(() => {
-    if (sample) { setWorkspace(selected ? sampleWorkspace : null); return }
-    const help = queue.find(item => item.id === selected)
-    if (!api || !help) { setWorkspace(null); return }
-    const controller = new AbortController(); detailAbort.current?.abort(); detailAbort.current = controller
-    setWorkspace(null); setLoading(true); setError(null); setAssetIndex(0); setImageFailed(false); setImageSize({ width: 0, height: 0 })
-    loadWorkspace(api, help, controller.signal)
-      .then(data => { if (!controller.signal.aborted) setWorkspace(data) })
-      .catch(cause => { if (!controller.signal.aborted) fail(cause) })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false) })
-    return () => controller.abort()
-  }, [api, selected, queue, sample])
-  useEffect(() => () => { connectionAbort.current?.abort(); detailAbort.current?.abort() }, [])
+    api.onSessionEnded = reason => reset('login', reason === 'expired' ? '登录已到期，请重新登录。本页的学生资料已清除。' : '登录已失效或已在别处撤销，请重新登录。本页的学生资料已清除。')
+    return () => { api.onSessionEnded = null }
+  }, [api, reset])
+  useEffect(() => {
+    if (expiresAt === null) return
+    const timer = setTimeout(() => { api.clear(); reset('login', '登录已到期，请重新登录。本页的学生资料已清除。') }, Math.min(MAX_TIMER, Math.max(0, expiresAt - Date.now())))
+    return () => clearTimeout(timer)
+  }, [api, expiresAt, reset])
+  useEffect(() => () => { wsAbort.current?.abort(); pollAbort.current?.abort(); checkAbort.current?.abort(); dropImages() }, [dropImages])
 
-  async function mutate(operation: () => Promise<unknown>, retryOriginal = false) {
-    if (!api || sample || (writeUncertain && !retryOriginal)) return
-    setBusy(true); setError(null); setNotice(null)
-    const activeEpoch = epoch.current
-    try {
-      await operation()
-      if (activeEpoch !== epoch.current) return
-      setWriteUncertain(false)
-      setNotice('服务端已确认本次操作。正在读取最新记录。')
-      const page = await api.helpQueue()
-      if (activeEpoch !== epoch.current) return
-      setQueue(page.items); setNextCursor(page.next_cursor)
-    } catch (cause) { if (activeEpoch === epoch.current) { setWriteUncertain(api.hasPendingWrite()); fail(cause) } }
-    finally { if (activeEpoch === epoch.current) setBusy(false) }
+  function fail(cause: unknown) {
+    if (cause instanceof DOMException && cause.name === 'AbortError') return
+    if (cause instanceof ApiError && cause.code === 'password_change_required') { setPhase('password'); setIdentity(null) }
+    // 401 already reset the session through onSessionEnded.
+    if (cause instanceof ApiError && cause.status === 401 && phase !== 'login' && !api.authenticated) return
+    setError(errorMessage(cause))
   }
-  const visibleQueue = queue.filter(item => (filter === 'all' || item.status === filter) && (item.note.includes(search) || item.id.includes(search)))
-  const student = identity?.authorized_students.find(item => item.student_id === workspace?.correction.scope.student_id)
-  const asset = workspace?.assets[assetIndex]
-  const imageUrl = asset && sample ? '/sample-homework.svg' : asset && new Date(asset.expires_at).getTime() > Date.now() && /^https:\/\//.test(asset.read_url) ? asset.read_url : null
-  const regions = workspace?.question.record.regions.filter(region => region.asset_id === asset?.asset_id) ?? []
+
+  const enrichNames = useCallback(async (helps: HelpRequest[], known: Set<string>, people: IdentityContext, generation: number) => {
+    const missing = [...new Set(helps.map(item => item.case_id))].filter(id => !known.has(id))
+    for (let i = 0; i < missing.length; i += 4) {
+      const found = await Promise.all(missing.slice(i, i + 4).map(id => api.case(id).then(c => [id, people.authorized_students.find(s => s.student_id === c.scope.student_id)?.display_name] as const).catch(() => [id, undefined] as const)))
+      if (generation !== epoch.current) return
+      setNames(old => { const next = new Map(old); for (const [id, name] of found) if (name) next.set(id, name); return next })
+    }
+  }, [api])
+
+  const loadQueues = useCallback(async (people: IdentityContext | null, more?: QueueTab) => {
+    if (!people) return
+    const generation = epoch.current
+    setQueueLoading(true)
+    try {
+      const [helpPage, reviewPage] = await Promise.allSettled([
+        more === 'review' ? Promise.resolve(null) : api.helpQueue(more === 'help' ? help.cursor ?? undefined : undefined),
+        more === 'help' ? Promise.resolve(null) : api.reviewQueue(more === 'review' ? review.cursor ?? undefined : undefined),
+      ])
+      if (generation !== epoch.current) return
+      const known = new Set(names.keys())
+      if (reviewPage.status === 'fulfilled' && reviewPage.value) {
+        const page = reviewPage.value
+        setReview(old => applyPage(old, page, reviewId, more === 'review'))
+        for (const item of page.items) known.add(item.case_id)
+        setNames(old => new Map([...old, ...page.items.map(item => [item.case_id, item.student_name] as const)]))
+      }
+      if (helpPage.status === 'fulfilled' && helpPage.value) {
+        const page = helpPage.value
+        setHelp(old => applyPage(old, page, helpId, more === 'help'))
+        void enrichNames(page.items, known, people, generation)
+      }
+      const rejected = [helpPage, reviewPage].find(result => result.status === 'rejected')
+      if (rejected) fail((rejected as PromiseRejectedResult).reason)
+    } finally { if (generation === epoch.current) setQueueLoading(false) }
+  }, [api, help.cursor, review.cursor, names, enrichNames])
+
+  const loadCase = useCallback(async (caseId: string, keepView: boolean) => {
+    if (phase === 'sample') { setWs(sampleWorkspace); if (!keepView) setAttemptId(sampleWorkspace.correction.current_attempt_id); return }
+    wsAbort.current?.abort()
+    const controller = new AbortController(); wsAbort.current = controller
+    const generation = epoch.current
+    if (!keepView) setWs(null)
+    setWsLoading(true)
+    try {
+      const data = await loadWorkspace(api, caseId, controller.signal)
+      if (controller.signal.aborted || generation !== epoch.current || selectionRef.current?.caseId !== caseId) return
+      if (imageHomework.current !== data.homework.id) { dropImages(); imageHomework.current = data.homework.id }
+      setWs(data)
+      setAttemptId(old => keepView && data.attempts.some(a => a.record.id === old) ? old : data.correction.current_attempt_id)
+    } catch (cause) { if (!controller.signal.aborted && generation === epoch.current) fail(cause) }
+    finally { if (!controller.signal.aborted && generation === epoch.current) setWsLoading(false) }
+  }, [api, phase, dropImages])
+
+  function select(next: Selection) {
+    selectionRef.current = next
+    setSelection(next); setNotice(null); setError(null)
+    void loadCase(next.caseId, false)
+  }
+
+  async function refreshAll() {
+    await Promise.all([loadQueues(identity), selectionRef.current ? loadCase(selectionRef.current.caseId, true) : Promise.resolve()])
+  }
+
+  async function enter() {
+    const people = await api.me()
+    if (!people.roles.some(role => STAFF_ROLES.includes(role))) {
+      await api.logout()
+      reset('login', '此账号不是坐班老师或校区管理员账号，不能进入工作台。')
+      return
+    }
+    setIdentity(people); setPhase('ready'); setError(null)
+    await loadQueues(people)
+  }
+
+  async function login(name: string, password: string) {
+    setBusy(true); setError(null); setNotice(null)
+    try {
+      const session = await api.login(name, password)
+      setUsername(name.trim().toLowerCase()); setExpiresAt(Date.parse(session.expires_at))
+      if (session.must_change_password) setPhase('password')
+      else await enter()
+      return true
+    } catch (cause) { fail(cause); return false }
+    finally { setBusy(false) }
+  }
+
+  async function changePassword(current: string, next: string) {
+    setBusy(true); setError(null)
+    try {
+      const session = await api.changePassword(current, next)
+      setExpiresAt(Date.parse(session.expires_at))
+      await enter()
+      setNotice('新密码已保存。以后请用新密码登录。')
+      return true
+    } catch (cause) { fail(cause); return false }
+    finally { setBusy(false) }
+  }
+
+  async function logout() {
+    setBusy(true)
+    const confirmed = await api.logout()
+    reset('login', null)
+    setNotice(confirmed ? '已退出登录，本页的学生资料已清除。' : null)
+    if (!confirmed) setError('本页已退出，但服务器尚未确认会话撤销；该会话在到期前仍可能有效。')
+  }
+
+  function startSample() {
+    reset('sample')
+    setIdentity(sampleIdentity)
+    setHelp({ items: [sampleHelp], cursor: null, loaded: true })
+    setReview({ items: [sampleReviewItem], cursor: null, loaded: true })
+    setNames(new Map([[sampleCaseId, '合成学生 A']]))
+    const first = { caseId: sampleCaseId, helpId: sampleHelp.id }
+    selectionRef.current = first; setSelection(first); setWs(sampleWorkspace); setAttemptId(sampleWorkspace.correction.current_attempt_id)
+  }
+
+  function trackRepair(accepted: Accepted, homeworkId: string, before: string[]) {
+    pollAbort.current?.abort()
+    const controller = new AbortController(); pollAbort.current = controller
+    const generation = epoch.current
+    setRepair({ job: accepted.job, homeworkId, createdCaseIds: null })
+    pollJob(signal => api.job(accepted.job.id, signal), accepted.job, {
+      signal: controller.signal,
+      onUpdate: job => { if (generation === epoch.current) setRepair(old => old && old.job.id === job.id ? { ...old, job } : old) },
+    }).then(async job => {
+      if (generation !== epoch.current) return
+      if (!isTerminal(job.status)) { setNotice('补题/拆合仍在处理中，请稍后刷新查看结果。'); return }
+      const created = job.status === 'succeeded' ? newCaseIds(before, await api.homework(homeworkId)) : null
+      if (generation !== epoch.current) return
+      setRepair(old => old && old.job.id === job.id ? { ...old, job, createdCaseIds: created } : old)
+      await refreshAll()
+    }).catch(cause => { if (!controller.signal.aborted && generation === epoch.current) fail(cause) })
+  }
+
+  function watchCheck(accepted: Accepted) {
+    checkAbort.current?.abort()
+    const controller = new AbortController(); checkAbort.current = controller
+    const generation = epoch.current
+    pollJob(signal => api.job(accepted.job.id, signal), accepted.job, { signal: controller.signal }).then(async job => {
+      if (generation !== epoch.current) return
+      if (job.status === 'succeeded') setNotice('重新检查已完成，已读取新的 AI 候选判断。')
+      else if (isTerminal(job.status)) setError('重新检查未能完成，可以稍后再试，或直接人工初次核实。')
+      await refreshAll()
+    }).catch(cause => { if (!controller.signal.aborted && generation === epoch.current) fail(cause) })
+  }
+
+  const repairBefore = useRef<{ homeworkId: string; caseIds: string[] } | null>(null)
+
+  async function mutate<T>(operation: () => Promise<T>, success: string, after?: (value: T) => void, retryOriginal = false): Promise<boolean> {
+    if (!ready || busy || (writeUncertain && !retryOriginal)) return false
+    setBusy(true); setError(null); setNotice(null)
+    const generation = epoch.current
+    try {
+      const value = await operation()
+      if (generation !== epoch.current) return false
+      setWriteUncertain(false); setNotice(success)
+      after?.(value)
+      await refreshAll()
+      return true
+    } catch (cause) {
+      if (generation !== epoch.current) return false
+      setWriteUncertain(api.hasPendingWrite())
+      if (isConflict(cause)) {
+        setError(errorMessage(cause))
+        await refreshAll()
+      } else fail(cause)
+      return false
+    } finally { if (generation === epoch.current) setBusy(false) }
+  }
+
+  const retry = () => mutate(() => api.retryPendingWrite(), '服务端已确认原操作。已读取最新记录。', ({ path, value }) => {
+    if (path.endsWith('/layout-revisions') && repairBefore.current) trackRepair(value as Accepted, repairBefore.current.homeworkId, repairBefore.current.caseIds)
+  }, true)
+
+  const loadImage = useCallback(async (asset: ImageAsset, signal: AbortSignal) => {
+    if (phase === 'sample') return `${import.meta.env.BASE_URL}${sampleImage}`
+    const cached = images.current.get(asset.id)
+    if (cached) return cached
+    const access = await api.assetAccess(asset.id, signal)
+    const blob = await api.image(access.read_url, signal)
+    const url = URL.createObjectURL(blob)
+    if (signal.aborted) { URL.revokeObjectURL(url); throw signal.reason }
+    images.current.set(asset.id, url)
+    return url
+  }, [api, phase])
+
+  const homework = ws?.homework
+  const loadQuestions = useCallback((): Promise<QuestionRead[]> => {
+    if (phase === 'sample') return Promise.resolve(sampleQuestions)
+    return homework ? loadHomeworkQuestions(api, homework) : Promise.resolve([])
+  }, [api, phase, homework])
+
+  const focus = ws ? focusHelp(ws, selection?.helpId ?? null) : null
+  const block = ws ? editBlock(ws, focus, identity?.actor_id, sample) : null
+  const studentName = ws ? identity?.authorized_students.find(s => s.student_id === ws.correction.scope.student_id)?.display_name ?? names.get(ws.correction.id) ?? '已授权学生' : ''
+  const signedIn = ready || sample
 
   return <div className="app-shell">
     <header className="app-header">
       <a className="brand" href="#main"><span className="brand-mark"><BookOpen size={23} strokeWidth={1.6} /></span><span>学伴<span className="brand-divider">/</span><strong>坐班工作台</strong></span></a>
-      <div className="header-actions"><span className={`connection-state ${mode === 'live' ? 'connected' : ''}`}><i />{sample ? '合成样例' : mode === 'live' ? '身份已授权' : '尚未连接'}</span>
-        {mode === 'offline' ? <><button className="button text-button" onClick={startSample}><Eye size={15} />合成样例预览</button><button className="button primary" onClick={() => setShowConnect(true)}><Link2 size={15} />连接工作台</button></> : <button className="button" onClick={disconnect}><LogOut size={15} />{sample ? '退出预览' : '断开并清除会话'}</button>}
+      <div className="header-actions">
+        <span className={`connection-state ${ready ? 'connected' : ''}`}><i />{sample ? '合成样例' : ready ? `已登录 · ${username}` : phase === 'password' ? '待设置新密码' : '尚未登录'}</span>
+        {ready && <button className="button" disabled={busy} onClick={() => void logout()}><LogOut size={15} />退出登录</button>}
+        {sample && <button className="button" onClick={() => reset('login')}><LogOut size={15} />退出预览</button>}
+        {phase === 'login' && <button className="button text-button" onClick={startSample}><Eye size={15} />合成样例预览</button>}
       </div>
     </header>
-    {sample && <div className="sample-banner"><Sparkles size={16} /><strong>合成样例预览</strong><span>无真实学生数据 · 不调用后台 · 所有处理操作均不保存</span><button onClick={disconnect} aria-label="退出合成预览"><X size={16} /></button></div>}
-    <div className="workspace-heading"><div><p className="eyebrow">让孩子继续自己的作业</p><h1>每一次卡住，都有人接住。</h1></div><div className="workspace-subtitle"><ShieldCheck size={17} /><span>对照原图，有依据地帮助订正</span></div></div>
+    {sample && <div className="sample-banner"><Sparkles size={16} /><strong>合成样例预览</strong><span>人物、题目与原图均为合成 · 不调用后台 · 所有操作都不会保存</span><button onClick={() => reset('login')} aria-label="退出合成预览"><X size={16} /></button></div>}
+
     {error && <div className="status-message error" role="alert"><CircleHelp size={17} /><span>{error}</span><button onClick={() => setError(null)} aria-label="关闭错误提示"><X size={16} /></button></div>}
-    {notice && <div className="status-message success" role="status"><ShieldCheck size={17} /><span>{notice}</span></div>}
-    {writeUncertain && <div className="status-message error" role="status"><CircleHelp size={17} /><span>上一笔提交结果尚未确认。表单暂时锁定；重试会沿用原内容与幂等键。刷新队列不会解除这一状态，请勿刷新浏览器或重复创建操作。</span><button className="button" disabled={busy} onClick={() => mutate(() => api!.retryPendingWrite(), true)}>重试原操作</button></div>}
+    {notice && <div className="status-message success" role="status"><ShieldCheck size={17} /><span>{notice}</span><button onClick={() => setNotice(null)} aria-label="关闭提示"><X size={16} /></button></div>}
+    {writeUncertain && <div className="status-message error" role="status"><CircleHelp size={17} /><span>上一笔提交结果尚未确认。表单暂时锁定；重试会沿用原内容与幂等键。请勿刷新浏览器（刷新会丢失本页的待确认记录）。</span><button className="button" disabled={busy} onClick={() => void retry()}>重试原操作</button></div>}
 
-    <main id="main" className="workbench">
-      <aside className="queue-panel" aria-label="待办与求助队列">
-        <div className="queue-heading"><div><h2>待办与求助</h2><p>{sample ? '1 条合成记录' : mode === 'live' ? '当前已加载的授权队列' : '连接后读取授权范围'}</p></div><button className="icon-button" aria-label="刷新队列" disabled={mode !== 'live' || loading || busy} onClick={() => refresh()}><RefreshCw size={17} className={loading ? 'spin' : ''} /></button></div>
-        <label className="search-box"><Search size={16} /><input aria-label="搜索求助内容或编号" placeholder="搜索求助内容" value={search} onChange={event => setSearch(event.target.value)} /></label>
-        <div className="queue-tabs" aria-label="筛选求助状态">{([['all', '全部'], ['waiting', '待接手'], ['claimed', '处理中']] as const).map(([value, label]) => <button key={value} aria-pressed={filter === value} className={filter === value ? 'active' : ''} onClick={() => setFilter(value)}>{label}</button>)}</div>
-        <div className="queue-list">{visibleQueue.map(help => <button key={help.id} className={`queue-item ${selected === help.id ? 'selected' : ''}`} onClick={() => { setSelected(help.id); setNotice(null); setAssetIndex(0); setImageFailed(false) }} disabled={busy}>
-          <div className="queue-item-top"><span className="queue-avatar"><MessageCircle size={18} /></span><span className="tag">{kindLabels[help.kind]}</span><span className="queue-status">{statusLabels[help.status]}</span></div>
-          <h3>{sample ? '合成学生 A · 数学作业' : '作业中的求助'}</h3><p>{help.note}</p><footer><span>{sample ? '样例时间 16:32' : new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(help.created_at))}</span><ArrowRight size={15} /></footer>
-        </button>)}
-          {visibleQueue.length === 0 && <div className="queue-empty"><Inbox size={30} strokeWidth={1.2} /><p>{mode === 'offline' ? '队列尚未连接' : loading ? '正在读取队列…' : error ? '暂时无法读取队列' : '当前筛选下没有记录'}</p><span>{mode === 'offline' ? '授权后，孩子的求助会显示在这里。' : '未加载的记录不会计作已处理。'}</span></div>}
-          {nextCursor && <button className="button full" disabled={loading || busy} onClick={() => refresh(true)}>加载更多</button>}
-        </div>
-        <div className="queue-footer"><CircleHelp size={16} /><p>先帮助当前卡住的孩子。<br />不额外安排课程或练习。</p></div>
-      </aside>
-
-      <section className={`document-panel ${zoom ? 'expanded-document' : ''}`} aria-label="作业原图与题区">
-        {workspace ? <>
-          <div className="document-heading"><div><div className="breadcrumb">{sample ? '合成作业' : student?.display_name ?? '已授权作业'}<span>/</span>当前求助</div><h2>{workspace.question.record.stem_text ?? '题目文字待核实'}</h2></div><button className="button" disabled={sample || busy || workspace.help.status !== 'waiting'} onClick={() => mutate(() => api!.claim(workspace.help))}><ShieldCheck size={15} />{workspace.help.status === 'claimed' ? '已接手' : '接手处理'}</button></div>
-          <div className="help-quote"><MessageCircle size={17} /><div><small>孩子说</small><p>“{workspace.help.note}”</p></div></div>
-          <div className="image-toolbar"><div><span className="view-label"><FileImage size={15} />原始照片</span><span className="page-indicator">{assetIndex + 1} / {workspace.assets.length}</span></div><div><button className={`icon-button ${showRegion ? 'is-on' : ''}`} title="显示或隐藏题区" aria-label="显示或隐藏题区" aria-pressed={showRegion} onClick={() => setShowRegion(!showRegion)}><Focus size={17} /></button><button className="icon-button" title="展开原图" aria-label={zoom ? '收起原图' : '展开原图'} onClick={() => setZoom(!zoom)}>{zoom ? <X size={17} /> : <Maximize2 size={16} />}</button></div></div>
-          <div className="paper-stage"><div className="paper-wrap">
-            {imageUrl && !imageFailed ? <><img src={imageUrl} alt={sample ? '合成数学作业样张，非真实学生数据' : '当前作业原图'} referrerPolicy="no-referrer" onLoad={event => setImageSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} onError={() => setImageFailed(true)} />
-              {showRegion && imageSize.width > 0 && <svg className="region-overlay" viewBox={`0 0 ${imageSize.width} ${imageSize.height}`} aria-label="当前题目范围">{regions.map((region, i) => <rect key={i} x={region.x} y={region.y} width={region.width} height={region.height} />)}</svg>}
-            </> : <div className="photo-error"><FileImage size={34} /><p>原图暂时不可读取</p><small>读取地址可能过期或尚未接通。请刷新当前队列后重新进入；不会用其他图片替代。</small></div>}
-          </div></div>
-          <div className="document-footer"><span><span className="region-legend" />当前题区 · 原图像素定位</span>{workspace.assets.length > 1 && <div className="button-row"><button className="icon-button" disabled={assetIndex === 0} aria-label="上一张原图" onClick={() => { setAssetIndex(assetIndex - 1); setImageFailed(false); setImageSize({ width: 0, height: 0 }) }}><ArrowLeft size={16} /></button><button className="icon-button" disabled={assetIndex === workspace.assets.length - 1} aria-label="下一张原图" onClick={() => { setAssetIndex(assetIndex + 1); setImageFailed(false); setImageSize({ width: 0, height: 0 }) }}><ArrowRight size={16} /></button></div>}</div>
-        </> : <div className="desk-empty"><div className="empty-illustration"><span className="paper-line"/><span className="paper-line"/><span className="paper-line short"/><span className="empty-stamp"><LockKeyhole size={24} /></span></div><p className="eyebrow">原图、作答与订正，在同一张桌面</p><h2>{loading ? '正在读取这次求助' : mode === 'offline' ? '先连接，再开始陪伴。' : '从左侧选择一条求助'}</h2><p>{loading ? '正在核对原图访问权限和有效版本。' : '这里会展示孩子的作业原图。先看清发生了什么，再给恰到好处的帮助。'}</p>{mode === 'offline' && <div className="button-row"><button className="button primary" onClick={() => setShowConnect(true)}>连接工作台<ArrowRight size={16} /></button><button className="button" onClick={startSample}>看看合成样例</button></div>}{loading && <LoaderCircle className="spin" size={24} />}<div className="empty-steps"><span>01 对照原图</span><span>02 帮助订正</span><span>03 留下依据</span></div></div>}
-      </section>
-      {workspace ? <ReviewPanel key={`${workspace.help.id}-${workspace.correction.revision}-${workspace.help.revision}`} workspace={workspace} identity={identity} sample={sample} busy={busy || writeUncertain} onReview={(payload: SubmitReview) => mutate(() => api!.review(workspace.correction.id, payload))} onComplete={(outcome, note) => mutate(() => api!.complete(workspace.help, outcome, note))} /> : <aside className="review-panel review-empty"><span className="round-icon"><ShieldCheck size={23} /></span><h2>每个结论，都有来处。</h2><p>选择求助后，在这里查看候选判断、孩子已经看过的提示和每次订正。</p><div className="principle"><span>01</span><p>AI 初判与老师确认<br />清楚区分</p></div><div className="principle"><span>02</span><p>帮助结束与题目答对<br />分别记录</p></div><div className="principle"><span>03</span><p>保留原图和修改过程<br />不覆盖历史</p></div><small>当前求助、复核后端仍待接通。</small></aside>}
-    </main>
-    <footer className="app-footer"><span>学伴 · 坐班支持</span><span>{sample ? '预览中的题目与人物均为合成' : '访问凭据仅保留在本次页面会话中'}</span></footer>
-
-    {showConnect && <div className="modal-backdrop" onClick={() => { if (!connecting) setShowConnect(false) }}><section className="connection-dialog" role="dialog" aria-modal="true" aria-labelledby="connect-title" onClick={event => event.stopPropagation()}><button className="icon-button modal-close" aria-label="关闭连接窗口" disabled={connecting} onClick={() => setShowConnect(false)}><X size={20} /></button><span className="round-icon"><LockKeyhole size={24} /></span><h2 id="connect-title">连接坐班工作台</h2><p>使用后端签发的真实授权。不会创建演示账号，也不会保存访问令牌。</p><form onSubmit={connect}><label>服务地址<input type="url" required placeholder="https://api.example.com" value={baseUrl} onChange={event => setBaseUrl(event.target.value)} autoComplete="url" disabled={connecting} /></label><label>本次访问令牌<input type="password" required placeholder="Bearer 访问令牌，不含 Bearer 前缀" value={token} onChange={event => setToken(event.target.value)} autoComplete="off" disabled={connecting} /></label><div className="preview-note">当前版本首先核验身份；求助与复核接口未接通时会显示实际错误。</div><button className="button primary full" disabled={connecting}>{connecting ? <LoaderCircle size={16} className="spin" /> : <Link2 size={16} />}{connecting ? '正在核验授权…' : '核验并连接'}</button></form><button className="button text-button full" disabled={connecting} onClick={startSample}><Eye size={16} />只看合成样例，不连接服务</button></section></div>}
+    {!signedIn ? <main id="main" className="auth-stage">
+      <div className="auth-intro"><p className="eyebrow">让孩子继续自己的作业</p><h1>每一次卡住，<br />都有人接住。</h1><p>对照原图核实 AI 判断、接手孩子的求助、修订识别与切题。所有结论都记录依据，并与 AI 候选分开保存。</p></div>
+      {phase === 'password' ? <PasswordScreen busy={busy} username={username} onChange={changePassword} onLogout={() => void logout()} /> : <LoginScreen busy={busy} onLogin={login} onSample={startSample} />}
+    </main> : <main id="main" className="workbench">
+      <QueuePanel tab={tab} onTab={setTab} help={help} review={review} names={names} selection={selection} onSelect={select} loading={queueLoading} busy={busy} sample={sample}
+        onRefresh={() => { setError(null); void refreshAll() }} onMore={more => void loadQueues(identity, more)} />
+      {ws ? <>
+        <CaseDesk key={ws.correction.id} ws={ws} studentName={studentName} focus={focus} block={block} busy={busy || writeUncertain} sample={sample} attemptId={attemptId || ws.correction.current_attempt_id}
+          loadImage={loadImage} loadQuestions={loadQuestions} repair={repair} onOpenCase={caseId => select({ caseId, helpId: null })}
+          onReviseQuestion={(id: string, payload: ReviseQuestion) => mutate(() => api.reviseQuestion(id, payload), '题目已修订。旧判断已失效，请重新检查或人工核实。')}
+          onReviseAnswer={(id: string, payload: ReviseAnswer) => mutate(() => api.reviseAnswer(id, payload), '答案识别已修订。旧判断已失效，请重新检查或人工核实。')}
+          onRepair={(payload: RepairLayout, before: string[]) => { repairBefore.current = { homeworkId: ws.homework.id, caseIds: before }; return mutate(() => api.repairLayout(ws.homework.id, payload), '补题/拆合已受理，正在生成新题。', accepted => trackRepair(accepted, ws.homework.id, before)) }} />
+        <ReviewPanel key={`${ws.correction.id}-review`} ws={ws} focus={focus} actorId={identity?.actor_id} block={block} sample={sample} busy={busy || writeUncertain}
+          attemptId={attemptId || ws.correction.current_attempt_id} onAttempt={setAttemptId}
+          onClaim={target => mutate(() => api.claim(target), '已接手这条求助。')}
+          onComplete={(target, outcome, note) => mutate(() => api.complete(target, outcome, note), outcome === 'resolved' ? '已记录：帮助已结束。题目对错仍以复核记录为准。' : '已记录：仍需帮助。')}
+          onReview={(payload: SubmitReview) => mutate(() => api.submitReview(ws.correction.id, payload), '复核记录已保存。')}
+          onStartCheck={() => { const attempt = currentAttempt(ws)!; return mutate(() => api.startCheck(ws.correction.id, { expected_revision: ws.correction.revision, attempt_id: attempt.record.id, question_revision: ws.question.current_revision, attempt_recognition_revision: attempt.record.recognition_revision }), '已请求重新检查，完成后会自动刷新这道题。', watchCheck) }} />
+      </> : <>
+        <section className="document-panel"><div className="desk-empty"><div className="empty-illustration"><span className="paper-line" /><span className="paper-line" /><span className="paper-line short" /><span className="empty-stamp"><LockKeyhole size={24} /></span></div>
+          <p className="eyebrow">原图、作答与订正，在同一张桌面</p><h2>{wsLoading ? '正在读取这道题' : '从左侧选择一条记录'}</h2>
+          <p>{wsLoading ? '正在核对原图访问权限和有效版本。' : '求助来自孩子；待核实来自 AI 候选与识别。先看清原图，再给恰到好处的帮助。'}</p>{wsLoading && <LoaderCircle className="spin" size={24} />}
+          <div className="empty-steps"><span>01 对照原图</span><span>02 帮助订正</span><span>03 留下依据</span></div></div></section>
+        <aside className="review-panel review-empty"><span className="round-icon"><ShieldCheck size={23} /></span><h2>每个结论，都有来处。</h2><p>选择记录后，在这里查看候选判断、孩子看过的提示和每一次订正。</p>
+          <div className="principle"><span>01</span><p>AI 初判与老师确认<br />清楚区分</p></div><div className="principle"><span>02</span><p>帮助结束与题目答对<br />分别记录</p></div><div className="principle"><span>03</span><p>保留原图和修改过程<br />不覆盖历史</p></div></aside>
+      </>}
+    </main>}
+    <footer className="app-footer"><span>学伴 · 坐班支持</span><span>{sample ? '预览中的题目与人物均为合成' : '登录凭据只保留在本页内存中，不写入浏览器存储'}</span></footer>
   </div>
 }
