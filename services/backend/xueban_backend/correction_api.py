@@ -381,7 +381,9 @@ def install_correction(app, engine, cfg, database_session, current_actor):
         active_case(case)
         if case.document["progress"] == "verified_resolved":
             conflict(case.revision)
-        return update_case(session, contracts, case, progress="paused" if payload["action"] == "pause" else "pending")
+        decision = case.document["current_decision"]
+        resumed = "needs_correction" if decision and decision["verdict"] != "correct" else "pending"
+        return update_case(session, contracts, case, progress="paused" if payload["action"] == "pause" else resumed)
 
     def create_help(session, actor, homework, case, payload):
         active_case(case)

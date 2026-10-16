@@ -1,7 +1,7 @@
 """Rule R1.1 on hand-built evidence: status, sufficiency and delayed verification."""
 from datetime import datetime, timedelta, timezone
 
-from xueban_backend.learning_rules import chapter_rollup, compute_state
+from xueban_backend.learning_rules import assistance, chapter_rollup, compute_state
 
 NOW = datetime(2026, 10, 30, 12, tzinfo=timezone.utc)
 
@@ -73,3 +73,13 @@ def test_chapter_rollup_counts_not_averages():
     assert rollup == [{"chapter_id": "ch", "name": "第1章", "objectives": 2,
                        "status_counts": {"consolidating": 1, "no_judgment": 1}}]
     assert chapter_rollup(nodes, {}) == []
+
+
+def test_help_counts_only_for_work_done_after_it_was_seen():
+    first = {"id": "a1", "occurred_at": "2026-10-10T01:00:00Z", "help_condition": "hint_used"}
+    fix = {"id": "a2", "occurred_at": "2026-10-10T01:10:00Z", "help_condition": "hint_used"}
+    hints = [{"attempt_id": "a1", "level": "direction", "first_shown_at": "2026-10-10T01:05:00Z", "exposes_answer": False}]
+    assert assistance(first, hints, None) == "unknown"
+    assert assistance(fix, hints, None) == "direction"
+    assert assistance({**first, "help_condition": "none_reported"}, [], None) == "no_recorded_help"
+    assert assistance(first, hints, "independent") == "independent"

@@ -22,7 +22,7 @@ import hashlib
 import json
 from zoneinfo import ZoneInfo
 
-RULE_VERSION = "r1.1-custody"
+RULE_VERSION = "r1.2-custody"
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 STABLE_MIN_SPAN = timedelta(hours=24)
 DELAYED_AFTER = timedelta(days=7)
@@ -54,17 +54,27 @@ def authoritative_decision(attempt_id: str, decisions: list[dict], stale_reasons
     return None
 
 
+def hints_seen_before(attempt: dict, hints: list[dict]) -> list[dict]:
+    """Hints for the same case the learner saw no later than this attempt; later help belongs to later work."""
+    occurred = parse(attempt["occurred_at"])
+    return [h for h in hints if h.get("first_shown_at") and parse(h["first_shown_at"]) <= occurred]
+
+
 def assistance(attempt: dict, hints: list[dict], condition: str | None) -> str:
     if condition:
         return condition
-    shown = [h for h in hints if h["attempt_id"] == attempt["id"] and h.get("first_shown_at")]
+    shown = hints_seen_before(attempt, hints)
     if any(h.get("exposes_answer") for h in shown):
         return "solution_seen"
     if any(h["level"] == "key_step" for h in shown):
         return "key_step"
     if shown:
         return "direction"
-    return HELP_TO_ASSISTANCE.get(attempt.get("help_condition", "unknown"), "unknown")
+    help_condition = attempt.get("help_condition", "unknown")
+    if help_condition in ("hint_used", "answer_shown"):
+        # Set when a hint was viewed after this attempt; what the learner reported at the time is unknown.
+        return "unknown"
+    return HELP_TO_ASSISTANCE.get(help_condition, "unknown")
 
 
 def derive_evidence(*, cases, attempts, decisions, hints, questions, links, conditions, stale_reasons):

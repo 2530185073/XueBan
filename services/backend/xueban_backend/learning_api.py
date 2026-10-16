@@ -18,7 +18,7 @@ from .errors import Problem
 from .learning_models import (AttemptCondition, KnowledgeDiagnosis, KnowledgeEdge, KnowledgeNode, LearningEvidence,
                               LearningProjection, QuestionKnowledgeLink, StudentKnowledgeState, StudentLearningProfile)
 from .learning_projection import fingerprints, new_id, published_graph
-from .learning_rules import RULE_VERSION, chapter_rollup
+from .learning_rules import RULE_VERSION, chapter_rollup, hints_seen_before
 from .models import Homework, Student
 
 KID = r"^[a-z][a-z0-9_-]{2,63}$"
@@ -251,8 +251,11 @@ def install_learning(app, engine, cfg, database_session, current_actor):
                                  .order_by(AttemptCondition.created_at.desc(), AttemptCondition.id.desc()))
         if (current.id if current else None) != payload.expected_condition_id:
             raise Problem(409, "conflict", "revision_conflict", "作答帮助条件已被他人修改，请刷新后核实。")
-        if payload.assistance_level == "independent" and attempt.document["help_condition"] in ("hint_used", "answer_shown"):
-            raise Problem(409, "conflict", "help_recorded", "系统已记录本次作答看过提示或答案，不能标为独立完成。")
+        hints = [e.document for e in session.scalars(select(Entity).where(Entity.homework_id == attempt.homework_id, Entity.kind == "hint"))
+                 if e.document["case_id"] == attempt.document["case_id"]]
+        if payload.assistance_level == "independent" and (hints_seen_before(attempt.document, hints)
+                                                          or attempt.document["parent_attempt_id"] is not None):
+            raise Problem(409, "conflict", "help_recorded", "这次作答前已看过提示，或属于订正，不能标为独立完成。")
         row = AttemptCondition(id=new_id("cond"), tenant_id=student.tenant_id, student_id=student.id, attempt_id=attempt_id,
                                assistance_level=payload.assistance_level, note=payload.note, actor_id=actor.id,
                                created_at=datetime.now(timezone.utc))
