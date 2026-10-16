@@ -1,8 +1,8 @@
 {
   "schema_version": "backlog.v1",
   "source_document": "08-研发计划与验收矩阵.md",
-  "scope": "production_v1",
-  "status_note": "所有生产用户故事待开发；参考内核的演示测试不构成任何 US 完成。P0/P1 表示研发优先顺序，不表示可省略 P1。",
+  "scope": "full_product_blueprint",
+  "status_note": "原 40 条全产品故事全部待开发；P0/P1 表示所属完整产品范围优先级，不等于一期范围。一期按 phase1-backlog.json 的 16 项任务独立交付。",
   "cycle_policy": {
     "timezone": "Asia/Shanghai",
     "periods": [
@@ -21,7 +21,12 @@
       "status": "not_started",
       "dependency_ids": [],
       "work_package": "P01",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "phase1_baseline_and_later_extension",
+      "phase1_task_ids": [
+        "P1-02",
+        "P1-14"
+      ]
     },
     {
       "id": "US-02",
@@ -34,7 +39,12 @@
         "US-01"
       ],
       "work_package": "P01",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "phase1_baseline_and_later_extension",
+      "phase1_task_ids": [
+        "P1-02",
+        "P1-14"
+      ]
     },
     {
       "id": "US-03",
@@ -49,7 +59,13 @@
       ],
       "work_package": "P03",
       "priority": "P0",
-      "delivery_milestone": "C0"
+      "delivery_milestone": "C0",
+      "delivery_stage": "phase1_baseline_and_later_extension",
+      "phase1_task_ids": [
+        "P1-03",
+        "P1-04",
+        "P1-12"
+      ]
     },
     {
       "id": "US-04",
@@ -63,7 +79,11 @@
       ],
       "work_package": "P03",
       "priority": "P0",
-      "delivery_milestone": "C0"
+      "delivery_milestone": "C0",
+      "delivery_stage": "phase1_baseline_and_later_extension",
+      "phase1_task_ids": [
+        "P1-05"
+      ]
     },
     {
       "id": "US-05",
@@ -77,7 +97,12 @@
       ],
       "work_package": "P03",
       "priority": "P0",
-      "delivery_milestone": "C0"
+      "delivery_milestone": "C0",
+      "delivery_stage": "phase1_baseline_and_later_extension",
+      "phase1_task_ids": [
+        "P1-06",
+        "P1-15"
+      ]
     },
     {
       "id": "US-06",
@@ -92,7 +117,11 @@
       ],
       "work_package": "P03",
       "priority": "P0",
-      "delivery_milestone": "C0"
+      "delivery_milestone": "C0",
+      "delivery_stage": "phase1_baseline_and_later_extension",
+      "phase1_task_ids": [
+        "P1-09"
+      ]
     },
     {
       "id": "US-07",
@@ -106,7 +135,11 @@
       ],
       "work_package": "P03",
       "priority": "P0",
-      "delivery_milestone": "C0"
+      "delivery_milestone": "C0",
+      "delivery_stage": "phase1_baseline_and_later_extension",
+      "phase1_task_ids": [
+        "P1-10"
+      ]
     },
     {
       "id": "US-08",
@@ -121,7 +154,12 @@
       ],
       "work_package": "P03",
       "priority": "P0",
-      "delivery_milestone": "C0"
+      "delivery_milestone": "C0",
+      "delivery_stage": "phase1_baseline_and_later_extension",
+      "phase1_task_ids": [
+        "P1-08",
+        "P1-12"
+      ]
     },
     {
       "id": "US-09",
@@ -134,7 +172,9 @@
         "US-06"
       ],
       "work_package": "P04",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-10",
@@ -148,7 +188,9 @@
         "US-11"
       ],
       "work_package": "P04",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-11",
@@ -162,7 +204,9 @@
         "US-09"
       ],
       "work_package": "P04",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-12",
@@ -176,7 +220,9 @@
         "US-11"
       ],
       "work_package": "P04",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-13",
@@ -191,7 +237,9 @@
         "US-11"
       ],
       "work_package": "P05",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-14",
@@ -206,7 +254,9 @@
         "US-17"
       ],
       "work_package": "P05",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-15",
@@ -220,7 +270,9 @@
         "US-13"
       ],
       "work_package": "P05",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-16",
@@ -235,7 +287,11 @@
       ],
       "work_package": "P03",
       "priority": "P0",
-      "delivery_milestone": "C0"
+      "delivery_milestone": "C0",
+      "delivery_stage": "phase1_baseline_and_later_extension",
+      "phase1_task_ids": [
+        "P1-07"
+      ]
     },
     {
       "id": "US-17",
@@ -248,7 +304,9 @@
         "US-13"
       ],
       "work_package": "P05",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-18",
@@ -263,7 +321,11 @@
       ],
       "work_package": "P03",
       "priority": "P0",
-      "delivery_milestone": "C0"
+      "delivery_milestone": "C0",
+      "delivery_stage": "phase1_baseline_and_later_extension",
+      "phase1_task_ids": [
+        "P1-09"
+      ]
     },
     {
       "id": "US-19",
@@ -278,7 +340,9 @@
         "US-17"
       ],
       "work_package": "P06",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-20",
@@ -292,7 +356,9 @@
         "US-19"
       ],
       "work_package": "P06",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-21",
@@ -305,7 +371,9 @@
         "US-02"
       ],
       "work_package": "P02",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-22",
@@ -321,7 +389,9 @@
         "US-21"
       ],
       "work_package": "P06",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-23",
@@ -335,7 +405,9 @@
         "US-22"
       ],
       "work_package": "P06",
-      "priority": "P1"
+      "priority": "P1",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-24",
@@ -350,7 +422,11 @@
         "US-12"
       ],
       "work_package": "P06",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "phase1_baseline_and_later_extension",
+      "phase1_task_ids": [
+        "P1-11"
+      ]
     },
     {
       "id": "US-25",
@@ -365,7 +441,9 @@
         "US-21"
       ],
       "work_package": "P08",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-26",
@@ -379,7 +457,9 @@
         "US-25"
       ],
       "work_package": "P08",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-27",
@@ -393,7 +473,9 @@
         "US-26"
       ],
       "work_package": "P08",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-28",
@@ -407,7 +489,9 @@
         "US-02"
       ],
       "work_package": "P07",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-29",
@@ -421,7 +505,9 @@
         "US-28"
       ],
       "work_package": "P07",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-30",
@@ -435,7 +521,9 @@
         "US-29"
       ],
       "work_package": "P07",
-      "priority": "P1"
+      "priority": "P1",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-31",
@@ -449,7 +537,9 @@
         "US-11"
       ],
       "work_package": "P07",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-32",
@@ -463,7 +553,9 @@
         "US-31"
       ],
       "work_package": "P07",
-      "priority": "P1"
+      "priority": "P1",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-33",
@@ -478,7 +570,9 @@
         "US-29"
       ],
       "work_package": "P08",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-34",
@@ -491,7 +585,9 @@
         "US-33"
       ],
       "work_package": "P08",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-35",
@@ -504,7 +600,9 @@
         "US-34"
       ],
       "work_package": "P08",
-      "priority": "P1"
+      "priority": "P1",
+      "delivery_stage": "later_phase",
+      "phase1_task_ids": []
     },
     {
       "id": "US-36",
@@ -519,7 +617,13 @@
         "US-17"
       ],
       "work_package": "P09",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "phase1_baseline_and_later_extension",
+      "phase1_task_ids": [
+        "P1-04",
+        "P1-13",
+        "P1-16"
+      ]
     },
     {
       "id": "US-37",
@@ -535,7 +639,11 @@
         "US-34"
       ],
       "work_package": "P09",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "phase1_baseline_and_later_extension",
+      "phase1_task_ids": [
+        "P1-14"
+      ]
     },
     {
       "id": "US-38",
@@ -551,7 +659,12 @@
         "US-17"
       ],
       "work_package": "P09",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "phase1_baseline_and_later_extension",
+      "phase1_task_ids": [
+        "P1-15",
+        "P1-16"
+      ]
     },
     {
       "id": "US-39",
@@ -566,7 +679,14 @@
         "US-11"
       ],
       "work_package": "P09",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_stage": "phase1_baseline_and_later_extension",
+      "phase1_task_ids": [
+        "P1-04",
+        "P1-12",
+        "P1-13",
+        "P1-16"
+      ]
     },
     {
       "id": "US-40",
@@ -581,10 +701,14 @@
         "US-35"
       ],
       "work_package": "P09",
-      "priority": "P1"
+      "priority": "P1",
+      "delivery_stage": "phase1_baseline_and_later_extension",
+      "phase1_task_ids": [
+        "P1-16"
+      ]
     }
   ],
-  "product_version": "3.2",
+  "product_version": "3.3",
   "dependency_semantics": "dependency_ids 仅表示研发集成先后，不是学生必做任务顺序。US-27/33 可依赖小测相关能力的研发，但半月汇总和报告不以参加或完成小测为运行前提。",
   "service_policy": {
     "setting": "托管班，辅助自主完成学校课程与作业，不增负",
@@ -632,6 +756,7 @@
       "US-16",
       "US-18"
     ],
-    "note": "首批题型与最小证据底座同时准备；C0不依赖完整长期记忆或图谱展示；图谱与报告不替代纠错验收。"
-  }
+    "note": "C0 是一期纠错功能关口；完整 App 还须通过 PHASE1.md 的 R1/R2。独立一期任务见 phase1-backlog.json，不继承后续图谱/智能体/报告依赖。"
+  },
+  "phase1_backlog": "phase1-backlog.json"
 }
