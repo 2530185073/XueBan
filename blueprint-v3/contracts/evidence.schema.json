@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:xueban:evidence:v1",
+  "title": "学伴生产目标证据事件",
+  "description": "结构校验不替代复合外键、时间顺序、身份与学科权限验证。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "evidence_id", "tenant_id", "campus_id", "student_id", "event_type", "occurred_at", "recorded_at", "effective_from", "evidence_revision", "actor_role", "validity", "supersedes_id", "payload"],
+  "properties": {
+    "schema_version": {"const": "evidence.v1"},
+    "evidence_id": {"type": "string", "minLength": 1},
+    "tenant_id": {"type": "string", "minLength": 1},
+    "campus_id": {"type": "string", "minLength": 1},
+    "student_id": {"type": "string", "minLength": 1},
+    "event_type": {"enum": ["attempt.verified", "behavior.observed"]},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "recorded_at": {"type": "string", "format": "date-time"},
+    "effective_from": {"type": "string", "format": "date-time"},
+    "evidence_revision": {"type": "integer", "minimum": 1},
+    "actor_role": {"enum": ["teacher", "coach"]},
+    "validity": {"enum": ["active", "superseded", "retracted"]},
+    "supersedes_id": {"type": ["string", "null"]},
+    "payload": {"type": "object"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"event_type": {"const": "attempt.verified"}}},
+      "then": {
+        "properties": {
+          "actor_role": {"const": "teacher"},
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["attempt_id", "review_decision_id", "knowledge_id", "item_id", "item_family_id", "result", "assistance_level", "independent_condition_verified", "stage", "graph_version", "rubric_version"],
+            "properties": {
+              "attempt_id": {"type": "string", "minLength": 1},
+              "review_decision_id": {"type": "string", "minLength": 1},
+              "knowledge_id": {"type": "string", "minLength": 1},
+              "item_id": {"type": "string", "minLength": 1},
+              "item_family_id": {"type": "string", "minLength": 1},
+              "result": {"enum": ["correct", "incorrect", "partial", "unscorable"]},
+              "assistance_level": {"enum": ["none", "direction_hint", "step_hint", "answer_seen", "unknown"]},
+              "independent_condition_verified": {"type": "boolean"},
+              "stage": {"enum": ["homework", "correction", "practice", "assessment", "preview", "delayed_check"]},
+              "graph_version": {"type": "string", "minLength": 1},
+              "rubric_version": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["behavior_code", "observation_type", "opportunities", "observed_successes", "prompt_level", "context", "intervention_id"],
+            "properties": {
+              "behavior_code": {"type": "string", "minLength": 1},
+              "observation_type": {"enum": ["observed_fact", "student_self_report", "hypothesis"]},
+              "opportunities": {"type": "integer", "minimum": 0},
+              "observed_successes": {"type": "integer", "minimum": 0},
+              "prompt_level": {"enum": ["none", "reminder", "modelled", "unknown"]},
+              "context": {"type": "string", "maxLength": 1000},
+              "intervention_id": {"type": ["string", "null"]}
+            }
+          }
+        }
+      }
+    }
+  ]
+}

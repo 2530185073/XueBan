@@ -1,0 +1,1181 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "学伴个人学习智能体参考内核",
+    "description": "仅用于本机合成数据演示。无真实模型、OCR、持久化或生产认证。OpenAPI 是已实现参考子集，完整产品接口见研发规格。",
+    "version": "0.1.0-demo"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Health",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students": {
+      "get": {
+        "tags": [
+          "students"
+        ],
+        "summary": "Students",
+        "operationId": "students_v1_students_get",
+        "parameters": [
+          {
+            "name": "x-demo-actor",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "演示身份选择器，不是生产认证；仅允许固定合成身份",
+              "title": "X-Demo-Actor"
+            },
+            "description": "演示身份选择器，不是生产认证；仅允许固定合成身份"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_id}/knowledge-graph": {
+      "get": {
+        "tags": [
+          "graph"
+        ],
+        "summary": "Graph",
+        "operationId": "graph_v1_students__student_id__knowledge_graph_get",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "x-demo-actor",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "演示身份选择器，不是生产认证；仅允许固定合成身份",
+              "title": "X-Demo-Actor"
+            },
+            "description": "演示身份选择器，不是生产认证；仅允许固定合成身份"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_id}/agent-context": {
+      "get": {
+        "tags": [
+          "agent"
+        ],
+        "summary": "Context",
+        "operationId": "context_v1_students__student_id__agent_context_get",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "x-demo-actor",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "演示身份选择器，不是生产认证；仅允许固定合成身份",
+              "title": "X-Demo-Actor"
+            },
+            "description": "演示身份选择器，不是生产认证；仅允许固定合成身份"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_id}/growth-events": {
+      "get": {
+        "tags": [
+          "evidence"
+        ],
+        "summary": "Growth",
+        "operationId": "growth_v1_students__student_id__growth_events_get",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "x-demo-actor",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "演示身份选择器，不是生产认证；仅允许固定合成身份",
+              "title": "X-Demo-Actor"
+            },
+            "description": "演示身份选择器，不是生产认证；仅允许固定合成身份"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_id}/attempts": {
+      "post": {
+        "tags": [
+          "evidence"
+        ],
+        "summary": "Attempt",
+        "operationId": "attempt_v1_students__student_id__attempts_post",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "x-demo-actor",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "演示身份选择器，不是生产认证；仅允许固定合成身份",
+              "title": "X-Demo-Actor"
+            },
+            "description": "演示身份选择器，不是生产认证；仅允许固定合成身份"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttemptIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/attempts/{attempt_id}/reviews": {
+      "post": {
+        "tags": [
+          "review"
+        ],
+        "summary": "Review",
+        "operationId": "review_v1_attempts__attempt_id__reviews_post",
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attempt Id"
+            }
+          },
+          {
+            "name": "x-demo-actor",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "演示身份选择器，不是生产认证；仅允许固定合成身份",
+              "title": "X-Demo-Actor"
+            },
+            "description": "演示身份选择器，不是生产认证；仅允许固定合成身份"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_id}/observations": {
+      "post": {
+        "tags": [
+          "coach"
+        ],
+        "summary": "Observation",
+        "operationId": "observation_v1_students__student_id__observations_post",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "x-demo-actor",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "演示身份选择器，不是生产认证；仅允许固定合成身份",
+              "title": "X-Demo-Actor"
+            },
+            "description": "演示身份选择器，不是生产认证；仅允许固定合成身份"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObservationIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_id}/plans": {
+      "post": {
+        "tags": [
+          "agent"
+        ],
+        "summary": "Plan",
+        "operationId": "plan_v1_students__student_id__plans_post",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "x-demo-actor",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "演示身份选择器，不是生产认证；仅允许固定合成身份",
+              "title": "X-Demo-Actor"
+            },
+            "description": "演示身份选择器，不是生产认证；仅允许固定合成身份"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_id}/preview": {
+      "get": {
+        "tags": [
+          "learning"
+        ],
+        "summary": "Preview",
+        "operationId": "preview_v1_students__student_id__preview_get",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "x-demo-actor",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "演示身份选择器，不是生产认证；仅允许固定合成身份",
+              "title": "X-Demo-Actor"
+            },
+            "description": "演示身份选择器，不是生产认证；仅允许固定合成身份"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_id}/course-progress": {
+      "post": {
+        "tags": [
+          "learning"
+        ],
+        "summary": "Progress",
+        "operationId": "progress_v1_students__student_id__course_progress_post",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "x-demo-actor",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "演示身份选择器，不是生产认证；仅允许固定合成身份",
+              "title": "X-Demo-Actor"
+            },
+            "description": "演示身份选择器，不是生产认证；仅允许固定合成身份"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProgressIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_id}/interventions": {
+      "post": {
+        "tags": [
+          "intervention"
+        ],
+        "summary": "Intervention",
+        "operationId": "intervention_v1_students__student_id__interventions_post",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "x-demo-actor",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "演示身份选择器，不是生产认证；仅允许固定合成身份",
+              "title": "X-Demo-Actor"
+            },
+            "description": "演示身份选择器，不是生产认证；仅允许固定合成身份"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterventionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_id}/reports": {
+      "post": {
+        "tags": [
+          "reports"
+        ],
+        "summary": "Report",
+        "operationId": "report_v1_students__student_id__reports_post",
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Student Id"
+            }
+          },
+          {
+            "name": "x-demo-actor",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "演示身份选择器，不是生产认证；仅允许固定合成身份",
+              "title": "X-Demo-Actor"
+            },
+            "description": "演示身份选择器，不是生产认证；仅允许固定合成身份"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/reports/{report_id}/publish": {
+      "post": {
+        "tags": [
+          "reports"
+        ],
+        "summary": "Publish",
+        "operationId": "publish_v1_reports__report_id__publish_post",
+        "parameters": [
+          {
+            "name": "report_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Report Id"
+            }
+          },
+          {
+            "name": "x-demo-actor",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "演示身份选择器，不是生产认证；仅允许固定合成身份",
+              "title": "X-Demo-Actor"
+            },
+            "description": "演示身份选择器，不是生产认证；仅允许固定合成身份"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Command"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/reports/{report_id}": {
+      "get": {
+        "tags": [
+          "reports"
+        ],
+        "summary": "Get Report",
+        "operationId": "get_report_v1_reports__report_id__get",
+        "parameters": [
+          {
+            "name": "report_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Report Id"
+            }
+          },
+          {
+            "name": "x-demo-actor",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "演示身份选择器，不是生产认证；仅允许固定合成身份",
+              "title": "X-Demo-Actor"
+            },
+            "description": "演示身份选择器，不是生产认证；仅允许固定合成身份"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AttemptIn": {
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Revision"
+          },
+          "question_id": {
+            "type": "string",
+            "title": "Question Id"
+          },
+          "answer": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Answer"
+          },
+          "occurred_at": {
+            "type": "string",
+            "title": "Occurred At"
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "homework",
+              "correction",
+              "practice",
+              "assessment",
+              "preview"
+            ],
+            "title": "Stage",
+            "default": "practice"
+          },
+          "assistance": {
+            "type": "string",
+            "enum": [
+              "none",
+              "hint",
+              "answer_seen"
+            ],
+            "title": "Assistance",
+            "default": "none"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "idempotency_key",
+          "expected_revision",
+          "question_id",
+          "answer",
+          "occurred_at"
+        ],
+        "title": "AttemptIn"
+      },
+      "Command": {
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Revision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "idempotency_key",
+          "expected_revision"
+        ],
+        "title": "Command"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "InterventionIn": {
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Revision"
+          },
+          "domain": {
+            "type": "string",
+            "enum": [
+              "academic",
+              "habit"
+            ],
+            "title": "Domain"
+          },
+          "target": {
+            "type": "string",
+            "title": "Target"
+          },
+          "action_text": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Action Text"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "idempotency_key",
+          "expected_revision",
+          "domain",
+          "target",
+          "action_text"
+        ],
+        "title": "InterventionIn"
+      },
+      "ObservationIn": {
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Revision"
+          },
+          "behavior": {
+            "type": "string",
+            "enum": [
+              "self_check",
+              "task_start",
+              "help_request",
+              "review_followthrough"
+            ],
+            "title": "Behavior"
+          },
+          "observed": {
+            "type": "boolean",
+            "title": "Observed"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Note"
+          },
+          "occurred_at": {
+            "type": "string",
+            "title": "Occurred At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "idempotency_key",
+          "expected_revision",
+          "behavior",
+          "observed",
+          "note",
+          "occurred_at"
+        ],
+        "title": "ObservationIn"
+      },
+      "PlanIn": {
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Revision"
+          },
+          "minutes": {
+            "type": "integer",
+            "maximum": 45.0,
+            "minimum": 5.0,
+            "title": "Minutes",
+            "default": 20
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "idempotency_key",
+          "expected_revision"
+        ],
+        "title": "PlanIn"
+      },
+      "ProgressIn": {
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Revision"
+          },
+          "next_lesson": {
+            "type": "string",
+            "title": "Next Lesson"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "idempotency_key",
+          "expected_revision",
+          "next_lesson"
+        ],
+        "title": "ProgressIn"
+      },
+      "ReportIn": {
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Revision"
+          },
+          "period_start": {
+            "type": "string",
+            "title": "Period Start"
+          },
+          "period_end": {
+            "type": "string",
+            "title": "Period End"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "idempotency_key",
+          "expected_revision",
+          "period_start",
+          "period_end"
+        ],
+        "title": "ReportIn"
+      },
+      "ReviewIn": {
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Revision"
+          },
+          "correct": {
+            "type": "boolean",
+            "title": "Correct"
+          },
+          "independence_confirmed": {
+            "type": "boolean",
+            "title": "Independence Confirmed",
+            "default": false
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Reason"
+          },
+          "supersedes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes"
+          },
+          "retracted": {
+            "type": "boolean",
+            "title": "Retracted",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "idempotency_key",
+          "expected_revision",
+          "correct",
+          "reason"
+        ],
+        "title": "ReviewIn"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

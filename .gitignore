@@ -1,0 +1,13 @@
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+.env
+.env.*
+!.env.example
+.DS_Store
+
+# Local delivery snapshots and superseded discussion draft.
+/学伴研发启动包-*.zip
+/DELIVERY-MANIFEST.json
+/学伴项目计划-完善版-20261016.md

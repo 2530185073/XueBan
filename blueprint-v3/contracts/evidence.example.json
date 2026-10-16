@@ -1,0 +1,28 @@
+{
+  "schema_version": "evidence.v1",
+  "evidence_id": "demo-evidence-001",
+  "tenant_id": "demo-tenant",
+  "campus_id": "demo-campus",
+  "student_id": "demo-student",
+  "event_type": "attempt.verified",
+  "occurred_at": "2026-10-15T10:00:00Z",
+  "recorded_at": "2026-10-15T10:05:00Z",
+  "effective_from": "2026-10-15T10:00:00Z",
+  "evidence_revision": 1,
+  "actor_role": "teacher",
+  "validity": "active",
+  "supersedes_id": null,
+  "payload": {
+    "attempt_id": "demo-attempt-001",
+    "review_decision_id": "demo-review-001",
+    "knowledge_id": "demo-distributive-law",
+    "item_id": "demo-item-001",
+    "item_family_id": "demo-expand-negative",
+    "result": "correct",
+    "assistance_level": "none",
+    "independent_condition_verified": true,
+    "stage": "delayed_check",
+    "graph_version": "demo-math-v1",
+    "rubric_version": "demo-rubric-v1"
+  }
+}

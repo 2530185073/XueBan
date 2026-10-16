@@ -1,0 +1,26 @@
+name: Reference checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reference:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: pip
+          cache-dependency-path: prototype/requirements.txt
+      - name: Install reference dependencies
+        run: python -m pip install -r prototype/requirements.txt
+      - name: Test reference rules and HTTP adapter
+        run: python -m pytest prototype -q
+      - name: Run synthetic learning flow
+        run: python -m prototype.demo

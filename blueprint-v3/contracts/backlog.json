@@ -1,0 +1,578 @@
+{
+  "schema_version": "backlog.v1",
+  "source_document": "08-研发计划与验收矩阵.md",
+  "scope": "production_v1",
+  "status_note": "所有生产用户故事待开发；参考内核的演示测试不构成任何 US 完成。P0/P1 表示研发优先顺序，不表示可省略 P1。",
+  "cycle_policy": {
+    "timezone": "Asia/Shanghai",
+    "periods": [
+      "自然月1日至15日",
+      "自然月16日至月末"
+    ],
+    "interval_convention": "start_inclusive_end_exclusive"
+  },
+  "items": [
+    {
+      "id": "US-01",
+      "title": "校区管理员创建学生及监护绑定",
+      "owner_hint": "TL",
+      "acceptance_success": "正确绑定后监护人可见该生已发布内容；绑定变更留审计",
+      "acceptance_failure": "非绑定家长读取、枚举或导出学生资料均拒绝；撤销后缓存访问失效",
+      "status": "not_started",
+      "dependency_ids": [],
+      "work_package": "P01",
+      "priority": "P0"
+    },
+    {
+      "id": "US-02",
+      "title": "老师进入授权班级",
+      "owner_hint": "TL",
+      "acceptance_success": "教师只能查询授权范围，学生迁班后权限按新规则生效",
+      "acceptance_failure": "修改 URL、请求体或缓存键不能跨学生/校区/机构；返回不泄露对象存在性",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-01"
+      ],
+      "work_package": "P01",
+      "priority": "P0"
+    },
+    {
+      "id": "US-03",
+      "title": "学生上传作业",
+      "owner_hint": "BE",
+      "acceptance_success": "同一次上传重试只产生一次提交；页面显示 received/processing",
+      "acceptance_failure": "缺图、损坏、超限、伪装格式有明确错误；文件不可公开访问",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-01",
+        "US-02"
+      ],
+      "work_package": "P03",
+      "priority": "P0"
+    },
+    {
+      "id": "US-04",
+      "title": "老师补正识别与切题",
+      "owner_hint": "FE",
+      "acceptance_success": "保存原图、题目边界及人工修订版本；后续分析读取新版",
+      "acceptance_failure": "题干不完整进入 needs_resubmit，不自动编造缺少条件",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-03"
+      ],
+      "work_package": "P03",
+      "priority": "P0"
+    },
+    {
+      "id": "US-05",
+      "title": "学生收到可靠纠错",
+      "owner_hint": "AI",
+      "acceptance_success": "初判进入 awaiting_review；老师 confirmed 后学生可用",
+      "acceptance_failure": "模型超时/拒绝/截断保留失败原因；不得显示老师已确认",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-04"
+      ],
+      "work_package": "P03",
+      "priority": "P0"
+    },
+    {
+      "id": "US-06",
+      "title": "学科老师采纳或改判",
+      "owner_hint": "BE",
+      "acceptance_success": "判定、错误步骤、解释及原因关联 review_decision",
+      "acceptance_failure": "教官、学生、家长和模型服务不能调用确认命令；旧版本提交返回 409",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-02",
+        "US-05"
+      ],
+      "work_package": "P03",
+      "priority": "P0"
+    },
+    {
+      "id": "US-07",
+      "title": "学生申诉误判",
+      "owner_hint": "BE",
+      "acceptance_success": "申诉进入待处理，老师新决定替代旧判断，相关任务可追踪",
+      "acceptance_failure": "旧证据被撤销后不得继续影响当前图谱或新报告；保留原作答",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-06"
+      ],
+      "work_package": "P03",
+      "priority": "P0"
+    },
+    {
+      "id": "US-08",
+      "title": "学生完成订正",
+      "owner_hint": "FE",
+      "acceptance_success": "订正形成新 attempt，注明已用提示；原错误仍可回看",
+      "acceptance_failure": "重复上传同一订正去重；不能把看答案后改对标为独立验证",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-06"
+      ],
+      "work_package": "P03",
+      "priority": "P0"
+    },
+    {
+      "id": "US-09",
+      "title": "老师查看知识点诊断",
+      "owner_hint": "CUR",
+      "acceptance_success": "主/关联知识点和错因分别展示，结论可点击到证据",
+      "acceptance_failure": "无作答过程时显示待核实；一次错误不能自动定性“粗心”",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-06"
+      ],
+      "work_package": "P04",
+      "priority": "P0"
+    },
+    {
+      "id": "US-10",
+      "title": "学生查看个人知识图谱",
+      "owner_hint": "FE",
+      "acceptance_success": "课程图谱叠加个人状态、样本量、日期、证据及下一步",
+      "acceptance_failure": "未观察节点显示数据不足；不把全班平均值填成本人状态",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-09",
+        "US-11"
+      ],
+      "work_package": "P04",
+      "priority": "P0"
+    },
+    {
+      "id": "US-11",
+      "title": "系统更新知识状态",
+      "owner_hint": "TL",
+      "acceptance_success": "已确认有效证据按版本规则计算；重放得到同一投影",
+      "acceptance_failure": "待审核、被撤销、条件未核实证据不能越权触发高质量验证结果",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-06",
+        "US-09"
+      ],
+      "work_package": "P04",
+      "priority": "P0"
+    },
+    {
+      "id": "US-12",
+      "title": "老师修正图谱或题目映射",
+      "owner_hint": "TL",
+      "acceptance_success": "新版本重算受影响状态，旧结果可追溯，待执行计划标 stale",
+      "acceptance_failure": "重算未完成时禁止用旧状态发布报告；重复事件不重复累计证据",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-07",
+        "US-11"
+      ],
+      "work_package": "P04",
+      "priority": "P0"
+    },
+    {
+      "id": "US-13",
+      "title": "每个孩子保有专属智能体",
+      "owner_hint": "AI",
+      "acceptance_success": "重登/换设备后加载本人状态；模型升级后个人数据仍在",
+      "acceptance_failure": "两生同时运行无会话、记忆、检索、工具或费用明细串用",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-01",
+        "US-02",
+        "US-11"
+      ],
+      "work_package": "P05",
+      "priority": "P0"
+    },
+    {
+      "id": "US-14",
+      "title": "学生获得个性学习建议",
+      "owner_hint": "AI",
+      "acceptance_success": "同一问题按各自图谱、任务和证据生成不同且可解释的建议",
+      "acceptance_failure": "缺少下一课或证据时 needs_evidence；不得虚构既往表现",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-10",
+        "US-13",
+        "US-17"
+      ],
+      "work_package": "P05",
+      "priority": "P0"
+    },
+    {
+      "id": "US-15",
+      "title": "学生与老师确认长期记忆",
+      "owner_hint": "BE",
+      "acceptance_success": "候选→确认→到期/替代；保留来源、确认人和期限",
+      "acceptance_failure": "学生不能确认学科诊断；模型不能把自述直接写为长期事实",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-06",
+        "US-13"
+      ],
+      "work_package": "P05",
+      "priority": "P0"
+    },
+    {
+      "id": "US-16",
+      "title": "学生获取分层帮助",
+      "owner_hint": "AI",
+      "acceptance_success": "当前模式允许的提示逐级出现，提示层级写入 attempt 条件",
+      "acceptance_failure": "测验模式禁提示工具；越级套答案、文档注入和多轮诱导被阻止或转人工",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-13",
+        "US-17"
+      ],
+      "work_package": "P05",
+      "priority": "P0"
+    },
+    {
+      "id": "US-17",
+      "title": "智能体调用学习工具",
+      "owner_hint": "AI",
+      "acceptance_success": "工具只访问当前学生批准内容，并记录输入、结果和原因",
+      "acceptance_failure": "未知工具、任意 SQL/URL、跨生 ID、超步数均拒绝；不直接改成绩",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-13"
+      ],
+      "work_package": "P05",
+      "priority": "P0"
+    },
+    {
+      "id": "US-18",
+      "title": "老师接收智能体转介",
+      "owner_hint": "BE",
+      "acceptance_success": "needs_human 形成具体责任队列；无老师时待安排并显示原因",
+      "acceptance_failure": "转人工失败不得伪装已完成；未经接单不显示“老师正在处理”",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-06",
+        "US-17"
+      ],
+      "work_package": "P05",
+      "priority": "P0"
+    },
+    {
+      "id": "US-19",
+      "title": "学生做举一反三",
+      "owner_hint": "CUR",
+      "acceptance_success": "每组关联原错点，结构变化与迁移用途明确；老师可替换",
+      "acceptance_failure": "未审核生成题不可投放；连续失败转讲解而非无限加题",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-08",
+        "US-09",
+        "US-17"
+      ],
+      "work_package": "P06",
+      "priority": "P0"
+    },
+    {
+      "id": "US-20",
+      "title": "学生按负担预算完成任务",
+      "owner_hint": "FE",
+      "acceptance_success": "当天纠错/复习/预习共享预算，超预算建议可延期",
+      "acceptance_failure": "取消/替换任务有原因；智能体不能绕过预算重复创建同目标任务",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-14",
+        "US-19"
+      ],
+      "work_package": "P06",
+      "priority": "P0"
+    },
+    {
+      "id": "US-21",
+      "title": "老师维护学校课程进度",
+      "owner_hint": "BE",
+      "acceptance_success": "进度有学校/教材/学科/确认人/时间，下一课据此确定",
+      "acceptance_failure": "未确认时不能按目录自动认定下一课；旧版本并发更新受冲突检查",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-02"
+      ],
+      "work_package": "P02",
+      "priority": "P0"
+    },
+    {
+      "id": "US-22",
+      "title": "学生进入独立预习板块",
+      "owner_hint": "FE",
+      "acceptance_success": "显示目标、前置检查、个人缺口、短导学和上课关注点",
+      "acceptance_failure": "进度修改后旧草案失效；新课未学会不直接记为已学知识退步",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-10",
+        "US-14",
+        "US-19",
+        "US-21"
+      ],
+      "work_package": "P06",
+      "priority": "P0"
+    },
+    {
+      "id": "US-23",
+      "title": "老师查看课前课后关联",
+      "owner_hint": "BE",
+      "acceptance_success": "预习记录可关联课后独立作答，展示条件和时间",
+      "acceptance_failure": "只有缺勤或未采集时标缺失，不能记作预习失败或宣称因果提分",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-11",
+        "US-22"
+      ],
+      "work_package": "P06",
+      "priority": "P1"
+    },
+    {
+      "id": "US-24",
+      "title": "学生使用错题本",
+      "owner_hint": "FE",
+      "acceptance_success": "支持状态、知识点、错因、时间筛选及打印；历史保留",
+      "acceptance_failure": "误判撤销从有效错题统计剔除；重复照片不增加错误次数",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-08",
+        "US-11",
+        "US-12"
+      ],
+      "work_package": "P06",
+      "priority": "P0"
+    },
+    {
+      "id": "US-25",
+      "title": "老师创建半月测验",
+      "owner_hint": "CUR",
+      "acceptance_success": "周期、目标和通过标准测前冻结，候选卷审核后可实施",
+      "acceptance_failure": "已直接练过的题不能充当新题迁移证据；有题目冲突时阻止发布",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-11",
+        "US-19",
+        "US-21"
+      ],
+      "work_package": "P08",
+      "priority": "P0"
+    },
+    {
+      "id": "US-26",
+      "title": "学生独立参加小测",
+      "owner_hint": "FE",
+      "acceptance_success": "测验模式锁定提示；分题结果与条件保存，缺席进入待补测",
+      "acceptance_failure": "掉线恢复不重复作答；无法核实独立条件时标记条件未核实",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-16",
+        "US-25"
+      ],
+      "work_package": "P08",
+      "priority": "P0"
+    },
+    {
+      "id": "US-27",
+      "title": "老师复盘半月目标",
+      "owner_hint": "BE",
+      "acceptance_success": "显示目标总数、已覆盖目标、达标目标和缺测目标，回写下期计划",
+      "acceptance_failure": "缺测不算达标；不同难度个性卷总分不得直接排名或比较涨幅",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-11",
+        "US-26"
+      ],
+      "work_package": "P08",
+      "priority": "P0"
+    },
+    {
+      "id": "US-28",
+      "title": "教官记录学习观察",
+      "owner_hint": "FE",
+      "acceptance_success": "分开记录事实、学生自述、推测；有时间/场景/观察者",
+      "acceptance_failure": "不允许自动识别情绪或诊断心理；观察不能修改学科掌握分",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-01",
+        "US-02"
+      ],
+      "work_package": "P07",
+      "priority": "P0"
+    },
+    {
+      "id": "US-29",
+      "title": "教官执行习惯干预",
+      "owner_hint": "BE",
+      "acceptance_success": "目标、具体行为、责任人、期限、执行与回看结果齐全",
+      "acceptance_failure": "“已提醒”不等于验证成功；撤销或改计划有理由且保留记录",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-20",
+        "US-28"
+      ],
+      "work_package": "P07",
+      "priority": "P0"
+    },
+    {
+      "id": "US-30",
+      "title": "老师和教官交接",
+      "owner_hint": "FE",
+      "acceptance_success": "学科困难转老师，执行困难转教官；待接/处理中/已回执可追踪",
+      "acceptance_failure": "转介只附必要数据；未获学科权限的教官不能查看或修改评分操作",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-18",
+        "US-29"
+      ],
+      "work_package": "P07",
+      "priority": "P1"
+    },
+    {
+      "id": "US-31",
+      "title": "校区查看共性问题",
+      "owner_hint": "BE",
+      "acceptance_success": "同题/知识点/错因聚合，显示有效作答分母、人数与采集覆盖",
+      "acceptance_failure": "只采错题时不展示知识点错误率；订正和初作不混作一次分母",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-09",
+        "US-11"
+      ],
+      "work_package": "P07",
+      "priority": "P0"
+    },
+    {
+      "id": "US-32",
+      "title": "校区安排个别或小组补学",
+      "owner_hint": "BE",
+      "acceptance_success": "研判单转 intervention，人员、内容、时间、验证明确",
+      "acceptance_failure": "分组随证据调整；家长看不到其他学生名单或原始作答",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-29",
+        "US-31"
+      ],
+      "work_package": "P07",
+      "priority": "P1"
+    },
+    {
+      "id": "US-33",
+      "title": "老师确认家长报告",
+      "owner_hint": "FE",
+      "acceptance_success": "报告用锁定证据与数字，学科/习惯分别确认后可发布",
+      "acceptance_failure": "缺确认、投影落后、证据撤销或数值不一致时阻止发布",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-12",
+        "US-27",
+        "US-29"
+      ],
+      "work_package": "P08",
+      "priority": "P0"
+    },
+    {
+      "id": "US-34",
+      "title": "家长收到报告及后续计划",
+      "owner_hint": "BE",
+      "acceptance_success": "发送命令有幂等键、回执和发布版本；本人历史可查",
+      "acceptance_failure": "网络超时不能盲目重复发送；更正生成新版并提示旧版已更新",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-33"
+      ],
+      "work_package": "P08",
+      "priority": "P0"
+    },
+    {
+      "id": "US-35",
+      "title": "家长反馈与线下面谈跟进",
+      "owner_hint": "FE",
+      "acceptance_success": "反馈转负责人待办，记录约定、行动和回看时间",
+      "acceptance_failure": "无负责人不得显示已处理；新增收费内容与教学建议区分并单独确认",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-34"
+      ],
+      "work_package": "P08",
+      "priority": "P1"
+    },
+    {
+      "id": "US-36",
+      "title": "校区应对模型或网络故障",
+      "owner_hint": "OPS",
+      "acceptance_success": "已确认任务仍可用，新分析排队或转人工；失败有状态",
+      "acceptance_failure": "不将服务失败计为学生不配合；重试不重复生成任务或费用业务记录",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-03",
+        "US-05",
+        "US-17"
+      ],
+      "work_package": "P09",
+      "priority": "P0"
+    },
+    {
+      "id": "US-37",
+      "title": "工作人员撤回或删除资料",
+      "owner_hint": "BE",
+      "acceptance_success": "删除传播到对象/索引/摘要/缓存，保留最少审计与执行回执",
+      "acceptance_failure": "未核验身份不能执行；恢复备份必须重放删除清单，防止复活",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-01",
+        "US-12",
+        "US-15",
+        "US-34"
+      ],
+      "work_package": "P09",
+      "priority": "P0"
+    },
+    {
+      "id": "US-38",
+      "title": "研发安全发布模型版本",
+      "owner_hint": "AI",
+      "acceptance_success": "锁定评测集回归、影子、灰度、版本记录和回滚均可执行",
+      "acceptance_failure": "关键切片退化/越权/泄漏阻止放量；不以总体均分掩盖切片失败",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-05",
+        "US-14",
+        "US-16",
+        "US-17"
+      ],
+      "work_package": "P09",
+      "priority": "P0"
+    },
+    {
+      "id": "US-39",
+      "title": "运维恢复任务与数据",
+      "owner_hint": "OPS",
+      "acceptance_success": "Worker 中断、租约失效、服务重启、备份恢复后任务可续办",
+      "acceptance_failure": "重复投递不重复更新掌握状态；人工确认不被模型重试覆盖",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-03",
+        "US-06",
+        "US-11"
+      ],
+      "work_package": "P09",
+      "priority": "P0"
+    },
+    {
+      "id": "US-40",
+      "title": "负责人评估服务效果与工时",
+      "owner_hint": "PO",
+      "acceptance_success": "分开展示学习、执行、质量、教师负担与学生负担",
+      "acceptance_failure": "采纳率不等于准确率，打开率不等于满意，相关变化不写因果提分",
+      "status": "not_started",
+      "dependency_ids": [
+        "US-27",
+        "US-29",
+        "US-35"
+      ],
+      "work_package": "P09",
+      "priority": "P1"
+    }
+  ]
+}
