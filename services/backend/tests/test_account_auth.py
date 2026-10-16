@@ -176,8 +176,9 @@ def test_logout_invalidates_session_and_replays(accounts):
     token = login(client).json()['access_token']
     assert post(client, '/v1/auth/logout', {}, token, 'logout-request-one').json() == {'logged_out': True}
     assert post(client, '/v1/auth/logout', {}, token, 'logout-request-one').json() == {'logged_out': True}
-    assert client.get('/v1/auth/account', headers=bearer(token)).status_code == 401
-    assert post(client, '/v1/auth/change-password', {'current_password': PASSWORD, 'new_password': NEW_PASSWORD}, token).status_code == 401
+    for ended in (client.get('/v1/auth/account', headers=bearer(token)),
+                  post(client, '/v1/auth/change-password', {'current_password': PASSWORD, 'new_password': NEW_PASSWORD}, token)):
+        assert ended.status_code == 401 and ended.json()['code'] == 'authentication_required'
 
 
 def test_admin_create_is_idempotent_scoped_and_forces_change(accounts, database):

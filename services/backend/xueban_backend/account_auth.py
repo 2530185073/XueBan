@@ -70,6 +70,10 @@ def denied():
     return Problem(401, 'authorization', 'invalid_credentials', '用户名或密码不正确，或账号不可用。')
 
 
+def session_ended():
+    return Problem(401, 'authorization', 'authentication_required', '登录已失效，请重新登录。')
+
+
 def throttled():
     return Problem(429, 'authorization', 'login_rate_limited', '登录尝试过于频繁，请稍后再试。')
 
@@ -219,12 +223,12 @@ def install_account_auth(app, engine, cfg):
         token = bearer(authorization); claims = verifier._claims(token)
         principal = session.scalar(select(Principal).where(Principal.issuer == cfg.oidc_issuer, Principal.subject == claims['sub'], Principal.active.is_(True)))
         if principal is None:
-            raise denied()
+            raise session_ended()
         account = session.scalar(select(PasswordAccount).where(PasswordAccount.principal_id == principal.id).with_for_update())
         device_id = claims.get('device_session_id')
         device = session.get(DeviceSession, device_id) if isinstance(device_id, str) else None
         if account is None or not usable(session, cfg, principal, account) or device is None or device.principal_id != principal.id or utc(device.expires_at) <= datetime.now(timezone.utc) or (device.revoked and not recovery):
-            raise denied()
+            raise session_ended()
         return principal, account, device
 
     def campus_scope(session, authorization):
@@ -293,7 +297,7 @@ def install_account_auth(app, engine, cfg):
                 if old.previous_session_id != previous.id or old.credential_version != account.password_version: raise denied()
                 result = session_result(key, cfg, principal, account, session.get(DeviceSession, old.session_id))
             elif previous.revoked:
-                raise denied()
+                raise session_ended()
             elif account.locked_until and utc(account.locked_until) > now:
                 error = throttled()
             elif not verify_password(current, account.password_hash):

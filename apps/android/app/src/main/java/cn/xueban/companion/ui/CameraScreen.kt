@@ -51,10 +51,12 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import cn.xueban.companion.CaptureViewModel
 import cn.xueban.companion.data.CameraAccess
+import cn.xueban.companion.data.ImageLimits
 import cn.xueban.companion.data.LocalPage
 import cn.xueban.companion.data.cameraAccess
+import cn.xueban.companion.data.pageLimitProblem
 
-private const val MAX_PICKED_PAGES = 10
+private const val MAX_PICKED_PAGES = ImageLimits.MAX_PAGES
 
 @Composable
 fun CameraScreen(model: CaptureViewModel, onEdit: (String) -> Unit, onSubmitted: (String) -> Unit, onDiscarded: () -> Unit) {
@@ -88,7 +90,9 @@ fun CameraScreen(model: CaptureViewModel, onEdit: (String) -> Unit, onSubmitted:
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(if (model.isCorrectionCapture) "拍新的订正" else "拍作业 · 可以拍多页", style = MaterialTheme.typography.headlineSmall)
         Text(if (model.isCorrectionCapture) "请拍同一道题的题干和新的作答，保留题目完整内容。" else "一页拍一张，拍清题目和自己的作答，注意反光和缺角。拍完所有页再一起上传。")
-        when (cameraAccess(granted, asked, showRationale)) {
+        val full = pageLimitProblem(pages.size)
+        if (full != null) Text(full, style = MaterialTheme.typography.bodyMedium)
+        else when (cameraAccess(granted, asked, showRationale)) {
             CameraAccess.Granted -> CameraCapture(model, saving, onSaving = { saving = it }, onError = { error = it })
             CameraAccess.NotRequested -> {
                 Text("拍作业需要使用相机。照片只保存在本机应用内，提交后才会上传给老师和学伴检查。")
@@ -105,7 +109,7 @@ fun CameraScreen(model: CaptureViewModel, onEdit: (String) -> Unit, onSubmitted:
                 }) { Text("打开系统设置") }
             }
         }
-        OutlinedButton(enabled = !saving && !model.busy, onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
+        if (full == null) OutlinedButton(enabled = !saving && !model.busy, onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
             Text("从相册添加（可多选）")
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }

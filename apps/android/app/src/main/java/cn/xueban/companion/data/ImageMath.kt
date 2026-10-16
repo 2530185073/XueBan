@@ -83,6 +83,9 @@ object ImageLimits {
     const val SOURCE_MAX_PIXELS = 50_000_000L
     const val UPLOAD_MAX_BYTES = 4L * 1024 * 1024
     const val UPLOAD_MAX_SIDE = 2400
+    /** The backend accepts at most 4 images and 8 MiB per recognition request. */
+    const val MAX_PAGES = 4
+    const val BATCH_MAX_BYTES = 8L * 1024 * 1024
     const val MIN_FREE_BYTES = 64L * 1024 * 1024
     val JPEG_QUALITIES = listOf(92, 85, 75, 65)
 }
@@ -96,6 +99,12 @@ fun sourceImageProblem(byteSize: Long, width: Int, height: Int): String? = when 
 
 fun uploadTooLargeMessage(byteSize: Long): String? =
     if (byteSize > ImageLimits.UPLOAD_MAX_BYTES) "这页压缩后仍超过 4 MB 上传上限，请裁掉空白部分或重拍" else null
+
+fun pageLimitProblem(pageCount: Int): String? =
+    if (pageCount >= ImageLimits.MAX_PAGES) "一份作业最多 ${ImageLimits.MAX_PAGES} 页；剩下的页请先提交这份，再新拍一份" else null
+
+fun batchTooLargeMessage(totalBytes: Long): String? =
+    if (totalBytes > ImageLimits.BATCH_MAX_BYTES) "这几页加起来超过 8 MB，请裁掉空白部分，或把部分页另拍一份" else null
 
 fun storageProblem(usableBytes: Long, neededBytes: Long = ImageLimits.MIN_FREE_BYTES): String? =
     if (usableBytes < neededBytes) "平板存储空间不足（剩余约 ${usableBytes / 1_048_576} MB），请先清理空间再拍照；已保存的作业不受影响" else null

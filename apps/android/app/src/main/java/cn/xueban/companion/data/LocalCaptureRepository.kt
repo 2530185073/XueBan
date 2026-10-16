@@ -115,6 +115,7 @@ class LocalCaptureRepository(private val root: File, private val renderer: PageR
         val pageId = "page_" + UUID.randomUUID().toString().replace("-", "").take(12)
         update(id) { state ->
             requireDraft(state)
+            pageLimitProblem(state.getJSONArray("pages").length())?.let { throw IllegalArgumentException(it) }
             state.getJSONArray("pages").put(JSONObject().put("id", pageId).put("status", "capturing").put("source", source)
                 .put("original_file", "$pageId-original.jpg").put("upload_file", "$pageId-upload.jpg").put("rotation", 0).put("crop", JSONObject.NULL))
         }
@@ -174,6 +175,7 @@ class LocalCaptureRepository(private val root: File, private val renderer: PageR
         require(pages.all { it.optString("status") == "ready" }) { "还有照片没有处理完，请删除出错的页后再提交" }
         require(pages.size == confirmedPages) { "页数已变化，请重新确认" }
         pages.forEach { page -> uploadTooLargeMessage(page.optLong("byte_size"))?.let { throw IllegalArgumentException(it) } }
+        batchTooLargeMessage(pages.sumOf { it.optLong("byte_size") })?.let { throw IllegalArgumentException(it) }
         state.put("stage", "queued").put("submitted_at", System.currentTimeMillis()).put("confirmed_pages", confirmedPages).remove("error")
     }
 

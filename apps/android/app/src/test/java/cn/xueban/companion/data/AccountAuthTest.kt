@@ -106,6 +106,15 @@ class AccountAuthTest {
         assertFalse(requireNotNull(store.value).has("pending_change_key"))
     }
 
+    @Test fun revokedSessionDuringPasswordChangeIsNotAWrongPassword() {
+        backend.mustChange = true
+        auth.login(backend.base, "student.one", backend.password)
+        backend.validTokens.clear()
+        val error = assertThrows(ApiFailure::class.java) { auth.changePassword(backend.password, "a long synthetic sentence password") }
+        assertEquals("authentication_required", error.code)
+        assertEquals(FailureKind.SessionExpired, classifyFailure(error))
+    }
+
     @Test fun logoutRevokesOnServerAndWipesOnlyLocalCredentials() {
         auth.login(backend.base, "student.one", backend.password)
         assertTrue(auth.logout())

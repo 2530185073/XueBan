@@ -93,6 +93,19 @@ class MultiPageSyncTest {
         assertEquals("complete", repository.capture("legacy-record").stage)
     }
 
+    @Test fun draftsStayWithinTheRecognitionBatchLimits() {
+        val id = repository.createDraft(backend.base, "actor_a", "student_a", null)
+        val pageIds = (1..ImageLimits.MAX_PAGES).map {
+            val (pageId, original) = repository.beginPage(id, "camera")
+            original.writeBytes(ByteArray(3 * 1024 * 1024)); repository.completePage(id, pageId); pageId
+        }
+        assertEquals(pageLimitProblem(ImageLimits.MAX_PAGES), assertThrows(IllegalArgumentException::class.java) { repository.beginPage(id, "picker") }.message)
+        assertEquals(batchTooLargeMessage(12L * 1024 * 1024), assertThrows(IllegalArgumentException::class.java) { repository.submit(id, 4) }.message)
+        repository.removePage(id, pageIds[0]); repository.removePage(id, pageIds[1])
+        repository.submit(id, 2)
+        assertEquals("queued", repository.capture(id).stage)
+    }
+
     @Test fun draftsAreEditableOnlyUntilTheStudentConfirmsThePageCount() {
         val renderer = CopyRenderer()
         val local = LocalCaptureRepository(root, renderer) { Long.MAX_VALUE }

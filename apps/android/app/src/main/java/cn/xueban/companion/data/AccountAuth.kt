@@ -103,7 +103,7 @@ class AccountAuth(private val store: SessionStore, private val debug: Boolean, p
                 .post("/v1/auth/change-password", JSONObject().put("current_password", current).put("new_password", new), saved.getString("pending_change_key"))
         } catch (error: ApiFailure) {
             if (error.status in definite) update { it.remove("pending_change_key") }
-            if (error.status == 401) throw ApiFailure(422, "current_password_rejected", "当前密码不正确；如果刚才已改成功，请退出后用新密码登录")
+            if (error.status == 401 && error.code == "invalid_credentials") throw ApiFailure(422, "current_password_rejected", "当前密码不正确；如果刚才已改成功，请退出后用新密码登录")
             if (error.code == "idempotency_conflict") throw ApiFailure(409, error.code, "上次修改密码的结果未确认：请退出后先用新密码登录，不行再用原密码登录")
             throw error
         }
