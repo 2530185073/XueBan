@@ -68,9 +68,17 @@ def register_periodic(interval: timedelta):
     return decorator
 
 
-def published_graph(session) -> CurriculumGraph:
+def published_graph(session) -> CurriculumGraph | None:
     return session.scalar(select(CurriculumGraph).where(CurriculumGraph.status == "published")
                           .order_by(CurriculumGraph.published_at.desc()))
+
+
+def require_published_graph(session) -> CurriculumGraph:
+    from .errors import Problem
+    graph = published_graph(session)
+    if graph is None:
+        raise Problem(503, "service", "service_unavailable", "尚未发布课程知识图谱。")
+    return graph
 
 
 def enqueue(session, tenant_id, student_id, kind, payload, dedupe_key, available_at=None):

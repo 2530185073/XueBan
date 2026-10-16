@@ -29,7 +29,7 @@ from .errors import Problem
 from .governance import register_downstream_purger
 from .learning_models import (KnowledgeEdge, KnowledgeNode, OptionalWindow, PracticeItem, PracticeResponse, PracticeSession,
                               StudentKnowledgeState, StudentLearningProfile)
-from .learning_projection import enqueue, new_id, published_graph, register_job_handler
+from .learning_projection import enqueue, new_id, register_job_handler, require_published_graph
 from .learning_reports import SHANGHAI, local_day, register_report_section
 from .models import Homework, Student
 from .providers.prompts import Role
@@ -150,7 +150,7 @@ def gate_status(session, student_id, at=None):
 
 
 def _names(session):
-    graph = published_graph(session)
+    graph = require_published_graph(session)
     return {n.id: n for n in session.scalars(select(KnowledgeNode).where(KnowledgeNode.graph_version == graph.version))}
 
 
@@ -178,7 +178,7 @@ def pick_items(session, tenant_id, student_id, knowledge_ids, count):
 
 def preview_targets(session, student_id, knowledge_ids):
     names, states = _names(session), _states(session, student_id)
-    graph = published_graph(session)
+    graph = require_published_graph(session)
     edges = list(session.scalars(select(KnowledgeEdge).where(KnowledgeEdge.graph_version == graph.version,
                                                              KnowledgeEdge.relation_type == "prerequisite_of",
                                                              KnowledgeEdge.to_id.in_(knowledge_ids))))
@@ -518,13 +518,23 @@ def install_practice(app, engine, cfg, database_session, current_actor):
     @app.get("/v1/students/{student_id}/practice-sessions", operation_id="listPracticeSessions")
     def list_sessions(student_id: str, actor: ActorDep, session: SessionDep):
         require_student(session, actor, student_id)
-        rows = session.scalars(select(PracticeSession).where(PracticeSession.student_id == student_id)
-                               .order_by(PracticeSession.started_at.desc()).limit(50))
+        rows = list(session.scalars(select(PracticeSession).where(PracticeSession.student_id == student_id)
+                                    .order_by(PracticeSession.started_at.desc()).limit(50)))
+        at = now()
+        if any(r.status == "active" and utc(r.budget_ends_at) <= at for r in rows):
+            for row in session.scalars(select(PracticeSession).where(PracticeSession.student_id == student_id,
+                                                                    PracticeSession.status == "active").with_for_update()):
+                _expire(row, at)
+            session.commit()
         return {"items": [session_dict(session, r, staff=is_staff(actor)) for r in rows]}
 
     @app.get("/v1/practice-sessions/{session_id}", operation_id="getPracticeSession")
     def get_session(session_id: str, actor: ActorDep, session: SessionDep):
         row = load_session(session, actor, session_id)
+        if row.status == "active" and utc(row.budget_ends_at) <= now():
+            row = load_session(session, actor, session_id, lock=True)
+            _expire(row, now())
+            session.commit()
         return session_dict(session, row, staff=is_staff(actor))
 
     @app.post("/v1/practice-sessions/{session_id}/items/{item_id}/hint", operation_id="revealPracticeHint")

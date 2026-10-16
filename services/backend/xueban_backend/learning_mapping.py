@@ -55,6 +55,8 @@ def suggest_links(session, job, worker):
     if session.scalar(select(QuestionKnowledgeLink.id).where(QuestionKnowledgeLink.question_id == question.id)):
         return {"status": "already_linked"}
     graph = published_graph(session)
+    if graph is None:
+        return {"status": "no_published_graph"}
     profile = session.get(StudentLearningProfile, job.student_id)
     nodes = _candidates(session, graph.version, (profile.document.get("grade") if profile else None))
     ids = [n.id for n in nodes]

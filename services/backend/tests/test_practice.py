@@ -156,9 +156,10 @@ def test_budget_runs_out_and_closes_the_gate(flow, clock):
     open_window(flow, minutes=5, confirm=True)
     body = start(flow, purpose="variant", knowledge_id="kp-rational-add-sub").json()
     clock["t"] += timedelta(minutes=6)
+    assert flow.client.get(f"/v1/practice-sessions/{body['id']}").json()["status"] == "time_up"
+    assert flow.client.get("/v1/students/student_a/practice-sessions").json()["items"][0]["status"] == "time_up"
     late = flow.client.post(f"/v1/practice-sessions/{body['id']}/responses", json={"item_id": body["items"][0]["id"], "answer_text": "5"})
     assert late.status_code == 409
-    assert flow.client.get(f"/v1/practice-sessions/{body['id']}").json()["status"] == "time_up"
     gate = flow.client.get("/v1/students/student_a/optional-activities").json()["gate"]
     assert gate["open"] is False and gate["reasons"] == ["no_extra_budget"]
 

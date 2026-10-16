@@ -1,7 +1,8 @@
 """Each learner's long-term agent: traceable memories, case context and staff summaries."""
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from test_correction_flow import flow, teacher  # noqa: F401  (pytest fixture reuse)
@@ -9,7 +10,8 @@ from test_learning import learning, link, review, reviewed
 from xueban_backend.agent_memory import rule_proposals
 from xueban_backend.asset_store import LocalAssetStore
 from xueban_backend.governance import purge_student
-from xueban_backend.learning_models import AgentMemoryItem, AgentRun
+from xueban_backend.learning_models import AgentMemoryItem, AgentRun, CurriculumGraph
+from xueban_backend.models import Student
 from xueban_backend.providers.ark import Metadata
 
 
@@ -56,9 +58,25 @@ def test_student_sees_confirmed_only_and_may_set_own_preferences(flow):
     forbidden = flow.client.post("/v1/students/student_a/memories", json={"category": "effective_support", "content": "多鼓励"})
     assert forbidden.status_code == 403
     assert flow.client.get("/v1/students/student_b/memories").status_code == 404
+    assert made.json()["proposed_by"] == made.json()["confirmed_by"]
+    with Session(flow.database.engine) as session:
+        session.add(AgentMemoryItem(id="memory_rule_x", tenant_id=session.get(Student, "student_a").tenant_id, student_id="student_a", category="recurring_difficulty",
+                                    content="「去括号」有 2 次经老师核实的错误作答。", evidence_ids=["ev1"], source="system_rule",
+                                    status="confirmed", proposed_by="rule:memory-r1", confirmed_by="rule:memory-r1",
+                                    revision=1, created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc)))
+        session.commit()
+    assert [m["id"] for m in flow.client.get("/v1/students/student_a/memories").json()["items"]] == [made.json()["id"]]
     retracted = flow.client.post(f"/v1/memories/{made.json()['id']}/retract")
     assert retracted.status_code == 200 and retracted.json()["status"] == "retracted"
     assert flow.client.get("/v1/students/student_a/memories").json()["items"] == []
+
+
+def test_learning_endpoints_report_unpublished_graph_as_unavailable(flow):
+    case = flow.ready()
+    with Session(flow.database.engine) as session:
+        session.execute(update(CurriculumGraph).values(status="retired"))
+        session.commit()
+    assert flow.client.get(f"/v1/cases/{case['id']}/agent-context").status_code == 503
 
 
 def test_staff_memory_requires_valid_evidence_and_is_invalidated_when_evidence_withdrawn(flow):

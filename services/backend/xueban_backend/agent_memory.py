@@ -22,7 +22,7 @@ from .errors import Problem
 from .learning_models import (AgentMemoryItem, AgentRun, KnowledgeNode, LearningEvidence, LearningProjection,
                               StudentKnowledgeState)
 from .governance import register_downstream_purger
-from .learning_projection import (enqueue, new_id, published_graph, register_evidence_listener, register_job_handler,
+from .learning_projection import (enqueue, new_id, published_graph, register_evidence_listener, register_job_handler, require_published_graph,
                                   register_projection_followup)
 from .models import Homework
 from .providers.prompts import Role
@@ -70,7 +70,7 @@ def memory_dict(memory, at=None):
     status = "expired" if memory.status == "confirmed" and memory.valid_until and utc(memory.valid_until) <= at else memory.status
     return {"id": memory.id, "category": memory.category, "content": memory.content, "knowledge_id": memory.knowledge_id,
             "evidence_ids": memory.evidence_ids, "source": memory.source, "status": status, "status_reason": memory.status_reason,
-            "confirmed_by": memory.confirmed_by, "confirmed_at": iso(memory.confirmed_at),
+            "proposed_by": memory.proposed_by, "confirmed_by": memory.confirmed_by, "confirmed_at": iso(memory.confirmed_at),
             "valid_until": iso(memory.valid_until), "supersedes_id": memory.supersedes_id,
             "revision": memory.revision, "created_at": iso(memory.created_at)}
 
@@ -103,6 +103,8 @@ def rule_proposals(states: dict, evidence: dict, names: dict) -> list[dict]:
 @register_projection_followup
 def refresh_rule_memories(session, tenant_id, student_id, worker):
     graph = published_graph(session)
+    if graph is None:
+        return
     names = {n.id: n.name for n in session.scalars(select(KnowledgeNode).where(KnowledgeNode.graph_version == graph.version))}
     states = {r.knowledge_id: r.document for r in session.scalars(
         select(StudentKnowledgeState).where(StudentKnowledgeState.student_id == student_id))}
@@ -165,7 +167,7 @@ def summary_schema(evidence_ids):
 
 
 def build_summary_context(session, student_id):
-    graph = published_graph(session)
+    graph = require_published_graph(session)
     names = {n.id: n.name for n in session.scalars(select(KnowledgeNode).where(KnowledgeNode.graph_version == graph.version))}
     projection = session.get(LearningProjection, student_id)
     states = [r.document for r in session.scalars(select(StudentKnowledgeState).where(StudentKnowledgeState.student_id == student_id))]
@@ -258,7 +260,8 @@ def install_agent(app, engine, cfg, database_session, current_actor):
                                .order_by(AgentMemoryItem.created_at.desc()))
         items = [memory_dict(m, at) for m in rows]
         if not staff(actor):
-            items = [m for m in items if m["status"] == "confirmed"]
+            # Difficulty records are staff-facing evidence summaries; the child sees them only as gentle tips.
+            items = [m for m in items if m["status"] == "confirmed" and m["category"] != "recurring_difficulty"]
         elif not include_inactive:
             items = [m for m in items if m["status"] in ACTIVE]
         return {"student_id": student_id, "items": items,
@@ -327,7 +330,7 @@ def install_agent(app, engine, cfg, database_session, current_actor):
             raise Problem(404, "not_found", "not_found", "资源不存在或不可访问。")
         homework = session.get(Homework, case.homework_id)
         student = require_student(session, actor, homework.student_id)
-        graph = published_graph(session)
+        graph = require_published_graph(session)
         names = {n.id: n for n in session.scalars(select(KnowledgeNode).where(KnowledgeNode.graph_version == graph.version))}
         links = [l for l in current_links(session, case.document["question_id"]).values() if l.status == "confirmed"]
         knowledge_ids = [l.knowledge_id for l in links]
@@ -341,7 +344,7 @@ def install_agent(app, engine, cfg, database_session, current_actor):
             if memory.knowledge_id in knowledge_ids and memory.category == "recurring_difficulty":
                 node = names[memory.knowledge_id]
                 tips.append({"kind": "past_difficulty", "memory_id": memory.id, "evidence_ids": memory.evidence_ids,
-                             "text": f"学伴记得：你之前在「{node.name}」上出过几次错。这次可以先对照：{node.observable_objective or node.name}"})
+                             "text": f"学伴记得：「{node.name}」之前练过几次，这里容易卡一下。这次可以先对照：{node.observable_objective or node.name}"})
             elif memory.knowledge_id in knowledge_ids and memory.category == "progress_milestone":
                 tips.append({"kind": "past_progress", "memory_id": memory.id, "evidence_ids": memory.evidence_ids,
                              "text": f"学伴记得：「{names[memory.knowledge_id].name}」你已经在不同日期独立做对过，相信自己再检查一遍。"})
