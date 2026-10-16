@@ -166,6 +166,7 @@ def register_downstream_purger(function):
 
 
 def _purge_downstream(session, tenant_id, student_id):
+    from . import learning_jobs  # noqa: F401  registers every learning purger
     for function in DOWNSTREAM_PURGERS:
         function(session, tenant_id, student_id)
 

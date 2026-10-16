@@ -309,11 +309,13 @@ def main():
     engine = create_database_engine(settings.database_url, allow_sqlite=settings.allow_sqlite_for_tests)
     try:
         from .governance import DeletionExecutor
+        from .learning_jobs import LearningWorker
         deletions = DeletionExecutor(engine, settings)
         with CorrectionPipeline.from_env() as pipeline:
             worker = CorrectionWorker(engine, settings, pipeline)
+            learning = LearningWorker(engine, client=pipeline.client)
             while True:
-                worked = deletions.run_once() or worker.run_once()
+                worked = deletions.run_once() or worker.run_once() or learning.run_once()
                 if args.once:
                     break
                 if not worked:

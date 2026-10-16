@@ -1,0 +1,3283 @@
+{
+ "graph_version": "pep-math-junior-pilot-1",
+ "subject": "math",
+ "title": "人教版初中数学知识点（试点种子）",
+ "review_status": "pilot_seed_unreviewed",
+ "source_note": "按人教版初中数学章节目录自编的知识点词典与前置关系，不含教材正文。七年级按2024年版章节编号；八、九年级章节编号与版次须教研按校区实际教材核对后发布正式版本。",
+ "nodes": [
+  {
+   "id": "kp-math-junior",
+   "node_type": "subject",
+   "parent_id": null,
+   "name": "初中数学",
+   "definition": "人教版初中数学（7—9年级）课程范围。",
+   "observable_objective": null,
+   "curriculum_refs": [],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 0
+  },
+  {
+   "id": "ch-7a-01",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第1章 有理数",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 1,
+     "chapter_title": "有理数",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 1
+  },
+  {
+   "id": "kp-rational-concept",
+   "node_type": "concept",
+   "parent_id": "ch-7a-01",
+   "name": "有理数的概念与分类",
+   "definition": "整数和分数统称有理数；按正负或按整数/分数分类。",
+   "observable_objective": "能判断给定数属于哪一类有理数并说明理由。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 1,
+     "chapter_title": "有理数",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "正负分类",
+    "整数分数分类"
+   ],
+   "misconception_codes": [
+    "zero_sign_confusion"
+   ],
+   "sort_order": 2
+  },
+  {
+   "id": "kp-number-line",
+   "node_type": "concept",
+   "parent_id": "ch-7a-01",
+   "name": "数轴",
+   "definition": "规定了原点、正方向和单位长度的直线，有理数可用数轴上的点表示。",
+   "observable_objective": "能在数轴上表示有理数并据此比较大小。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 1,
+     "chapter_title": "有理数",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "表示点",
+    "比较大小"
+   ],
+   "misconception_codes": [],
+   "sort_order": 3
+  },
+  {
+   "id": "kp-opposite-abs",
+   "node_type": "concept",
+   "parent_id": "ch-7a-01",
+   "name": "相反数与绝对值",
+   "definition": "只有符号不同的两个数互为相反数；绝对值是数轴上点到原点的距离。",
+   "observable_objective": "能求一个数的相反数与绝对值，并处理含字母的简单情形。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 1,
+     "chapter_title": "有理数",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "相反数",
+    "绝对值",
+    "含字母"
+   ],
+   "misconception_codes": [
+    "abs_drops_sign_wrongly"
+   ],
+   "sort_order": 4
+  },
+  {
+   "id": "kp-rational-compare",
+   "node_type": "concept",
+   "parent_id": "ch-7a-01",
+   "name": "有理数的大小比较",
+   "definition": "正数大于零，零大于负数；两个负数绝对值大的反而小。",
+   "observable_objective": "能比较有理数大小并说明依据。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 1,
+     "chapter_title": "有理数",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "负数比较"
+   ],
+   "misconception_codes": [
+    "negative_compare_reversed"
+   ],
+   "sort_order": 5
+  },
+  {
+   "id": "ch-7a-02",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第2章 有理数的运算",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 2,
+     "chapter_title": "有理数的运算",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 6
+  },
+  {
+   "id": "kp-rational-add-sub",
+   "node_type": "concept",
+   "parent_id": "ch-7a-02",
+   "name": "有理数的加减法",
+   "definition": "同号相加取相同符号，异号相加取绝对值较大数的符号；减去一个数等于加上它的相反数。",
+   "observable_objective": "能正确进行含负数的加减运算。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 2,
+     "chapter_title": "有理数的运算",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "同号",
+    "异号",
+    "减法转加法"
+   ],
+   "misconception_codes": [
+    "sign_error",
+    "subtraction_not_converted"
+   ],
+   "sort_order": 7
+  },
+  {
+   "id": "kp-rational-mul-div",
+   "node_type": "concept",
+   "parent_id": "ch-7a-02",
+   "name": "有理数的乘除法",
+   "definition": "两数相乘除，同号得正，异号得负，并把绝对值相乘除。",
+   "observable_objective": "能正确确定积商的符号并计算。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 2,
+     "chapter_title": "有理数的运算",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "符号法则",
+    "多因数"
+   ],
+   "misconception_codes": [
+    "sign_error"
+   ],
+   "sort_order": 8
+  },
+  {
+   "id": "kp-rational-power",
+   "node_type": "concept",
+   "parent_id": "ch-7a-02",
+   "name": "有理数的乘方",
+   "definition": "求 n 个相同因数积的运算；注意 (-a)^n 与 -a^n 的区别。",
+   "observable_objective": "能区分底数与指数并正确计算含负数的乘方。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 2,
+     "chapter_title": "有理数的运算",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "负数底数",
+    "-a^n 形式"
+   ],
+   "misconception_codes": [
+    "negative_base_confusion"
+   ],
+   "sort_order": 9
+  },
+  {
+   "id": "kp-rational-mixed-ops",
+   "node_type": "concept",
+   "parent_id": "ch-7a-02",
+   "name": "有理数的混合运算",
+   "definition": "先乘方，再乘除，最后加减；有括号先算括号内。",
+   "observable_objective": "能按运算顺序完成混合运算，必要时合理使用运算律。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 2,
+     "chapter_title": "有理数的运算",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "运算顺序",
+    "运算律简算"
+   ],
+   "misconception_codes": [
+    "order_of_operations"
+   ],
+   "sort_order": 10
+  },
+  {
+   "id": "kp-scientific-notation",
+   "node_type": "concept",
+   "parent_id": "ch-7a-02",
+   "name": "科学记数法与近似数",
+   "definition": "把一个数表示成 a×10^n（1≤|a|<10）的形式；按要求取近似值。",
+   "observable_objective": "能用科学记数法表示数并按精确度取近似数。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 2,
+     "chapter_title": "有理数的运算",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [
+    "exponent_count_error"
+   ],
+   "sort_order": 11
+  },
+  {
+   "id": "ch-7a-03",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第3章 代数式",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 3,
+     "chapter_title": "代数式",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 12
+  },
+  {
+   "id": "kp-algebraic-expression",
+   "node_type": "concept",
+   "parent_id": "ch-7a-03",
+   "name": "列代数式",
+   "definition": "用运算符号把数和表示数的字母连接起来的式子。",
+   "observable_objective": "能根据文字描述列出代数式。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 3,
+     "chapter_title": "代数式",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "文字到式子"
+   ],
+   "misconception_codes": [
+    "wording_misread"
+   ],
+   "sort_order": 13
+  },
+  {
+   "id": "kp-expression-value",
+   "node_type": "concept",
+   "parent_id": "ch-7a-03",
+   "name": "代数式的值",
+   "definition": "用数值代替代数式里的字母，按运算计算得到的结果。",
+   "observable_objective": "能代入求值，负数代入时正确加括号。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 3,
+     "chapter_title": "代数式",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "负数代入"
+   ],
+   "misconception_codes": [
+    "missing_brackets_on_substitution"
+   ],
+   "sort_order": 14
+  },
+  {
+   "id": "ch-7a-04",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第4章 整式的加法与减法",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 4,
+     "chapter_title": "整式的加法与减法",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 15
+  },
+  {
+   "id": "kp-monomial-polynomial",
+   "node_type": "concept",
+   "parent_id": "ch-7a-04",
+   "name": "单项式与多项式",
+   "definition": "数与字母的积为单项式；几个单项式的和为多项式；系数、次数、项。",
+   "observable_objective": "能指出系数、次数、项和常数项。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 4,
+     "chapter_title": "整式的加法与减法",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "系数",
+    "次数"
+   ],
+   "misconception_codes": [
+    "degree_confusion"
+   ],
+   "sort_order": 16
+  },
+  {
+   "id": "kp-like-terms",
+   "node_type": "concept",
+   "parent_id": "ch-7a-04",
+   "name": "合并同类项",
+   "definition": "所含字母相同且相同字母指数也相同的项为同类项；合并时系数相加，字母部分不变。",
+   "observable_objective": "能识别同类项并正确合并。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 4,
+     "chapter_title": "整式的加法与减法",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "识别",
+    "合并"
+   ],
+   "misconception_codes": [
+    "combine_unlike_terms"
+   ],
+   "sort_order": 17
+  },
+  {
+   "id": "kp-remove-brackets",
+   "node_type": "concept",
+   "parent_id": "ch-7a-04",
+   "name": "去括号",
+   "definition": "括号前是“+”号，去括号后各项不变号；括号前是“-”号，各项都变号。",
+   "observable_objective": "能正确去括号，括号前为负号时每一项都变号。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 4,
+     "chapter_title": "整式的加法与减法",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "正号括号",
+    "负号括号",
+    "带系数括号"
+   ],
+   "misconception_codes": [
+    "partial_sign_change",
+    "missed_distribution"
+   ],
+   "sort_order": 18
+  },
+  {
+   "id": "kp-polynomial-add-sub",
+   "node_type": "concept",
+   "parent_id": "ch-7a-04",
+   "name": "整式的加减",
+   "definition": "整式加减的一般步骤是先去括号，再合并同类项。",
+   "observable_objective": "能完成整式化简求值。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 4,
+     "chapter_title": "整式的加法与减法",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "化简",
+    "化简求值"
+   ],
+   "misconception_codes": [
+    "partial_sign_change"
+   ],
+   "sort_order": 19
+  },
+  {
+   "id": "ch-7a-05",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第5章 一元一次方程",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 5,
+     "chapter_title": "一元一次方程",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 20
+  },
+  {
+   "id": "kp-equation-properties",
+   "node_type": "concept",
+   "parent_id": "ch-7a-05",
+   "name": "等式的性质",
+   "definition": "等式两边同加减或同乘同一个数（除数不为0），结果仍相等。",
+   "observable_objective": "能依据等式性质对方程变形并说明依据。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 5,
+     "chapter_title": "一元一次方程",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [
+    "one_side_only_operation"
+   ],
+   "sort_order": 21
+  },
+  {
+   "id": "kp-linear-eq-transpose",
+   "node_type": "concept",
+   "parent_id": "ch-7a-05",
+   "name": "解一元一次方程：移项与合并",
+   "definition": "把含未知数的项移到一边、常数项移到另一边，移项要变号。",
+   "observable_objective": "能通过移项、合并、系数化为1解方程。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 5,
+     "chapter_title": "一元一次方程",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "移项变号",
+    "系数化1"
+   ],
+   "misconception_codes": [
+    "transpose_without_sign_change",
+    "divide_wrong_side"
+   ],
+   "sort_order": 22
+  },
+  {
+   "id": "kp-linear-eq-brackets",
+   "node_type": "concept",
+   "parent_id": "ch-7a-05",
+   "name": "解一元一次方程：去括号",
+   "definition": "方程含括号时先去括号再求解。",
+   "observable_objective": "能解含括号的一元一次方程。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 5,
+     "chapter_title": "一元一次方程",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "负号括号",
+    "带系数括号"
+   ],
+   "misconception_codes": [
+    "missed_distribution",
+    "partial_sign_change"
+   ],
+   "sort_order": 23
+  },
+  {
+   "id": "kp-linear-eq-denominator",
+   "node_type": "concept",
+   "parent_id": "ch-7a-05",
+   "name": "解一元一次方程：去分母",
+   "definition": "方程两边同乘各分母的最小公倍数，不漏乘不含分母的项，分子是多项式时加括号。",
+   "observable_objective": "能正确去分母并求解。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 5,
+     "chapter_title": "一元一次方程",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "漏乘整数项",
+    "分子加括号"
+   ],
+   "misconception_codes": [
+    "missed_term_when_clearing",
+    "numerator_bracket_missing"
+   ],
+   "sort_order": 24
+  },
+  {
+   "id": "kp-linear-eq-application",
+   "node_type": "concept",
+   "parent_id": "ch-7a-05",
+   "name": "一元一次方程的应用",
+   "definition": "根据实际问题中的等量关系列方程并检验解的合理性。",
+   "observable_objective": "能找出等量关系、列方程并作答。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 5,
+     "chapter_title": "一元一次方程",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "行程",
+    "工程",
+    "销售"
+   ],
+   "misconception_codes": [
+    "equal_relation_wrong"
+   ],
+   "sort_order": 25
+  },
+  {
+   "id": "ch-7a-06",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第6章 几何图形初步",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 6,
+     "chapter_title": "几何图形初步",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 26
+  },
+  {
+   "id": "kp-solid-plane-figures",
+   "node_type": "concept",
+   "parent_id": "ch-7a-06",
+   "name": "几何图形与展开图",
+   "definition": "认识立体图形、平面图形及正方体等的展开图。",
+   "observable_objective": "能判断展开图能否围成给定立体图形。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 6,
+     "chapter_title": "几何图形初步",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 27
+  },
+  {
+   "id": "kp-line-segment-ray",
+   "node_type": "concept",
+   "parent_id": "ch-7a-06",
+   "name": "直线、射线、线段",
+   "definition": "掌握两点确定一条直线、两点之间线段最短，线段的和差与中点。",
+   "observable_objective": "能进行线段的和差计算与中点相关计算。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 6,
+     "chapter_title": "几何图形初步",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "中点计算"
+   ],
+   "misconception_codes": [],
+   "sort_order": 28
+  },
+  {
+   "id": "kp-angle-basics",
+   "node_type": "concept",
+   "parent_id": "ch-7a-06",
+   "name": "角的度量与比较",
+   "definition": "角的度分秒换算、角的和差、角平分线。",
+   "observable_objective": "能进行角的度量换算与和差计算。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 6,
+     "chapter_title": "几何图形初步",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "度分秒换算",
+    "角平分线"
+   ],
+   "misconception_codes": [
+    "sexagesimal_conversion"
+   ],
+   "sort_order": 29
+  },
+  {
+   "id": "kp-complement-supplement",
+   "node_type": "concept",
+   "parent_id": "ch-7a-06",
+   "name": "余角与补角",
+   "definition": "和为90°的两角互余，和为180°的两角互补；同角的余角（补角）相等。",
+   "observable_objective": "能求余角补角并用于推理。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "upper",
+     "chapter_no": 6,
+     "chapter_title": "几何图形初步",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 30
+  },
+  {
+   "id": "ch-7b-07",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第7章 相交线与平行线",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 7,
+     "chapter_title": "相交线与平行线",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 31
+  },
+  {
+   "id": "kp-intersecting-lines",
+   "node_type": "concept",
+   "parent_id": "ch-7b-07",
+   "name": "相交线与垂线",
+   "definition": "对顶角相等，邻补角互补；垂线段最短。",
+   "observable_objective": "能识别对顶角、邻补角并计算。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 7,
+     "chapter_title": "相交线与平行线",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 32
+  },
+  {
+   "id": "kp-parallel-criteria",
+   "node_type": "concept",
+   "parent_id": "ch-7b-07",
+   "name": "平行线的判定",
+   "definition": "同位角相等、内错角相等或同旁内角互补，两直线平行。",
+   "observable_objective": "能选择正确的判定方法并书写推理。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 7,
+     "chapter_title": "相交线与平行线",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "判定写法"
+   ],
+   "misconception_codes": [
+    "criteria_property_confused"
+   ],
+   "sort_order": 33
+  },
+  {
+   "id": "kp-parallel-properties",
+   "node_type": "concept",
+   "parent_id": "ch-7b-07",
+   "name": "平行线的性质",
+   "definition": "两直线平行，同位角相等、内错角相等、同旁内角互补。",
+   "observable_objective": "能运用性质求角并完成推理。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 7,
+     "chapter_title": "相交线与平行线",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [
+    "criteria_property_confused"
+   ],
+   "sort_order": 34
+  },
+  {
+   "id": "kp-translation",
+   "node_type": "concept",
+   "parent_id": "ch-7b-07",
+   "name": "平移",
+   "definition": "图形平移前后对应点连线平行且相等，形状大小不变。",
+   "observable_objective": "能作出平移后的图形并说明性质。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 7,
+     "chapter_title": "相交线与平行线",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 35
+  },
+  {
+   "id": "ch-7b-08",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第8章 实数",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 8,
+     "chapter_title": "实数",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 36
+  },
+  {
+   "id": "kp-square-root",
+   "node_type": "concept",
+   "parent_id": "ch-7b-08",
+   "name": "平方根与算术平方根",
+   "definition": "若 x²=a，则 x 叫作 a 的平方根；非负平方根为算术平方根。",
+   "observable_objective": "能求平方根与算术平方根，区分 ±。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 8,
+     "chapter_title": "实数",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "正负两个根"
+   ],
+   "misconception_codes": [
+    "missing_negative_root"
+   ],
+   "sort_order": 37
+  },
+  {
+   "id": "kp-cube-root",
+   "node_type": "concept",
+   "parent_id": "ch-7b-08",
+   "name": "立方根",
+   "definition": "若 x³=a，则 x 叫作 a 的立方根，任何数有唯一立方根。",
+   "observable_objective": "能求立方根。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 8,
+     "chapter_title": "实数",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 38
+  },
+  {
+   "id": "kp-real-numbers",
+   "node_type": "concept",
+   "parent_id": "ch-7b-08",
+   "name": "实数的概念与运算",
+   "definition": "有理数和无理数统称实数；实数与数轴上的点一一对应。",
+   "observable_objective": "能判断无理数并进行简单实数运算与估算。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 8,
+     "chapter_title": "实数",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "无理数判断",
+    "估算"
+   ],
+   "misconception_codes": [
+    "irrational_misclassified"
+   ],
+   "sort_order": 39
+  },
+  {
+   "id": "ch-7b-09",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第9章 平面直角坐标系",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 9,
+     "chapter_title": "平面直角坐标系",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 40
+  },
+  {
+   "id": "kp-coordinate-plane",
+   "node_type": "concept",
+   "parent_id": "ch-7b-09",
+   "name": "平面直角坐标系与点的坐标",
+   "definition": "有序数对确定平面内点的位置；各象限点的坐标符号。",
+   "observable_objective": "能写出点的坐标并判断所在象限。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 9,
+     "chapter_title": "平面直角坐标系",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "象限符号"
+   ],
+   "misconception_codes": [
+    "coordinate_order_swapped"
+   ],
+   "sort_order": 41
+  },
+  {
+   "id": "kp-coordinate-translation",
+   "node_type": "concept",
+   "parent_id": "ch-7b-09",
+   "name": "坐标表示平移",
+   "definition": "点左右平移改变横坐标，上下平移改变纵坐标。",
+   "observable_objective": "能用坐标描述平移。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 9,
+     "chapter_title": "平面直角坐标系",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [
+    "coordinate_order_swapped"
+   ],
+   "sort_order": 42
+  },
+  {
+   "id": "ch-7b-10",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第10章 二元一次方程组",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 10,
+     "chapter_title": "二元一次方程组",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 43
+  },
+  {
+   "id": "kp-linear-system-concept",
+   "node_type": "concept",
+   "parent_id": "ch-7b-10",
+   "name": "二元一次方程组的概念与解",
+   "definition": "含两个未知数且次数为1的整式方程组成的方程组；解为同时满足的数对。",
+   "observable_objective": "能检验数对是否为方程组的解。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 10,
+     "chapter_title": "二元一次方程组",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 44
+  },
+  {
+   "id": "kp-substitution-elimination",
+   "node_type": "concept",
+   "parent_id": "ch-7b-10",
+   "name": "代入消元法",
+   "definition": "把一个方程变形后代入另一个方程消去一个未知数。",
+   "observable_objective": "能用代入法解方程组。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 10,
+     "chapter_title": "二元一次方程组",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [
+    "substitution_bracket_missing"
+   ],
+   "sort_order": 45
+  },
+  {
+   "id": "kp-addition-elimination",
+   "node_type": "concept",
+   "parent_id": "ch-7b-10",
+   "name": "加减消元法",
+   "definition": "两方程同乘适当的数后相加减消去一个未知数。",
+   "observable_objective": "能用加减法解方程组。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 10,
+     "chapter_title": "二元一次方程组",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [
+    "partial_multiplication"
+   ],
+   "sort_order": 46
+  },
+  {
+   "id": "kp-linear-system-application",
+   "node_type": "concept",
+   "parent_id": "ch-7b-10",
+   "name": "二元一次方程组的应用",
+   "definition": "根据两个等量关系列方程组解决实际问题。",
+   "observable_objective": "能列出方程组并作答。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 10,
+     "chapter_title": "二元一次方程组",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [
+    "equal_relation_wrong"
+   ],
+   "sort_order": 47
+  },
+  {
+   "id": "ch-7b-11",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第11章 不等式与不等式组",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 11,
+     "chapter_title": "不等式与不等式组",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 48
+  },
+  {
+   "id": "kp-inequality-properties",
+   "node_type": "concept",
+   "parent_id": "ch-7b-11",
+   "name": "不等式的性质",
+   "definition": "不等式两边同乘除同一个负数，不等号方向改变。",
+   "observable_objective": "能依据性质变形，乘除负数时改变方向。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 11,
+     "chapter_title": "不等式与不等式组",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "乘除负数"
+   ],
+   "misconception_codes": [
+    "inequality_direction_not_flipped"
+   ],
+   "sort_order": 49
+  },
+  {
+   "id": "kp-linear-inequality",
+   "node_type": "concept",
+   "parent_id": "ch-7b-11",
+   "name": "解一元一次不等式",
+   "definition": "步骤与解方程类似，注意系数化1时的方向，并能在数轴上表示解集。",
+   "observable_objective": "能解不等式并在数轴上表示。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 11,
+     "chapter_title": "不等式与不等式组",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "数轴表示"
+   ],
+   "misconception_codes": [
+    "inequality_direction_not_flipped"
+   ],
+   "sort_order": 50
+  },
+  {
+   "id": "kp-inequality-system",
+   "node_type": "concept",
+   "parent_id": "ch-7b-11",
+   "name": "一元一次不等式组",
+   "definition": "分别求各不等式解集再取公共部分。",
+   "observable_objective": "能求不等式组的解集与整数解。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 11,
+     "chapter_title": "不等式与不等式组",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "公共部分",
+    "整数解"
+   ],
+   "misconception_codes": [
+    "intersection_wrong"
+   ],
+   "sort_order": 51
+  },
+  {
+   "id": "ch-7b-12",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第12章 数据的收集、整理与描述",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 12,
+     "chapter_title": "数据的收集、整理与描述",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 52
+  },
+  {
+   "id": "kp-data-collection",
+   "node_type": "concept",
+   "parent_id": "ch-7b-12",
+   "name": "数据的收集与抽样",
+   "definition": "全面调查与抽样调查；样本的代表性。",
+   "observable_objective": "能判断调查方式是否合适。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 12,
+     "chapter_title": "数据的收集、整理与描述",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 53
+  },
+  {
+   "id": "kp-statistical-charts",
+   "node_type": "concept",
+   "parent_id": "ch-7b-12",
+   "name": "统计图表",
+   "definition": "条形图、扇形图、折线图与频数分布直方图的读取和绘制。",
+   "observable_objective": "能从统计图中读取并计算所需信息。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 7,
+     "term": "lower",
+     "chapter_no": 12,
+     "chapter_title": "数据的收集、整理与描述",
+     "textbook_revision": "2024"
+    }
+   ],
+   "coverage_facets": [
+    "扇形圆心角"
+   ],
+   "misconception_codes": [],
+   "sort_order": 54
+  },
+  {
+   "id": "ch-8a-13",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第13章 三角形",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "upper",
+     "chapter_no": 13,
+     "chapter_title": "三角形",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 55
+  },
+  {
+   "id": "kp-triangle-sides",
+   "node_type": "concept",
+   "parent_id": "ch-8a-13",
+   "name": "三角形的三边关系",
+   "definition": "三角形任意两边之和大于第三边，两边之差小于第三边。",
+   "observable_objective": "能判断三条线段能否组成三角形。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "upper",
+     "chapter_no": 13,
+     "chapter_title": "三角形",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 56
+  },
+  {
+   "id": "kp-triangle-angles",
+   "node_type": "concept",
+   "parent_id": "ch-8a-13",
+   "name": "三角形的内角与外角",
+   "definition": "内角和180°，外角等于不相邻两内角之和。",
+   "observable_objective": "能运用内角和与外角性质求角。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "upper",
+     "chapter_no": 13,
+     "chapter_title": "三角形",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 57
+  },
+  {
+   "id": "kp-polygon-angles",
+   "node_type": "concept",
+   "parent_id": "ch-8a-13",
+   "name": "多边形的内角和与外角和",
+   "definition": "n 边形内角和为 (n-2)×180°，外角和为 360°。",
+   "observable_objective": "能求多边形内角和与边数。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "upper",
+     "chapter_no": 13,
+     "chapter_title": "三角形",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 58
+  },
+  {
+   "id": "ch-8a-14",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第14章 全等三角形",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "upper",
+     "chapter_no": 14,
+     "chapter_title": "全等三角形",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 59
+  },
+  {
+   "id": "kp-congruence-criteria",
+   "node_type": "concept",
+   "parent_id": "ch-8a-14",
+   "name": "全等三角形的判定",
+   "definition": "SSS、SAS、ASA、AAS、HL。",
+   "observable_objective": "能选择判定方法并规范书写证明。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "upper",
+     "chapter_no": 14,
+     "chapter_title": "全等三角形",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [
+    "SAS 夹角",
+    "HL"
+   ],
+   "misconception_codes": [
+    "ssa_misused"
+   ],
+   "sort_order": 60
+  },
+  {
+   "id": "kp-angle-bisector-property",
+   "node_type": "concept",
+   "parent_id": "ch-8a-14",
+   "name": "角平分线的性质",
+   "definition": "角平分线上的点到角两边距离相等，反之亦然。",
+   "observable_objective": "能运用角平分线性质证明或计算。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "upper",
+     "chapter_no": 14,
+     "chapter_title": "全等三角形",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 61
+  },
+  {
+   "id": "ch-8a-15",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第15章 轴对称",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "upper",
+     "chapter_no": 15,
+     "chapter_title": "轴对称",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 62
+  },
+  {
+   "id": "kp-axial-symmetry",
+   "node_type": "concept",
+   "parent_id": "ch-8a-15",
+   "name": "轴对称与垂直平分线",
+   "definition": "线段垂直平分线上的点到两端点距离相等。",
+   "observable_objective": "能运用垂直平分线性质并作对称图形。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "upper",
+     "chapter_no": 15,
+     "chapter_title": "轴对称",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 63
+  },
+  {
+   "id": "kp-isosceles-triangle",
+   "node_type": "concept",
+   "parent_id": "ch-8a-15",
+   "name": "等腰三角形",
+   "definition": "等边对等角，三线合一；等边三角形的性质与判定。",
+   "observable_objective": "能运用等腰三角形性质与判定解题。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "upper",
+     "chapter_no": 15,
+     "chapter_title": "轴对称",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [
+    "三线合一"
+   ],
+   "misconception_codes": [],
+   "sort_order": 64
+  },
+  {
+   "id": "ch-8a-16",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第16章 整式的乘法",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "upper",
+     "chapter_no": 16,
+     "chapter_title": "整式的乘法",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 65
+  },
+  {
+   "id": "kp-power-rules",
+   "node_type": "concept",
+   "parent_id": "ch-8a-16",
+   "name": "幂的运算",
+   "definition": "同底数幂相乘指数相加，幂的乘方指数相乘，积的乘方等于各因式乘方的积。",
+   "observable_objective": "能正确运用幂的运算法则。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "upper",
+     "chapter_no": 16,
+     "chapter_title": "整式的乘法",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [
+    "同底数幂",
+    "幂的乘方",
+    "积的乘方"
+   ],
+   "misconception_codes": [
+    "exponent_add_multiply_confused"
+   ],
+   "sort_order": 66
+  },
+  {
+   "id": "kp-polynomial-multiplication",
+   "node_type": "concept",
+   "parent_id": "ch-8a-16",
+   "name": "整式的乘法",
+   "definition": "单项式乘多项式用分配律，多项式乘多项式每项都要相乘。",
+   "observable_objective": "能完成整式乘法且不漏项。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "upper",
+     "chapter_no": 16,
+     "chapter_title": "整式的乘法",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [
+    "单乘多",
+    "多乘多"
+   ],
+   "misconception_codes": [
+    "missed_distribution"
+   ],
+   "sort_order": 67
+  },
+  {
+   "id": "kp-special-products",
+   "node_type": "concept",
+   "parent_id": "ch-8a-16",
+   "name": "乘法公式",
+   "definition": "平方差公式与完全平方公式。",
+   "observable_objective": "能识别并正确运用乘法公式。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "upper",
+     "chapter_no": 16,
+     "chapter_title": "整式的乘法",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [
+    "平方差",
+    "完全平方"
+   ],
+   "misconception_codes": [
+    "square_of_sum_missing_middle_term"
+   ],
+   "sort_order": 68
+  },
+  {
+   "id": "ch-8a-17",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第17章 因式分解",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "upper",
+     "chapter_no": 17,
+     "chapter_title": "因式分解",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 69
+  },
+  {
+   "id": "kp-factor-common",
+   "node_type": "concept",
+   "parent_id": "ch-8a-17",
+   "name": "提公因式法",
+   "definition": "把多项式各项的公因式提到括号外。",
+   "observable_objective": "能找全公因式并提取，括号内项数不变。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "upper",
+     "chapter_no": 17,
+     "chapter_title": "因式分解",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [
+    "common_factor_incomplete"
+   ],
+   "sort_order": 70
+  },
+  {
+   "id": "kp-factor-formula",
+   "node_type": "concept",
+   "parent_id": "ch-8a-17",
+   "name": "公式法",
+   "definition": "利用平方差和完全平方公式分解因式，并分解到不能再分解。",
+   "observable_objective": "能运用公式法彻底分解。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "upper",
+     "chapter_no": 17,
+     "chapter_title": "因式分解",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [
+    "彻底分解"
+   ],
+   "misconception_codes": [
+    "not_fully_factored"
+   ],
+   "sort_order": 71
+  },
+  {
+   "id": "ch-8a-18",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第18章 分式",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "upper",
+     "chapter_no": 18,
+     "chapter_title": "分式",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 72
+  },
+  {
+   "id": "kp-fraction-concept",
+   "node_type": "concept",
+   "parent_id": "ch-8a-18",
+   "name": "分式的概念与基本性质",
+   "definition": "分母含字母的式子；分母不为零；分子分母同乘除不为零的整式值不变。",
+   "observable_objective": "能求分式有意义的条件并约分通分。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "upper",
+     "chapter_no": 18,
+     "chapter_title": "分式",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [
+    "有意义条件",
+    "约分通分"
+   ],
+   "misconception_codes": [
+    "denominator_zero_ignored"
+   ],
+   "sort_order": 73
+  },
+  {
+   "id": "kp-fraction-operations",
+   "node_type": "concept",
+   "parent_id": "ch-8a-18",
+   "name": "分式的运算",
+   "definition": "分式的乘除与加减，结果化为最简。",
+   "observable_objective": "能完成分式混合运算。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "upper",
+     "chapter_no": 18,
+     "chapter_title": "分式",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [
+    "partial_sign_change"
+   ],
+   "sort_order": 74
+  },
+  {
+   "id": "kp-fractional-equation",
+   "node_type": "concept",
+   "parent_id": "ch-8a-18",
+   "name": "分式方程",
+   "definition": "去分母化为整式方程求解，必须检验增根。",
+   "observable_objective": "能解分式方程并检验。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "upper",
+     "chapter_no": 18,
+     "chapter_title": "分式",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [
+    "检验增根"
+   ],
+   "misconception_codes": [
+    "extraneous_root_not_checked"
+   ],
+   "sort_order": 75
+  },
+  {
+   "id": "ch-8b-19",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第19章 二次根式",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "lower",
+     "chapter_no": 19,
+     "chapter_title": "二次根式",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 76
+  },
+  {
+   "id": "kp-quadratic-radical",
+   "node_type": "concept",
+   "parent_id": "ch-8b-19",
+   "name": "二次根式的性质与运算",
+   "definition": "√a（a≥0）的性质；乘除与加减运算及化简。",
+   "observable_objective": "能化简二次根式并进行运算。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "lower",
+     "chapter_no": 19,
+     "chapter_title": "二次根式",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [
+    "有意义条件",
+    "化简"
+   ],
+   "misconception_codes": [
+    "radical_add_wrongly"
+   ],
+   "sort_order": 77
+  },
+  {
+   "id": "ch-8b-20",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第20章 勾股定理",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "lower",
+     "chapter_no": 20,
+     "chapter_title": "勾股定理",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 78
+  },
+  {
+   "id": "kp-pythagorean",
+   "node_type": "concept",
+   "parent_id": "ch-8b-20",
+   "name": "勾股定理及其逆定理",
+   "definition": "直角三角形两直角边平方和等于斜边平方；逆定理判断直角三角形。",
+   "observable_objective": "能运用勾股定理求边长并判断直角。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "lower",
+     "chapter_no": 20,
+     "chapter_title": "勾股定理",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [
+    "逆定理"
+   ],
+   "misconception_codes": [
+    "hypotenuse_misidentified"
+   ],
+   "sort_order": 79
+  },
+  {
+   "id": "ch-8b-21",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第21章 平行四边形",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "lower",
+     "chapter_no": 21,
+     "chapter_title": "平行四边形",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 80
+  },
+  {
+   "id": "kp-parallelogram",
+   "node_type": "concept",
+   "parent_id": "ch-8b-21",
+   "name": "平行四边形的性质与判定",
+   "definition": "对边平行且相等、对角相等、对角线互相平分。",
+   "observable_objective": "能运用性质与判定进行证明和计算。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "lower",
+     "chapter_no": 21,
+     "chapter_title": "平行四边形",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 81
+  },
+  {
+   "id": "kp-special-parallelograms",
+   "node_type": "concept",
+   "parent_id": "ch-8b-21",
+   "name": "特殊平行四边形",
+   "definition": "矩形、菱形、正方形的性质与判定。",
+   "observable_objective": "能区分并运用特殊平行四边形的性质。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "lower",
+     "chapter_no": 21,
+     "chapter_title": "平行四边形",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 82
+  },
+  {
+   "id": "ch-8b-22",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第22章 一次函数",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "lower",
+     "chapter_no": 22,
+     "chapter_title": "一次函数",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 83
+  },
+  {
+   "id": "kp-function-concept",
+   "node_type": "concept",
+   "parent_id": "ch-8b-22",
+   "name": "函数的概念",
+   "definition": "两个变量中，一个变量每取一个值，另一个变量有唯一值与之对应。",
+   "observable_objective": "能判断函数关系并求自变量取值范围。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "lower",
+     "chapter_no": 22,
+     "chapter_title": "一次函数",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 84
+  },
+  {
+   "id": "kp-linear-function",
+   "node_type": "concept",
+   "parent_id": "ch-8b-22",
+   "name": "一次函数的图像与性质",
+   "definition": "y=kx+b 的图像是直线，k 决定增减，b 决定与 y 轴交点。",
+   "observable_objective": "能根据 k、b 判断图像和增减性，并用待定系数法求解析式。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "lower",
+     "chapter_no": 22,
+     "chapter_title": "一次函数",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [
+    "k 符号",
+    "待定系数法"
+   ],
+   "misconception_codes": [
+    "slope_intercept_confused"
+   ],
+   "sort_order": 85
+  },
+  {
+   "id": "ch-8b-23",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第23章 数据的分析",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "lower",
+     "chapter_no": 23,
+     "chapter_title": "数据的分析",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 86
+  },
+  {
+   "id": "kp-central-tendency",
+   "node_type": "concept",
+   "parent_id": "ch-8b-23",
+   "name": "平均数、中位数与众数",
+   "definition": "描述数据集中趋势的统计量，加权平均数。",
+   "observable_objective": "能求并解释平均数、中位数、众数。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "lower",
+     "chapter_no": 23,
+     "chapter_title": "数据的分析",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [
+    "加权平均"
+   ],
+   "misconception_codes": [
+    "median_unsorted"
+   ],
+   "sort_order": 87
+  },
+  {
+   "id": "kp-variance",
+   "node_type": "concept",
+   "parent_id": "ch-8b-23",
+   "name": "方差",
+   "definition": "描述数据波动程度。",
+   "observable_objective": "能计算方差并比较稳定性。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 8,
+     "term": "lower",
+     "chapter_no": 23,
+     "chapter_title": "数据的分析",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 88
+  },
+  {
+   "id": "ch-9a-21",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第21章 一元二次方程",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 9,
+     "term": "upper",
+     "chapter_no": 21,
+     "chapter_title": "一元二次方程",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 89
+  },
+  {
+   "id": "kp-quadratic-eq-solving",
+   "node_type": "concept",
+   "parent_id": "ch-9a-21",
+   "name": "一元二次方程的解法",
+   "definition": "直接开平方、配方、公式法、因式分解法。",
+   "observable_objective": "能选择合适方法解一元二次方程。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 9,
+     "term": "upper",
+     "chapter_no": 21,
+     "chapter_title": "一元二次方程",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [
+    "配方",
+    "公式法",
+    "因式分解"
+   ],
+   "misconception_codes": [
+    "lost_root_dividing_by_variable"
+   ],
+   "sort_order": 90
+  },
+  {
+   "id": "kp-discriminant-vieta",
+   "node_type": "concept",
+   "parent_id": "ch-9a-21",
+   "name": "根的判别式与根与系数关系",
+   "definition": "Δ=b²-4ac 判断根的情况；x1+x2=-b/a，x1x2=c/a。",
+   "observable_objective": "能用判别式与根系关系解题。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 9,
+     "term": "upper",
+     "chapter_no": 21,
+     "chapter_title": "一元二次方程",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [
+    "vieta_sign_error"
+   ],
+   "sort_order": 91
+  },
+  {
+   "id": "ch-9a-22",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第22章 二次函数",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 9,
+     "term": "upper",
+     "chapter_no": 22,
+     "chapter_title": "二次函数",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 92
+  },
+  {
+   "id": "kp-quadratic-function",
+   "node_type": "concept",
+   "parent_id": "ch-9a-22",
+   "name": "二次函数的图像与性质",
+   "definition": "抛物线开口、对称轴、顶点与增减性。",
+   "observable_objective": "能由解析式确定开口、对称轴和顶点。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 9,
+     "term": "upper",
+     "chapter_no": 22,
+     "chapter_title": "二次函数",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [
+    "顶点式",
+    "一般式"
+   ],
+   "misconception_codes": [
+    "vertex_sign_error"
+   ],
+   "sort_order": 93
+  },
+  {
+   "id": "kp-quadratic-application",
+   "node_type": "concept",
+   "parent_id": "ch-9a-22",
+   "name": "二次函数与方程、实际问题",
+   "definition": "抛物线与 x 轴交点和方程的根；最值应用。",
+   "observable_objective": "能用二次函数求最值并联系方程。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 9,
+     "term": "upper",
+     "chapter_no": 22,
+     "chapter_title": "二次函数",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 94
+  },
+  {
+   "id": "ch-9a-23",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第23章 旋转",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 9,
+     "term": "upper",
+     "chapter_no": 23,
+     "chapter_title": "旋转",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 95
+  },
+  {
+   "id": "kp-rotation",
+   "node_type": "concept",
+   "parent_id": "ch-9a-23",
+   "name": "图形的旋转与中心对称",
+   "definition": "旋转前后对应点到旋转中心距离相等；中心对称的性质。",
+   "observable_objective": "能作旋转图形并运用性质。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 9,
+     "term": "upper",
+     "chapter_no": 23,
+     "chapter_title": "旋转",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 96
+  },
+  {
+   "id": "ch-9a-24",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第24章 圆",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 9,
+     "term": "upper",
+     "chapter_no": 24,
+     "chapter_title": "圆",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 97
+  },
+  {
+   "id": "kp-circle-basic",
+   "node_type": "concept",
+   "parent_id": "ch-9a-24",
+   "name": "圆的有关性质",
+   "definition": "垂径定理、圆心角与圆周角关系。",
+   "observable_objective": "能运用垂径定理与圆周角定理计算和证明。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 9,
+     "term": "upper",
+     "chapter_no": 24,
+     "chapter_title": "圆",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 98
+  },
+  {
+   "id": "kp-circle-position",
+   "node_type": "concept",
+   "parent_id": "ch-9a-24",
+   "name": "点、直线与圆的位置关系",
+   "definition": "切线的判定与性质。",
+   "observable_objective": "能证明切线并运用切线性质。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 9,
+     "term": "upper",
+     "chapter_no": 24,
+     "chapter_title": "圆",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 99
+  },
+  {
+   "id": "kp-circle-measure",
+   "node_type": "concept",
+   "parent_id": "ch-9a-24",
+   "name": "弧长与扇形面积",
+   "definition": "弧长和扇形面积公式。",
+   "observable_objective": "能计算弧长与扇形面积。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 9,
+     "term": "upper",
+     "chapter_no": 24,
+     "chapter_title": "圆",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 100
+  },
+  {
+   "id": "ch-9a-25",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第25章 概率初步",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 9,
+     "term": "upper",
+     "chapter_no": 25,
+     "chapter_title": "概率初步",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 101
+  },
+  {
+   "id": "kp-probability",
+   "node_type": "concept",
+   "parent_id": "ch-9a-25",
+   "name": "概率的计算",
+   "definition": "用列举法（列表、树状图）求概率；频率估计概率。",
+   "observable_objective": "能用列表或树状图求简单事件的概率。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 9,
+     "term": "upper",
+     "chapter_no": 25,
+     "chapter_title": "概率初步",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [
+    "放回与不放回"
+   ],
+   "misconception_codes": [
+    "replacement_confused"
+   ],
+   "sort_order": 102
+  },
+  {
+   "id": "ch-9b-26",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第26章 反比例函数",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 9,
+     "term": "lower",
+     "chapter_no": 26,
+     "chapter_title": "反比例函数",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 103
+  },
+  {
+   "id": "kp-inverse-function",
+   "node_type": "concept",
+   "parent_id": "ch-9b-26",
+   "name": "反比例函数的图像与性质",
+   "definition": "y=k/x 的图像是双曲线，k 决定所在象限与增减性。",
+   "observable_objective": "能根据 k 判断图像与增减性。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 9,
+     "term": "lower",
+     "chapter_no": 26,
+     "chapter_title": "反比例函数",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [
+    "increase_claim_without_branch"
+   ],
+   "sort_order": 104
+  },
+  {
+   "id": "ch-9b-27",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第27章 相似",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 9,
+     "term": "lower",
+     "chapter_no": 27,
+     "chapter_title": "相似",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 105
+  },
+  {
+   "id": "kp-similar-triangles",
+   "node_type": "concept",
+   "parent_id": "ch-9b-27",
+   "name": "相似三角形的判定与性质",
+   "definition": "两角对应相等或两边成比例且夹角相等等；相似比与面积比。",
+   "observable_objective": "能判定相似并运用性质求线段或面积。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 9,
+     "term": "lower",
+     "chapter_no": 27,
+     "chapter_title": "相似",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [
+    "面积比"
+   ],
+   "misconception_codes": [
+    "area_ratio_not_squared"
+   ],
+   "sort_order": 106
+  },
+  {
+   "id": "ch-9b-28",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第28章 锐角三角函数",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 9,
+     "term": "lower",
+     "chapter_no": 28,
+     "chapter_title": "锐角三角函数",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 107
+  },
+  {
+   "id": "kp-trig-ratios",
+   "node_type": "concept",
+   "parent_id": "ch-9b-28",
+   "name": "锐角三角函数与解直角三角形",
+   "definition": "正弦、余弦、正切的定义与特殊角函数值；解直角三角形。",
+   "observable_objective": "能求锐角三角函数值并解直角三角形。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 9,
+     "term": "lower",
+     "chapter_no": 28,
+     "chapter_title": "锐角三角函数",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [
+    "特殊角"
+   ],
+   "misconception_codes": [
+    "opposite_adjacent_swapped"
+   ],
+   "sort_order": 108
+  },
+  {
+   "id": "ch-9b-29",
+   "node_type": "chapter",
+   "parent_id": "kp-math-junior",
+   "name": "第29章 投影与视图",
+   "definition": null,
+   "observable_objective": null,
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 9,
+     "term": "lower",
+     "chapter_no": 29,
+     "chapter_title": "投影与视图",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 109
+  },
+  {
+   "id": "kp-projection-views",
+   "node_type": "concept",
+   "parent_id": "ch-9b-29",
+   "name": "投影与三视图",
+   "definition": "平行投影与中心投影；由物体画三视图、由三视图想象物体。",
+   "observable_objective": "能画出简单几何体的三视图。",
+   "curriculum_refs": [
+    {
+     "stage": "junior_middle_school",
+     "publisher": "人教版",
+     "grade": 9,
+     "term": "lower",
+     "chapter_no": 29,
+     "chapter_title": "投影与视图",
+     "textbook_revision": null
+    }
+   ],
+   "coverage_facets": [],
+   "misconception_codes": [],
+   "sort_order": 110
+  }
+ ],
+ "edges": [
+  {
+   "id": "edge-p001",
+   "from_id": "kp-number-line",
+   "to_id": "kp-opposite-abs",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "相反数和绝对值借助数轴理解"
+  },
+  {
+   "id": "edge-p002",
+   "from_id": "kp-opposite-abs",
+   "to_id": "kp-rational-add-sub",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "异号加法需要比较绝对值并确定符号"
+  },
+  {
+   "id": "edge-p003",
+   "from_id": "kp-rational-add-sub",
+   "to_id": "kp-rational-mixed-ops",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "混合运算中的加减步骤"
+  },
+  {
+   "id": "edge-p004",
+   "from_id": "kp-rational-mul-div",
+   "to_id": "kp-rational-power",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "乘方是相同因数的乘法"
+  },
+  {
+   "id": "edge-p005",
+   "from_id": "kp-rational-mul-div",
+   "to_id": "kp-rational-mixed-ops",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "混合运算中的乘除步骤"
+  },
+  {
+   "id": "edge-p006",
+   "from_id": "kp-rational-power",
+   "to_id": "kp-rational-mixed-ops",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "混合运算先算乘方"
+  },
+  {
+   "id": "edge-p007",
+   "from_id": "kp-rational-power",
+   "to_id": "kp-scientific-notation",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "科学记数法使用 10 的乘方"
+  },
+  {
+   "id": "edge-p008",
+   "from_id": "kp-algebraic-expression",
+   "to_id": "kp-expression-value",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "先有代数式才能求值"
+  },
+  {
+   "id": "edge-p009",
+   "from_id": "kp-rational-mixed-ops",
+   "to_id": "kp-expression-value",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "代入后按有理数运算求值"
+  },
+  {
+   "id": "edge-p010",
+   "from_id": "kp-monomial-polynomial",
+   "to_id": "kp-like-terms",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "识别同类项需要理解项与字母指数"
+  },
+  {
+   "id": "edge-p011",
+   "from_id": "kp-rational-mul-div",
+   "to_id": "kp-remove-brackets",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "去括号变号依赖乘法符号法则（适用于括号前带负系数的题型）"
+  },
+  {
+   "id": "edge-p012",
+   "from_id": "kp-like-terms",
+   "to_id": "kp-polynomial-add-sub",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "整式加减最后一步是合并同类项"
+  },
+  {
+   "id": "edge-p013",
+   "from_id": "kp-remove-brackets",
+   "to_id": "kp-polynomial-add-sub",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "整式加减先去括号"
+  },
+  {
+   "id": "edge-p014",
+   "from_id": "kp-equation-properties",
+   "to_id": "kp-linear-eq-transpose",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "移项依据等式性质"
+  },
+  {
+   "id": "edge-p015",
+   "from_id": "kp-like-terms",
+   "to_id": "kp-linear-eq-transpose",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "解方程需要合并同类项"
+  },
+  {
+   "id": "edge-p016",
+   "from_id": "kp-linear-eq-transpose",
+   "to_id": "kp-linear-eq-brackets",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "去括号后仍需移项合并"
+  },
+  {
+   "id": "edge-p017",
+   "from_id": "kp-remove-brackets",
+   "to_id": "kp-linear-eq-brackets",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "含括号方程先去括号"
+  },
+  {
+   "id": "edge-p018",
+   "from_id": "kp-linear-eq-brackets",
+   "to_id": "kp-linear-eq-denominator",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "去分母后常出现带括号的分子"
+  },
+  {
+   "id": "edge-p019",
+   "from_id": "kp-linear-eq-transpose",
+   "to_id": "kp-linear-eq-application",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "列出方程后需要求解"
+  },
+  {
+   "id": "edge-p020",
+   "from_id": "kp-line-segment-ray",
+   "to_id": "kp-angle-basics",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "角由射线构成"
+  },
+  {
+   "id": "edge-p021",
+   "from_id": "kp-angle-basics",
+   "to_id": "kp-complement-supplement",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "余角补角是角的和差"
+  },
+  {
+   "id": "edge-p022",
+   "from_id": "kp-complement-supplement",
+   "to_id": "kp-intersecting-lines",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "邻补角互补"
+  },
+  {
+   "id": "edge-p023",
+   "from_id": "kp-intersecting-lines",
+   "to_id": "kp-parallel-criteria",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "三线八角的识别"
+  },
+  {
+   "id": "edge-p024",
+   "from_id": "kp-parallel-criteria",
+   "to_id": "kp-parallel-properties",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "判定与性质互逆，常在同一推理中使用"
+  },
+  {
+   "id": "edge-p025",
+   "from_id": "kp-rational-power",
+   "to_id": "kp-square-root",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "平方根是乘方的逆运算"
+  },
+  {
+   "id": "edge-p026",
+   "from_id": "kp-square-root",
+   "to_id": "kp-real-numbers",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "无理数常以开方不尽的形式出现"
+  },
+  {
+   "id": "edge-p027",
+   "from_id": "kp-number-line",
+   "to_id": "kp-coordinate-plane",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "坐标轴是两条互相垂直的数轴"
+  },
+  {
+   "id": "edge-p028",
+   "from_id": "kp-coordinate-plane",
+   "to_id": "kp-coordinate-translation",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "平移用坐标变化描述"
+  },
+  {
+   "id": "edge-p029",
+   "from_id": "kp-linear-eq-transpose",
+   "to_id": "kp-substitution-elimination",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "消元后得到一元一次方程"
+  },
+  {
+   "id": "edge-p030",
+   "from_id": "kp-linear-eq-transpose",
+   "to_id": "kp-addition-elimination",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "消元后得到一元一次方程"
+  },
+  {
+   "id": "edge-p031",
+   "from_id": "kp-linear-system-concept",
+   "to_id": "kp-substitution-elimination",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "理解方程组的解"
+  },
+  {
+   "id": "edge-p032",
+   "from_id": "kp-linear-system-concept",
+   "to_id": "kp-addition-elimination",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "理解方程组的解"
+  },
+  {
+   "id": "edge-p033",
+   "from_id": "kp-addition-elimination",
+   "to_id": "kp-linear-system-application",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "列出方程组后需要求解"
+  },
+  {
+   "id": "edge-p034",
+   "from_id": "kp-equation-properties",
+   "to_id": "kp-inequality-properties",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "与等式性质对比，注意乘除负数时的差异"
+  },
+  {
+   "id": "edge-p035",
+   "from_id": "kp-inequality-properties",
+   "to_id": "kp-linear-inequality",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "解不等式依据不等式性质"
+  },
+  {
+   "id": "edge-p036",
+   "from_id": "kp-linear-inequality",
+   "to_id": "kp-inequality-system",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "分别解出每个不等式"
+  },
+  {
+   "id": "edge-p037",
+   "from_id": "kp-triangle-angles",
+   "to_id": "kp-polygon-angles",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "多边形内角和由三角形内角和推得"
+  },
+  {
+   "id": "edge-p038",
+   "from_id": "kp-triangle-angles",
+   "to_id": "kp-congruence-criteria",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "全等证明中需要角的关系"
+  },
+  {
+   "id": "edge-p039",
+   "from_id": "kp-congruence-criteria",
+   "to_id": "kp-angle-bisector-property",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "角平分线性质用全等证明"
+  },
+  {
+   "id": "edge-p040",
+   "from_id": "kp-congruence-criteria",
+   "to_id": "kp-isosceles-triangle",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "等腰三角形性质用全等证明"
+  },
+  {
+   "id": "edge-p041",
+   "from_id": "kp-rational-power",
+   "to_id": "kp-power-rules",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "幂的运算建立在乘方意义上"
+  },
+  {
+   "id": "edge-p042",
+   "from_id": "kp-remove-brackets",
+   "to_id": "kp-polynomial-multiplication",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "单项式乘多项式的分配与符号处理"
+  },
+  {
+   "id": "edge-p043",
+   "from_id": "kp-power-rules",
+   "to_id": "kp-polynomial-multiplication",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "单项式相乘需要同底数幂法则"
+  },
+  {
+   "id": "edge-p044",
+   "from_id": "kp-polynomial-multiplication",
+   "to_id": "kp-special-products",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "乘法公式由多项式乘法推得"
+  },
+  {
+   "id": "edge-p045",
+   "from_id": "kp-polynomial-multiplication",
+   "to_id": "kp-factor-common",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "因式分解是整式乘法的逆变形"
+  },
+  {
+   "id": "edge-p046",
+   "from_id": "kp-special-products",
+   "to_id": "kp-factor-formula",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "公式法是乘法公式的逆用"
+  },
+  {
+   "id": "edge-p047",
+   "from_id": "kp-factor-common",
+   "to_id": "kp-fraction-concept",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "约分需要分解因式"
+  },
+  {
+   "id": "edge-p048",
+   "from_id": "kp-factor-formula",
+   "to_id": "kp-fraction-operations",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "通分约分需要分解因式"
+  },
+  {
+   "id": "edge-p049",
+   "from_id": "kp-fraction-operations",
+   "to_id": "kp-fractional-equation",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "去分母需要找最简公分母"
+  },
+  {
+   "id": "edge-p050",
+   "from_id": "kp-linear-eq-denominator",
+   "to_id": "kp-fractional-equation",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "同为去分母求解"
+  },
+  {
+   "id": "edge-p051",
+   "from_id": "kp-square-root",
+   "to_id": "kp-quadratic-radical",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "二次根式建立在算术平方根上"
+  },
+  {
+   "id": "edge-p052",
+   "from_id": "kp-square-root",
+   "to_id": "kp-pythagorean",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "求边长需要开平方"
+  },
+  {
+   "id": "edge-p053",
+   "from_id": "kp-parallel-properties",
+   "to_id": "kp-parallelogram",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "平行四边形的角关系来自平行线性质"
+  },
+  {
+   "id": "edge-p054",
+   "from_id": "kp-congruence-criteria",
+   "to_id": "kp-parallelogram",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "平行四边形性质用全等证明"
+  },
+  {
+   "id": "edge-p055",
+   "from_id": "kp-parallelogram",
+   "to_id": "kp-special-parallelograms",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "特殊平行四边形是平行四边形"
+  },
+  {
+   "id": "edge-p056",
+   "from_id": "kp-coordinate-plane",
+   "to_id": "kp-function-concept",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "函数图像画在坐标系中"
+  },
+  {
+   "id": "edge-p057",
+   "from_id": "kp-function-concept",
+   "to_id": "kp-linear-function",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "一次函数是一类函数"
+  },
+  {
+   "id": "edge-p058",
+   "from_id": "kp-substitution-elimination",
+   "to_id": "kp-linear-function",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "待定系数法需要解方程组"
+  },
+  {
+   "id": "edge-p059",
+   "from_id": "kp-central-tendency",
+   "to_id": "kp-variance",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "方差需要先求平均数"
+  },
+  {
+   "id": "edge-p060",
+   "from_id": "kp-special-products",
+   "to_id": "kp-quadratic-eq-solving",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "配方法使用完全平方公式"
+  },
+  {
+   "id": "edge-p061",
+   "from_id": "kp-factor-formula",
+   "to_id": "kp-quadratic-eq-solving",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "因式分解法解方程"
+  },
+  {
+   "id": "edge-p062",
+   "from_id": "kp-quadratic-radical",
+   "to_id": "kp-quadratic-eq-solving",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "公式法结果需化简二次根式"
+  },
+  {
+   "id": "edge-p063",
+   "from_id": "kp-quadratic-eq-solving",
+   "to_id": "kp-discriminant-vieta",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "判别式来自求根公式"
+  },
+  {
+   "id": "edge-p064",
+   "from_id": "kp-linear-function",
+   "to_id": "kp-quadratic-function",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "函数图像与性质的研究方法相同"
+  },
+  {
+   "id": "edge-p065",
+   "from_id": "kp-quadratic-eq-solving",
+   "to_id": "kp-quadratic-application",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "交点问题需要解一元二次方程"
+  },
+  {
+   "id": "edge-p066",
+   "from_id": "kp-quadratic-function",
+   "to_id": "kp-quadratic-application",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "最值来自顶点"
+  },
+  {
+   "id": "edge-p067",
+   "from_id": "kp-coordinate-translation",
+   "to_id": "kp-rotation",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "图形变换的坐标描述"
+  },
+  {
+   "id": "edge-p068",
+   "from_id": "kp-isosceles-triangle",
+   "to_id": "kp-circle-basic",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "半径相等构成等腰三角形"
+  },
+  {
+   "id": "edge-p069",
+   "from_id": "kp-pythagorean",
+   "to_id": "kp-circle-basic",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "垂径定理计算常用勾股定理"
+  },
+  {
+   "id": "edge-p070",
+   "from_id": "kp-circle-basic",
+   "to_id": "kp-circle-position",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "切线问题建立在圆的性质上"
+  },
+  {
+   "id": "edge-p071",
+   "from_id": "kp-circle-basic",
+   "to_id": "kp-circle-measure",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "弧长与圆心角相关"
+  },
+  {
+   "id": "edge-p072",
+   "from_id": "kp-function-concept",
+   "to_id": "kp-inverse-function",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "反比例函数是一类函数"
+  },
+  {
+   "id": "edge-p073",
+   "from_id": "kp-congruence-criteria",
+   "to_id": "kp-similar-triangles",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "相似判定与全等判定类比"
+  },
+  {
+   "id": "edge-p074",
+   "from_id": "kp-similar-triangles",
+   "to_id": "kp-trig-ratios",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "三角函数值只与角有关的依据是相似"
+  },
+  {
+   "id": "edge-p075",
+   "from_id": "kp-pythagorean",
+   "to_id": "kp-trig-ratios",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "解直角三角形需要勾股定理"
+  },
+  {
+   "id": "edge-p076",
+   "from_id": "kp-solid-plane-figures",
+   "to_id": "kp-projection-views",
+   "relation_type": "prerequisite_of",
+   "scope": null,
+   "rationale": "三视图需要空间想象"
+  }
+ ]
+}
