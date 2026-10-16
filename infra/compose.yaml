@@ -1,0 +1,97 @@
+# Single-host pilot deployment: PostgreSQL, one-shot migration, API, worker and
+# Caddy (automatic HTTPS). Secrets are files under ./secrets (0600, never in Git).
+# Usage: see docs/runbooks/DEPLOY.md
+
+name: xueban
+
+x-backend: &backend
+  image: ${XUEBAN_IMAGE:-xueban-backend:local}
+  build:
+    context: ..
+    dockerfile: infra/Dockerfile
+  restart: unless-stopped
+  env_file: ./xueban.env
+  environment:
+    DATABASE_URL_FILE: /run/secrets/database_url
+    ASSET_STORAGE_DIR: /data/assets
+    DELETION_LEDGER_PATH: /ledger/deletions.jsonl
+    JWT_PUBLIC_KEY_FILE: /run/secrets/issuer_public
+    SIGNING_PRIVATE_KEY_FILE: /run/secrets/issuer_private
+  secrets: [database_url, issuer_public, issuer_private]
+  volumes:
+    - assets:/data/assets
+    - ledger:/ledger
+  depends_on:
+    postgres:
+      condition: service_healthy
+  read_only: true
+  tmpfs: [/tmp]
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+
+services:
+  postgres:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: xueban
+      POSTGRES_USER: xueban
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xueban -d xueban"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    <<: *backend
+    restart: "no"
+    command: ["sh", "-c", "alembic -c services/backend/alembic.ini upgrade head"]
+
+  api:
+    <<: *backend
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    <<: *backend
+    command: ["python", "-m", "xueban_backend.worker"]
+    env_file: [./xueban.env, ./model.env]
+    healthcheck:
+      disable: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      XUEBAN_DOMAIN: ${XUEBAN_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [api]
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password
+  database_url:
+    file: ./secrets/database_url
+  issuer_public:
+    file: ./secrets/issuer-public.pem
+  issuer_private:
+    file: ./secrets/issuer-private.pem
+
+volumes:
+  pgdata:
+  assets:
+  ledger:
+  caddy_data:
+  caddy_config:

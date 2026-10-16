@@ -269,6 +269,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     install_governance(app, engine, cfg, database_session, current_actor)
     from .staff import install_staff
     install_staff(app, engine, cfg, database_session, current_actor)
+    from .ops import install_ops
+    install_ops(app, engine, cfg)
     from .student_web import install_student_web
     install_student_web(app, cfg.student_web_dist)
+    from .staff_web import install_staff_web
+    install_staff_web(app)
     return app

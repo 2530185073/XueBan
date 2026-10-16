@@ -4,6 +4,15 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 
+def database_url_from_environment() -> str:
+    """DATABASE_URL, or the Docker-secret style DATABASE_URL_FILE."""
+    if os.environ.get("DATABASE_URL"):
+        return os.environ["DATABASE_URL"]
+    if os.environ.get("DATABASE_URL_FILE"):
+        return Path(os.environ["DATABASE_URL_FILE"]).read_text(encoding="utf-8").strip()
+    return ""
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str
@@ -26,7 +35,7 @@ class Settings:
 
     @classmethod
     def from_environment(cls) -> "Settings":
-        database_url = os.environ.get("DATABASE_URL", "")
+        database_url = database_url_from_environment()
         if not database_url:
             raise RuntimeError("DATABASE_URL is required; no automatic demo database")
         options = {

@@ -1,0 +1,22 @@
+{
+	# Access logs would contain short-lived image read tickets in query strings.
+	log default {
+		output stderr
+		level WARN
+	}
+}
+
+{$XUEBAN_DOMAIN} {
+	encode zstd gzip
+	request_body {
+		max_size 6MB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+	reverse_proxy api:8000 {
+		health_uri /healthz
+		health_interval 15s
+	}
+}

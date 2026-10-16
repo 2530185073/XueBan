@@ -12,3 +12,9 @@ __pycache__/
 /学伴研发启动包-*.zip
 /DELIVERY-MANIFEST.json
 /学伴项目计划-完善版-20261016.md
+
+# Deployment secrets and local configuration
+/infra/secrets/
+/infra/xueban.env
+/infra/model.env
+/infra/backups/

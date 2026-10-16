@@ -1,0 +1,56 @@
+name: Deployment smoke
+
+on:
+  push:
+    paths: ['infra/**', 'services/backend/**', 'apps/**', 'contracts/**', '.github/workflows/deploy-smoke.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare ephemeral configuration and secrets
+        run: |
+          cp xueban.env.example xueban.env
+          sed -i 's#^PUBLIC_BASE_URL=.*#PUBLIC_BASE_URL=http://localhost#' xueban.env
+          : > model.env
+          sudo ./scripts/init-secrets.sh
+      - name: Build image and start database, migration, API and proxy
+        env:
+          XUEBAN_DOMAIN: ':80'
+        run: docker compose up -d --build --wait postgres api caddy
+      - name: Readiness through the reverse proxy
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost/readyz; then exit 0; fi
+            sleep 2
+          done
+          docker compose logs api migrate
+          exit 1
+      - name: Bootstrap administrator and sign in
+        run: |
+          printf 'ci-only-admin-password-%s\n' "$GITHUB_RUN_ID" > /tmp/admin.password
+          docker compose run --rm -T --no-deps --entrypoint sh api -c 'umask 077; cat > /tmp/p; python -m xueban_backend.admin bootstrap-admin --tenant-id tenant_ci --campus-id campus_ci --principal-id actor_admin_ci --subject admin-ci --username ci.admin --password-file /tmp/p' < /tmp/admin.password
+          password=$(cat /tmp/admin.password)
+          status=$(curl -s -o /tmp/login.json -w '%{http_code}' -H 'Content-Type: application/json' -H 'Idempotency-Key: ci-login-0001' \
+            -d "{\"username\":\"ci.admin\",\"password\":\"$password\"}" http://localhost/v1/auth/login)
+          test "$status" = 200
+          python3 -c 'import json; d=json.load(open("/tmp/login.json")); assert d["must_change_password"] is True'
+          curl -fsS -o /dev/null http://localhost/learn/
+      - name: Backup and restore round trip
+        run: |
+          BACKUP_DIR=/tmp/xueban-backups ./scripts/backup.sh
+          ./scripts/restore.sh "$(ls -d /tmp/xueban-backups/* | tail -1)"
+          docker compose up -d --wait api
+          curl -fsS http://localhost/readyz
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --no-color | tail -200

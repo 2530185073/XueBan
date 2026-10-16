@@ -1,11 +1,12 @@
 import os
 
 from alembic import context
+from xueban_backend.config import database_url_from_environment
 from xueban_backend.db import create_database_engine
 from xueban_backend.models import Base
 
 config = context.config
-database_url = config.attributes.get("database_url") or os.environ.get("DATABASE_URL")
+database_url = config.attributes.get("database_url") or database_url_from_environment()
 if not database_url:
     raise RuntimeError("DATABASE_URL is required for migrations")
 allow_sqlite = config.attributes.get("allow_sqlite", False) or os.environ.get("ALLOW_SQLITE_FOR_TESTS") == "1"
