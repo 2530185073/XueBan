@@ -109,7 +109,7 @@ def test_variant_uses_reviewed_items_and_never_changes_state(flow, clock):
     assert session.status_code == 201, session.text
     body = session.json()
     assert len(body["items"]) == 2 and "answer_values" not in body["items"][0] and "solution_text" not in body["items"][0]
-    assert start(flow, purpose="variant", knowledge_id="kp-rational-add-sub").status_code == 409
+    assert start(flow, purpose="variant", knowledge_id="kp-rational-add-sub").json()["code"] == "practice_active"
     first, second = sorted(body["items"], key=lambda i: not i["has_hint"])
     assert flow.client.post(f"/v1/practice-sessions/{body['id']}/items/{first['id']}/hint").json()["hint_text"] == "先看符号"
     key = {"Idempotency-Key": "practice-answer-1"}
@@ -183,10 +183,18 @@ def test_model_drafts_candidates_that_staff_must_approve(flow, clock):
     queued = flow.client.post("/v1/practice-items/generate", json={"knowledge_id": "kp-rational-add-sub", "count": 1,
                                                                    "source_case_id": case["id"]})
     assert queued.status_code == 202, queued.text
+    status_path = f"/v1/practice-generations/{queued.json()['job_id']}"
+    assert flow.client.get(status_path).json()["status"] == "queued"
     client = ItemClient([])
     learning(flow, client).drain()
     assert "1 + 1" in client.calls[0]["text"] and "student_a" not in client.calls[0]["text"]
     [candidate] = flow.client.get("/v1/practice-items?knowledge_id=kp-rational-add-sub").json()["items"]
+    done = flow.client.get(status_path).json()
+    assert done["status"] == "succeeded" and done["candidate_item_ids"] == [candidate["id"]]
+    disabled = flow.client.post("/v1/practice-items/generate", json={"knowledge_id": "kp-rational-compare", "count": 1}).json()
+    learning(flow).drain()
+    failed = flow.client.get(f"/v1/practice-generations/{disabled['job_id']}").json()
+    assert failed["status"] == "failed" and failed["failure_code"] == "provider_disabled"
     assert candidate["status"] == "candidate" and candidate["source"] == "model"
     approved = flow.client.post(f"/v1/practice-items/{candidate['id']}/review",
                                 json={"action": "approve", "expected_revision": 1, "edits": {"difficulty": 2}})

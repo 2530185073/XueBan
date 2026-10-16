@@ -286,6 +286,12 @@ export function isPracticeItemList(value: unknown): value is { items: PracticeIt
 export function isGenerateAccepted(value: unknown): value is { job_id: string; status: string; notice: string } {
   return record(value) && id(value.job_id) && text(value.status, 16) && str(value.notice, 500)
 }
+export const GENERATION_STATUSES = ['queued', 'running', 'succeeded', 'failed'] as const
+export interface GenerationStatus { job_id: string; status: typeof GENERATION_STATUSES[number]; failure_code: string | null; knowledge_id: string; candidate_item_ids: string[] }
+export function isGenerationStatus(value: unknown): value is GenerationStatus {
+  return record(value) && id(value.job_id) && oneOf(GENERATION_STATUSES)(value.status) && (value.failure_code === null || text(value.failure_code, 64))
+    && id(value.knowledge_id) && Array.isArray(value.candidate_item_ids) && value.candidate_item_ids.every(id)
+}
 
 export type GateReason = 'school_tasks_not_confirmed' | 'capacity_not_observed' | 'no_extra_budget'
 export interface Gate {

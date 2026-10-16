@@ -1,6 +1,6 @@
 import { ApiError, type StaffApi } from './client'
 import {
-  isAgentRun, isAgentRunList, isAttemptCondition, isConditionRead, isCreatedDiagnosis, isCreatedShareLink, isCurriculumGraph, isGate, isGenerateAccepted, isKnowledgeDetail,
+  isAgentRun, isAgentRunList, isAttemptCondition, isConditionRead, isCreatedDiagnosis, isCreatedShareLink, isCurriculumGraph, isGate, isGenerateAccepted, isGenerationStatus, isKnowledgeDetail,
   isKnowledgeLink, isKnowledgeLinkList, isLearningProfile, isLinkQueue, isMemory, isMemoryList, isOptionalActivities, isPracticeItem, isPracticeItemList,
   isPracticeSessionList, isReport, isReportList, isReportQueue, isRetractedDiagnosis, isShareLink, isShareLinkList, isStudentKnowledge,
   type AssistanceInput, type CurriculumGraph, type DiagnosisInput, type ItemEdits, type ItemInput, type ItemStatus, type LinkDecision, type MemoryInput,
@@ -89,6 +89,7 @@ export class LearningApi {
     if (!Number.isInteger(payload.count) || payload.count < 1 || payload.count > 5) throw invalid()
     return this.api.call('/v1/practice-items/generate', isGenerateAccepted, { payload })
   }
+  generation(jobId: string, signal?: AbortSignal) { return this.api.call(`/v1/practice-generations/${segment(jobId)}`, isGenerationStatus, { signal }) }
   setWindow(studentId: string, payload: WindowInput) {
     if (!Number.isInteger(payload.extra_minutes) || payload.extra_minutes < 0 || payload.extra_minutes > 60) throw invalid()
     return this.api.call(`/v1/students/${segment(studentId)}/optional-window`, isGate, { payload, method: 'PUT' })

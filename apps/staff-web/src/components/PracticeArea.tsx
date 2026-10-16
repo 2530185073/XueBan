@@ -1,12 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Archive, Check, Clock3, Library, Plus, Sparkles, X } from 'lucide-react'
-import type { AnswerKind, Gate, ItemEdits, PracticeItem } from '../api/learningTypes'
+import type { AnswerKind, Gate, GenerationStatus, ItemEdits, PracticeItem } from '../api/learningTypes'
 import {
   answerKindLabels, dateTime, exitReasonLabels, gateReasonLabels, itemIssue, itemStatusLabels, parseAnswerValues, resultLabels, selectableNodes, sessionStatusLabels,
 } from '../learning'
 import { chapterNames, LoadNote, NodePicker, RefreshButton, StatusTag, StudentPicker, useGraph, useLoad, type LearningContext } from './LearningCommon'
 
 type Tab = 'bank' | 'window'
+const GENERATION_POLLS = 40
+const GENERATION_POLL_MS = 3000
+const generationFailures: Record<string, string> = { provider_disabled: '模型服务未开启，没有生成题目。', unknown_knowledge: '知识点已不在当前图谱中，没有生成题目。' }
+
+export function generationText(status: GenerationStatus | null, polling: boolean): string {
+  if (!status || status.status === 'queued' || status.status === 'running') return polling ? 'AI 正在生成候选题…' : '暂时没有拿到生成结果，可稍后刷新“待审核”。'
+  if (status.status === 'succeeded') return status.candidate_item_ids.length ? `已生成 ${status.candidate_item_ids.length} 道候选题，见“待审核”。` : '生成已结束，但没有得到可用的候选题。'
+  return generationFailures[status.failure_code ?? ''] ?? `生成失败（${status.failure_code ?? '未知原因'}），可稍后重试。`
+}
 
 interface ItemDraft { stem: string; answers: string; hint: string; solution: string; difficulty: number }
 const draftOf = (item: PracticeItem): ItemDraft => ({ stem: item.stem_text, answers: item.answer_values.join('\n'), hint: item.hint_text ?? '', solution: item.solution_text, difficulty: item.difficulty })
@@ -76,6 +85,8 @@ function Bank({ ctx }: { ctx: LearningContext }) {
   const [difficulty, setDifficulty] = useState(1)
   const [count, setCount] = useState(3)
   const [sourceCase, setSourceCase] = useState('')
+  const [generation, setGeneration] = useState<GenerationStatus | null>(null)
+  const [jobId, setJobId] = useState<string | null>(null)
   const values = parseAnswerValues(answers)
   const issue = itemIssue({ knowledge_id: knowledge ?? '', stem_text: stem, answer_values: values, solution_text: solution, hint_text: hint || null })
 
@@ -88,8 +99,25 @@ function Bank({ ctx }: { ctx: LearningContext }) {
   async function generate() {
     if (!knowledge) return
     const source = sourceCase.trim()
-    await ctx.act(() => ctx.learning.generateItems({ knowledge_id: knowledge, count, ...(source ? { source_case_id: source } : {}) }), '已请求 AI 生成候选题；生成后出现在“待审核”中，老师通过后孩子才会看到。')
+    const accepted = await ctx.act(() => ctx.learning.generateItems({ knowledge_id: knowledge, count, ...(source ? { source_case_id: source } : {}) }), '已请求 AI 生成候选题；生成后出现在“待审核”中，老师通过后孩子才会看到。')
+    if (accepted) { setGeneration(null); setJobId(accepted.job_id) }
   }
+  useEffect(() => {
+    if (!jobId) return
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const poll = async (attempt: number) => {
+      try {
+        const read = await ctx.learning.generation(jobId, controller.signal)
+        setGeneration(read)
+        if (read.status === 'succeeded' || read.status === 'failed') { setJobId(null); if (read.status === 'succeeded') items.reload(); return }
+      } catch { if (controller.signal.aborted) return }
+      if (attempt < GENERATION_POLLS) timer = setTimeout(() => void poll(attempt + 1), GENERATION_POLL_MS)
+      else setJobId(null)
+    }
+    void poll(0)
+    return () => { controller.abort(); clearTimeout(timer) }
+  }, [jobId])
 
   return <>
     <div className="card">
@@ -126,7 +154,8 @@ function Bank({ ctx }: { ctx: LearningContext }) {
           <label>AI 生成数量<div className="select-wrap"><select value={count} disabled={ctx.busy} onChange={event => setCount(Number(event.target.value))}>{[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}</option>)}</select></div></label>
           <label>参考题目 case 编号（可选）<input value={sourceCase} maxLength={64} disabled={ctx.busy} placeholder="case_…" onChange={event => setSourceCase(event.target.value)} /></label>
         </div>
-        <button className="button" disabled={ctx.busy || !knowledge} onClick={() => void generate()}><Sparkles size={14} />为所选知识点生成候选题</button>
+        <button className="button" disabled={ctx.busy || !knowledge || !!jobId} onClick={() => void generate()}><Sparkles size={14} />为所选知识点生成候选题</button>
+        {(jobId || generation) && <p className={generation?.status === 'failed' ? 'warning-text' : 'subtle'} role="status">{generationText(generation, !!jobId)}</p>}
       </div>
     </div>
   </>

@@ -27,7 +27,7 @@ from .correction_models import Entity
 from .device_auth import utc
 from .errors import Problem
 from .governance import register_downstream_purger
-from .learning_models import (KnowledgeEdge, KnowledgeNode, OptionalWindow, PracticeItem, PracticeResponse, PracticeSession,
+from .learning_models import (KnowledgeEdge, KnowledgeNode, LearningOutbox, OptionalWindow, PracticeItem, PracticeResponse, PracticeSession,
                               StudentKnowledgeState, StudentLearningProfile)
 from .correction_core import remember_idempotent, replay_idempotent
 from .learning_projection import OptionalKey, enqueue, new_id, register_job_handler, require_published_graph
@@ -433,6 +433,22 @@ def install_practice(app, engine, cfg, database_session, current_actor):
         session.commit()
         return {"job_id": job_id, "status": "queued", "notice": "模型只生成候选题，老师审核通过后学生才会看到。"}
 
+    @app.get("/v1/practice-generations/{job_id}", operation_id="getPracticeGeneration")
+    def generation_status(job_id: str, actor: ActorDep, session: SessionDep):
+        require_staff(actor)
+        job = session.get(LearningOutbox, job_id)
+        if job is None or job.kind != "generate_practice" or job.tenant_id != actor.tenant_id:
+            raise Problem(404, "not_found", "not_found", "资源不存在或不可访问。")
+        outcome = (job.payload.get("outcome") or {}).get("status")
+        items = [i.id for i in session.scalars(select(PracticeItem).where(PracticeItem.tenant_id == job.tenant_id, PracticeItem.source == "model",
+                                                                          PracticeItem.knowledge_id == job.payload["knowledge_id"]))
+                 if (i.generation or {}).get("job_id") == job.id]
+        status = {"queued": "queued", "running": "running", "dead": "failed"}.get(job.status)
+        if status is None:
+            status = "succeeded" if outcome in (None, "proposed") else "failed"
+        return {"job_id": job.id, "status": status, "failure_code": None if status != "failed" else (outcome or job.last_error),
+                "knowledge_id": job.payload["knowledge_id"], "candidate_item_ids": items}
+
     @app.put("/v1/students/{student_id}/optional-window", operation_id="setOptionalWindow")
     def set_window(student_id: str, payload: WindowInput, actor: ActorDep, session: SessionDep):
         require_staff(actor)
@@ -489,7 +505,7 @@ def install_practice(app, engine, cfg, database_session, current_actor):
             active = session.scalar(select(PracticeSession).where(PracticeSession.student_id == student_id, PracticeSession.status == "active"))
             _expire(active, now())
             if active.status == "active":
-                raise Problem(409, "conflict", "revision_conflict", "已有进行中的活动，请先完成或结束。")
+                raise Problem(409, "conflict", "practice_active", "已有进行中的活动，请先完成或结束。")
         at = now()
         gate = gate_status(session, student_id, at)
         if not gate["open"]:

@@ -112,7 +112,7 @@ const startMessages: Record<string, string> = {
   practice_not_needed: '这个知识点现在不需要额外练习，休息一下也很好。',
   course_unknown: '老师还没告诉学伴下一课学什么，预习先不开放。',
   no_reviewed_items: '这个知识点还没有老师看过的练习题，先休息一下吧。',
-  revision_conflict: '你还有一个没结束的活动，可以接着做，也可以直接结束。',
+  practice_active: '你还有一个没结束的活动，可以接着做，也可以直接结束。',
   hints_disabled: '小测里不提供提示，可以直接写，也可以随时结束。',
 }
 /** Kind messages for the voluntary-activity 409s; other failures keep the shared safe message. */
@@ -120,4 +120,4 @@ export function practiceMessage(error: unknown, fallback: string): string {
   return error instanceof StudentError ? startMessages[error.code] ?? error.message : fallback
 }
 export const RESUME_NOTICE = '你还有一个没结束的活动，可以接着做，也可以直接结束。'
-export const isActiveConflict = (error: unknown) => error instanceof StudentError && error.status === 409 && error.code === 'revision_conflict'
+export const isActiveConflict = (error: unknown) => error instanceof StudentError && error.status === 409 && error.code === 'practice_active'

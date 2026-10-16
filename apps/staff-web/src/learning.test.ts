@@ -2,13 +2,14 @@ import { describe, expect, it, vi } from 'vitest'
 import { StaffApi } from './api/client'
 import { LearningApi } from './api/learning'
 import {
-  isAgentRun, isCreatedShareLink, isGate, isKnowledgeDetail, isKnowledgeLinkList, isLinkQueue, isMemoryList, isReport, isStudentKnowledge, type AgentRun, type KnowledgeLink,
+  isAgentRun, isCreatedShareLink, isGate, isGenerationStatus, isKnowledgeDetail, isKnowledgeLinkList, isLinkQueue, isMemoryList, isReport, isStudentKnowledge, type AgentRun, type KnowledgeLink,
 } from './api/learningTypes'
 import {
   diagnosisIssue, finishedPeriods, helpSeen, lastFinishedPeriod, memoryIssue, parseAnswerValues, periodFinished, periodFromStart, periodLabel, primaryConflict,
   runView, shareState, shareUrl, statusLabel, statusLabels,
 } from './learning'
 import { sampleWorkspace } from './sample'
+import { generationText } from './components/PracticeArea'
 
 const at = '2026-10-16T08:00:00+00:00'
 const link = (overrides: Partial<KnowledgeLink> = {}): KnowledgeLink => ({
@@ -225,5 +226,20 @@ describe('学情接口请求', () => {
     expect(() => learning.generateReport('student_a', '2026-10-05')).toThrow()
     expect(() => learning.setWindow('student_a', { expected_revision: 0, capacity_observed: true, extra_minutes: 90, school_tasks_confirmed: null })).toThrow()
     expect(transport).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('practice generation status', () => {
+  const base = { job_id: 'ljob_1', knowledge_id: 'kp-rational-add-sub', failure_code: null, candidate_item_ids: [] as string[] }
+  it('accepts only known statuses and identifier lists', () => {
+    expect(isGenerationStatus({ ...base, status: 'running' })).toBe(true)
+    expect(isGenerationStatus({ ...base, status: 'done' })).toBe(false)
+    expect(isGenerationStatus({ ...base, status: 'succeeded', candidate_item_ids: ['not an id'] })).toBe(false)
+  })
+  it('tells staff what happened instead of a silent success', () => {
+    expect(generationText({ ...base, status: 'running' }, true)).toContain('正在生成')
+    expect(generationText({ ...base, status: 'succeeded', candidate_item_ids: ['item_a', 'item_b'] }, false)).toContain('2 道')
+    expect(generationText({ ...base, status: 'failed', failure_code: 'provider_disabled' }, false)).toContain('模型服务未开启')
+    expect(generationText(null, false)).toContain('稍后刷新')
   })
 })

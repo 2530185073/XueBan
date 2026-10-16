@@ -2086,6 +2086,7 @@
             "course_unknown",
             "no_reviewed_items",
             "hints_disabled",
+            "practice_active",
             "asset_integrity_mismatch",
             "asset_unavailable",
             "image_batch_too_large",

@@ -97,7 +97,7 @@ describe('session time', () => {
     expect(effectiveStatus({ status: 'exited', budget_ends_at: '2026-10-16T08:05:00Z' }, now)).toBe('exited')
   })
   it('maps the start conflicts to kind messages', () => {
-    for (const code of ['optional_gate_closed', 'practice_not_needed', 'course_unknown', 'no_reviewed_items', 'revision_conflict', 'hints_disabled']) expect(practiceMessage(new StudentError(code, 409), 'x')).not.toBe(new StudentError(code, 409).message)
+    for (const code of ['optional_gate_closed', 'practice_not_needed', 'course_unknown', 'no_reviewed_items', 'practice_active', 'hints_disabled']) expect(practiceMessage(new StudentError(code, 409), 'x')).not.toBe(new StudentError(code, 409).message)
     expect(practiceMessage(new StudentError('optional_gate_closed', 409), 'x')).toContain('今天就到这里也很好')
     expect(practiceMessage(new Error('boom'), '这次没有开始。')).toBe('这次没有开始。')
   })

@@ -287,7 +287,9 @@ class LearningWorker:
                 if handler is None:
                     job.status, job.last_error = "dead", "unknown_kind"
                     return True
-                handler(session, job, self)
+                outcome = handler(session, job, self)
+                if isinstance(outcome, dict):
+                    job.payload = {**job.payload, "outcome": outcome}
                 job.status, job.lease_token, job.lease_expires_at = "succeeded", None, None
             if kind == "project_student":
                 with Session(self.engine) as session, session.begin():

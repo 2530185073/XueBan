@@ -76,7 +76,7 @@ describe('learning client', () => {
     let code = 'optional_gate_closed'
     const s = harness({ 'POST /v1/students/student_one/practice-sessions': () => problem(409, code) })
     await s.login()
-    for (const next of ['optional_gate_closed', 'practice_not_needed', 'course_unknown', 'no_reviewed_items', 'revision_conflict']) {
+    for (const next of ['optional_gate_closed', 'practice_not_needed', 'course_unknown', 'no_reviewed_items', 'practice_active']) {
       code = next
       await expect(s.client.startPractice({ purpose: 'variant', willing: true, knowledge_id: 'kp-rational-add-sub', count: 2 })).rejects.toMatchObject({ code: next, status: 409 })
     }
