@@ -9,7 +9,7 @@ React + TypeScript + Vite 的一期坐班老师工作台，由后端同源托管
 ```sh
 cd apps/staff-web
 npm ci
-npm test          # vitest：API 客户端、框选坐标换算、队列合并、冲突与任务轮询
+npm test          # vitest：API 客户端、框选坐标换算、队列合并、冲突与任务轮询、学情接口校验与周期/链接规则
 npm run build     # 契约漂移检查 + tsc 类型检查 + 生产构建到 dist/
 ```
 
@@ -66,6 +66,21 @@ npm run build     # 契约漂移检查 + tsc 类型检查 + 生产构建到 dist
 
 **补题 / 拆合**：在原图上按住拖动画矩形（鼠标、触控笔、手指均可），矩形按显示尺寸换算成原图像素（`coordinate_space: original_pixels`）并取整、夹在图片范围内。可添加多道新题，每道可跨多块区域、可选填题干；勾选要被替代的现有题（漏题不勾、拆分勾一题画多题、合并勾多题画一题），填写原因后提交。接口返回 202 和任务，工作台每两秒左右轮询 `GET /v1/jobs/{id}`，完成后列出新生成的题目，可直接打开；被替代的题显示“已被替代”并链接到新题。若显示的图片比例与记录尺寸不一致（例如 EXIF 旋转），会禁止在该图上框选。
 
+## 学情工作区（后期功能）
+
+页头下方的导航切换六个区域：坐班工作台（上文）与下列五个学情区域。它们不在 `contracts/phase1` 内，响应由 `src/api/learningTypes.ts` 手写校验（不符即视为 502），请求经 `src/api/learning.ts` 走同一会话、同一幂等键与待确认写入锁；PUT/PATCH 也一样。写入带 `expected_revision` / `expected_link_id` / `expected_condition_id`，409 时提示并重新读取。掌握情况只显示“当前需要帮助 / 正在巩固 / 阶段性较稳 / 暂不判断”，任何地方都不显示百分比或分数。
+
+| 区域 | 接口 | 要点 |
+|---|---|---|
+| 知识点映射确认 | `GET /v1/knowledge-link-queue`、`GET /v1/curriculum/graph`、`GET/POST /v1/questions/{id}/knowledge-links` | 老师已核实但未确认知识点的题；AI 候选显示理由；确认 / 驳回 / 替换、主要或次要；一道题最多一个主要知识点（本地先拦）。题目工作台右栏也有同一编辑器 |
+| 帮助情况（在题目工作台） | `POST /v1/attempts/{id}/condition` | 按作答记录帮助程度；看过提示或答案的作答不能选“独立”，订正也不能。只有老师亲眼核实才勾选独立 |
+| 学员画像 | `GET /v1/students/{id}/knowledge`、`…/knowledge/{kid}?include_invalidated=true`、诊断 `POST …/diagnoses`、`POST /v1/diagnoses/{id}/retract`、`GET/PUT …/learning-profile` | 章节只计数不平均；`projection.pending` 显示“正在汇总最新改判”；证据区分有效/失效；“可能原因（未核实）”与“已核实薄弱范围”（至少两条证据）；档案维护年级、学期与当前课次 |
+| 学伴记忆 | `GET …/memories?include_inactive=true`、`POST …/memories`、`POST /v1/memories/{id}/confirm|retract`、`POST/GET …/agent-runs` | 来源、状态、有效期与引用证据；学科困难必须引用该生当前有效证据；AI 学情摘要排队后自动轮询，分别显示证据不足、需要老师判断、已过期、失败；AI 提议的记忆进入“待确认” |
+| 半月报告 | `GET /v1/reports?status=draft|published`、`GET/POST …/reports`、`GET/PATCH /v1/reports/{id}`、`POST …/publish`、分享链接 | 只能生成已结束的半月（北京时间）；快照显示真实分母、帮助条件、证据卡片、还不知道的、额外活动和局限说明；更正版本必须写更正说明；`projection_pending` / `report_changed` 给出中文提示；家长链接只显示一次（基于服务地址拼出 `/r/{token}`），可撤销 |
+| 题库审核与选做 | `GET/POST /v1/practice-items`、`POST …/review`、`POST /v1/practice-items/generate`、`PUT …/optional-window`、`GET …/optional-activities`、`GET …/practice-sessions` | AI 只生成候选，老师通过（可先修改）后才会出现；老师录入直接生效。今日选做窗口：额外活动默认 0 分钟，必须孩子愿意、学校任务完成、老师确认有余力；不做不记欠账。选做记录只读 |
+
+合成样例预览不包含这些区域。
+
 ## 冲突与未知结果
 
 | 情况 | 工作台行为 |
@@ -94,3 +109,5 @@ npm run build     # 契约漂移检查 + tsc 类型检查 + 生产构建到 dist
 - 补题/拆合生成的新题若识别完成但尚未检查，不会出现在任何队列；需在题目里点“请求重新检查”或人工初次核实。
 - 复核依据的区域目前固定使用当前题区，还不能单独框选依据区域。
 - 多页大作业、真实设备照片（含 EXIF 方向）和现场平板可用性仍需联合验收。
+- 作答帮助情况没有读取接口：本页只记得自己刚记录的那条；他人先记录过时提交会得到冲突提示。
+- 学情接口目前不读取 `Idempotency-Key`：结果未知时“重试原操作”可能重复创建记忆、题目或分享链接（带版本号的写入会得到 409）。

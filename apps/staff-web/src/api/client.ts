@@ -30,6 +30,9 @@ const codeMessages: Record<string, string> = {
   check_already_started: '相同内容的检查已在进行中，请稍后刷新。',
   unsafe_asset_url: '原图地址不属于当前工作台服务，已拒绝加载。',
   invalid_image: '原图格式不受支持，已停止显示。',
+  help_recorded: '系统已记录这次作答看过提示或答案，不能标为“独立完成”。请选择实际的帮助情况。',
+  projection_pending: '最新的改判或作答还在汇总，暂不能发布。已重新读取报告，请稍后再发布。',
+  report_changed: '报告事实刚刚按最新记录更新。已重新读取，请重新核对后再发布。',
 }
 
 export function errorMessage(error: unknown): string {
@@ -43,7 +46,7 @@ export function errorMessage(error: unknown): string {
     409: '记录已发生变化（可能是其他老师或孩子刚刚操作）。已重新读取最新内容，请核对后再提交。',
     422: '提交内容不符合接口要求，请检查必填信息。',
     429: '请求过于频繁，请稍后再试。',
-    502: '服务返回的数据不符合一期契约，已停止显示或提交。',
+    502: '服务返回的数据不符合接口约定，已停止显示或提交。',
     503: '服务暂不可用，请稍后重试。当前没有显示操作完成。',
   }
   return messages[error.status] ?? `服务返回 ${error.status}，操作未确认成功。`
@@ -63,9 +66,10 @@ const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024
 const segment = encodeURIComponent
 
-interface PendingWrite { key: string; payload: string; shape: string; requestShape?: string }
-interface RequestOptions { signal?: AbortSignal; payload?: unknown; requestShape?: string; anonymous?: boolean; keepSessionOn401?: boolean; idempotencyKey?: string }
+export type Method = 'GET' | 'POST' | 'PUT' | 'PATCH'
 type Shape = string | ((value: unknown) => boolean)
+interface PendingWrite { key: string; payload: string; shape: Shape; requestShape?: string; method: Method }
+interface RequestOptions { signal?: AbortSignal; payload?: unknown; requestShape?: string; anonymous?: boolean; keepSessionOn401?: boolean; idempotencyKey?: string; method?: Method }
 
 export interface StaffApiOptions {
   transport?: typeof fetch
@@ -113,6 +117,7 @@ export class StaffApi {
 
   private async request<T>(path: string, shape: Shape, options: RequestOptions = {}): Promise<T> {
     const { signal, payload, requestShape, anonymous = false, idempotencyKey } = options
+    const method = options.method ?? (payload === undefined ? 'GET' : 'POST')
     if (!anonymous) {
       if (this.token && this.expiresAt <= this.now()) this.endSession('expired')
       if (!this.token) throw new ApiError(401, 'A bearer session is required', 'session_expired')
@@ -128,14 +133,14 @@ export class StaffApi {
       if (tracked) {
         let write = this.pendingWrites.get(path)
         if ((this.pendingWrites.size > 0 && !write) || (write && write.payload !== serialized)) throw new ApiError(409, 'Previous write is unconfirmed', UNCONFIRMED_WRITE)
-        write ??= { key: crypto.randomUUID(), payload: serialized, shape: typeof shape === 'string' ? shape : '', requestShape }
+        write ??= { key: crypto.randomUUID(), payload: serialized, shape, requestShape, method }
         this.pendingWrites.set(path, write)
         key = write.key
       }
       headers['Content-Type'] = 'application/json'
       headers['Idempotency-Key'] = key!
     }
-    const body = await this.send(path, payload === undefined ? 'GET' : 'POST', headers, serialized, signal)
+    const body = await this.send(path, method, headers, serialized, signal)
     if (!body.ok) {
       // A definite rejection means nothing was accepted; only unknown outcomes keep the same key for retry.
       if (tracked && body.status >= 400 && body.status < 500) this.pendingWrites.delete(path)
@@ -264,12 +269,17 @@ export class StaffApi {
     const entry = this.pendingWrites.entries().next().value
     if (!entry) throw new ApiError(409, 'No unresolved write exists', 'no_pending_write')
     const [path, pending] = entry
-    const value = await this.request(path, pending.shape, { payload: JSON.parse(pending.payload), requestShape: pending.requestShape })
+    const value = await this.request(path, pending.shape, { payload: JSON.parse(pending.payload), requestShape: pending.requestShape, method: pending.method })
     return { path, value }
   }
 
   private write<T>(path: string, shape: string, requestShape: string, payload: unknown) {
     return this.request<T>(path, shape, { payload, requestShape })
+  }
+
+  /** Endpoints outside contracts/phase1: the response must pass a hand-written guard; writes share the pending-write lock. */
+  call<T>(path: string, guard: (value: unknown) => value is T, options: { method?: Method; payload?: unknown; signal?: AbortSignal } = {}) {
+    return this.request<T>(path, guard, options)
   }
 
   claim(help: HelpRequest) {

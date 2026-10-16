@@ -1,0 +1,229 @@
+import { describe, expect, it, vi } from 'vitest'
+import { StaffApi } from './api/client'
+import { LearningApi } from './api/learning'
+import {
+  isAgentRun, isCreatedShareLink, isGate, isKnowledgeDetail, isKnowledgeLinkList, isLinkQueue, isMemoryList, isReport, isStudentKnowledge, type AgentRun, type KnowledgeLink,
+} from './api/learningTypes'
+import {
+  diagnosisIssue, finishedPeriods, helpSeen, lastFinishedPeriod, memoryIssue, parseAnswerValues, periodFinished, periodFromStart, periodLabel, primaryConflict,
+  runView, shareState, shareUrl, statusLabel, statusLabels,
+} from './learning'
+import { sampleWorkspace } from './sample'
+
+const at = '2026-10-16T08:00:00+00:00'
+const link = (overrides: Partial<KnowledgeLink> = {}): KnowledgeLink => ({
+  id: 'qkl_1', question_id: 'question_a', knowledge_id: 'kp-rational-add-sub', knowledge_name: '有理数加减', role: 'primary', source: 'staff', status: 'confirmed',
+  rationale: null, actor_id: 'staff_a', supersedes_id: null, created_at: at, ...overrides,
+})
+const state = {
+  knowledge_id: 'kp-rational-add-sub', learning_status: 'needs_help_now', reason_codes: ['single_error_needs_diagnosis'], evidence_sufficiency: 'limited',
+  sufficiency_explanation: '只有作业记录，独立完成情况未核实', valid_evidence_count: 1, scorable_evidence_count: 1, independent_evidence_count: 0, independent_dates_count: 0,
+  distinct_item_families_count: 0, observed_error_count: 1, last_error_at: at, last_independent_success_at: null, delayed_verified_at: null, review_due_at: null,
+  diagnoses: [], open_questions: [{ code: 'independence_unverified', count: 1 }, { code: 'cause_not_diagnosed', count: 1 }], evidence_ids: ['evidence_1'], rule_version: 'r1.1-custody',
+}
+const evidence = {
+  id: 'evidence_1', attempt_id: 'attempt_a', case_id: 'case_a', homework_id: 'homework_a', question_id: 'question_a', decision_id: 'decision_a', verdict: 'incorrect',
+  event_type: 'school_first_attempt', result: 'incorrect', assistance_level: 'unknown', independent: false, link_role: 'primary', occurred_at: at,
+  validity: 'valid', invalidation_reason: null, question_text: '1 + 1 = ?', homework_title: null,
+}
+const node = { id: 'kp-rational-add-sub', node_type: 'concept', parent_id: 'ch-7a-02', name: '有理数加减', definition: null, observable_objective: '能计算', curriculum_refs: [], coverage_facets: [], misconception_codes: [], sort_order: 9 }
+const snapshot = {
+  rule_version: 'report-r1', period: { start: '2026-10-01', end_exclusive: '2026-10-16', timezone: 'Asia/Shanghai' },
+  coverage: { observed_days: 1, observed_dates: ['2026-10-08'], homeworks: 1, partial_period: true, first_seen_date: '2026-10-08' },
+  school_tasks: { questions: 1, staff_verified: 1, awaiting_verification: 0, not_judged: 0, verdicts: { correct: 0, incorrect: 1, partially_correct: 0, unanswered: 0 }, corrected_resolved: 0, correction_open: 1 },
+  help: { requests: 0, by_kind: {}, resolved: 0, hints_viewed: 0, answers_shown: 0, staff_help: [] },
+  focus: [{ knowledge_id: 'kp-rational-add-sub', name: '有理数加减', errors: 1, denominator: 1, independent_errors: 0, counter_evidence: 0, assistance: { 帮助情况未知: 1 },
+    status_at_period_end: 'needs_help_now', status_label: '当前需要帮助', verified_scope: [], possible_causes: ['可能是异号相加取符号'], unknown: ['independence_unverified'],
+    cards: [{ evidence_id: 'evidence_1', date: '2026-10-08', homework_title: null, page: 1, question: '1 + 1 = ?', result: 'incorrect', assistance: '帮助情况未知', staff_explanation: '已核对原图及过程。', certainty: '老师已核实' }],
+    next_step: '后续学校作业遇到相关步骤时，由坐班老师现场观察和答疑；家长无需额外布题。' }],
+  steady: [], unknown_current: [], sufficient: true, evidence_ids: ['evidence_1'], sections: { optional_activity: { sessions: 0, minutes: 0, answered: 0, correct: 0, exited: 0, summary: '本期没有安排额外活动。' } },
+  limitations: '本报告只汇总本期在托管班拍照、经老师核实的学校作业。',
+}
+const report = {
+  id: 'report_1', student_id: 'student_a', period_start: '2026-10-01', period_end: '2026-10-16', version: 2, status: 'draft', snapshot, staff_note: null, next_step: null,
+  correction_note: null, supersedes_id: 'report_0', published_at: null, revision: 3, regenerated_reason: 'correction_required', published_by: null, source_digest: 'x', created_at: at, updated_at: at,
+}
+
+describe('学情接口的手写校验', () => {
+  it('知识点关联与待确认队列', () => {
+    expect(isKnowledgeLinkList({ question_id: 'question_a', items: [link(), link({ id: 'qkl_2', status: 'candidate', source: 'model', rationale: '整数加法' })] })).toBe(true)
+    expect(isKnowledgeLinkList({ question_id: 'question_a', items: [{ ...link(), role: 'main' }] })).toBe(false)
+    expect(isLinkQueue({ items: [{ case_id: 'case_a', question_id: 'question_a', student_id: 'student_a', homework_title: null, question_text: null, verdict: 'incorrect', candidates: [] }] })).toBe(true)
+    expect(isLinkQueue({ items: [{ case_id: 'case_a' }] })).toBe(false)
+  })
+  it('学员知识状态：状态只能是四种之一，不接受分数', () => {
+    const body = { student_id: 'student_a', graph_version: 'pep-1', graph_review_status: 'pilot_seed_unreviewed', rule_version: 'r1.1',
+      projection: { evidence_revision: 1, state_version: 1, projected_at: at, pending: false }, states: [{ ...state, name: '有理数加减', chapter_id: 'ch-7a-02', chapter_name: '有理数', sort_order: 9 }],
+      chapters: [{ chapter_id: 'ch-7a-02', name: '有理数', objectives: 3, status_counts: { needs_help_now: 1, no_judgment: 2 } }], notice: '状态只根据坐班老师已核实的作答计算。' }
+    expect(isStudentKnowledge(body)).toBe(true)
+    expect(isStudentKnowledge({ ...body, states: [{ ...body.states[0], learning_status: 'mastered' }] })).toBe(false)
+    expect(isStudentKnowledge({ ...body, chapters: [{ ...body.chapters[0], status_counts: { mastery: 0.6 } }] })).toBe(false)
+    expect(isStudentKnowledge({ ...body, projection: { ...body.projection, pending: 'no' } })).toBe(false)
+  })
+  it('知识点详情含证据、前置与失效原因', () => {
+    const detail = { node, state, evidence: [evidence, { ...evidence, id: 'evidence_0', validity: 'invalidated', invalidation_reason: 'superseded' }],
+      prerequisites: [{ id: 'kp-opposite-abs', name: '相反数与绝对值', learning_status: 'no_judgment' }], leads_to: [], notice: '前置关系只用于提出诊断问题。' }
+    expect(isKnowledgeDetail(detail)).toBe(true)
+    expect(isKnowledgeDetail({ ...detail, evidence: [{ ...evidence, validity: 'maybe' }] })).toBe(false)
+    expect(isKnowledgeDetail({ ...detail, state: null })).toBe(true)
+  })
+  it('记忆与 AI 摘要', () => {
+    const memory = { id: 'memory_1', category: 'effective_support', content: '先口述符号法则再计算', knowledge_id: null, evidence_ids: ['evidence_1'], source: 'model', status: 'proposed',
+      status_reason: null, confirmed_by: null, confirmed_at: null, valid_until: null, supersedes_id: null, revision: 1, created_at: at }
+    expect(isMemoryList({ student_id: 'student_a', items: [memory], notice: '学伴只记住有出处的事实。' })).toBe(true)
+    expect(isMemoryList({ student_id: 'student_a', items: [{ ...memory, source: 'parent' }], notice: '' })).toBe(false)
+    const run = { id: 'agentrun_1', purpose: 'staff_summary', status: 'completed', context: { evidence_ids: ['evidence_1'], state_version: 1 }, model_metadata: null, failure_code: null, created_at: at, completed_at: at,
+      output: { status: 'ready', summary: '有一次经核实的错误。', next_action: '订正时先写出符号法则。', claims: [{ text: '1 道加法题答错', evidence_ids: ['evidence_1'], certainty: 'high' }], memory_proposals: [] } }
+    expect(isAgentRun(run)).toBe(true)
+    expect(isAgentRun({ ...run, status: 'queued', context: {}, output: null, completed_at: null })).toBe(true)
+    expect(isAgentRun({ ...run, output: { ...run.output, claims: [{ text: 'x', evidence_ids: ['evidence_1'], certainty: 0.9 }] } })).toBe(false)
+  })
+  it('半月报告快照：真实分母与更正版本', () => {
+    expect(isReport(report)).toBe(true)
+    expect(isReport({ ...report, snapshot: { ...snapshot, school_tasks: { ...snapshot.school_tasks, staff_verified: -1 } } })).toBe(false)
+    expect(isReport({ ...report, snapshot: { ...snapshot, focus: [{ ...snapshot.focus[0], status_at_period_end: 'weak' }] } })).toBe(false)
+    expect(isReport({ ...report, snapshot: null })).toBe(false)
+  })
+  it('家长链接只接受 /r/{token}', () => {
+    const base = { id: 'share_1', report_id: 'report_1', created_by: 'staff_a', created_at: at, expires_at: '2026-11-15T08:00:00+00:00', revoked_at: null, view_count: 0, last_viewed_at: null }
+    const token = 'A'.repeat(43)
+    expect(isCreatedShareLink({ ...base, token, path: `/r/${token}` })).toBe(true)
+    expect(isCreatedShareLink({ ...base, token, path: `https://evil.test/r/${token}` })).toBe(false)
+    expect(isCreatedShareLink({ ...base, token: 'a b', path: '/r/a b' })).toBe(false)
+  })
+  it('选做窗口闸门', () => {
+    const gate = { open: false, reasons: ['school_tasks_not_confirmed'], school_tasks_complete: { value: null, source: 'system', detail: 'no_homework_today' },
+      has_capacity: { value: true, source: 'staff', actor: 'staff_a', at }, extra_minutes: 10, remaining_minutes: 10, window_revision: 1, checked_at: at }
+    expect(isGate(gate)).toBe(true)
+    expect(isGate({ ...gate, reasons: ['tired'] })).toBe(false)
+    expect(isGate({ ...gate, school_tasks_complete: { value: true, source: 'parent' } })).toBe(false)
+  })
+})
+
+describe('状态文字', () => {
+  it('四种学习状态都有中文且不含百分比', () => {
+    expect(statusLabels).toEqual({ needs_help_now: '当前需要帮助', consolidating: '正在巩固', stable_for_now: '阶段性较稳', no_judgment: '暂不判断' })
+    expect(Object.values(statusLabels).join('')).not.toMatch(/[%％\d]/)
+    expect(statusLabel('unknown_value')).toBe('暂不判断')
+  })
+  it('摘要状态：完成但证据不足时如实显示', () => {
+    const run = (status: AgentRun['status'], output: AgentRun['output'] = null): AgentRun => ({ id: 'agentrun_1', status, context: {}, output, failure_code: null, created_at: at, completed_at: null })
+    expect(runView(run('completed', { status: 'needs_evidence', summary: '尚无', claims: [], next_action: '' }))).toBe('needs_evidence')
+    expect(runView(run('completed', { status: 'ready', summary: 'x', claims: [], next_action: '' }))).toBe('ready')
+    expect(runView(run('stale', { status: 'ready', summary: 'x', claims: [], next_action: '' }))).toBe('stale')
+    expect(runView(run('queued'))).toBe('queued')
+  })
+})
+
+describe('半月周期（北京时间）', () => {
+  const utc = (value: string) => Date.parse(value)
+  it('上一个已结束的半月', () => {
+    expect(lastFinishedPeriod(utc('2026-10-15T16:30:00Z'))).toBe('2026-10-01')
+    expect(lastFinishedPeriod(utc('2026-10-15T15:59:00Z'))).toBe('2026-09-16')
+    expect(lastFinishedPeriod(utc('2026-11-01T01:00:00Z'))).toBe('2026-10-16')
+    expect(lastFinishedPeriod(utc('2026-10-31T15:59:00Z'))).toBe('2026-10-01')
+    expect(lastFinishedPeriod(utc('2027-01-05T00:00:00Z'))).toBe('2026-12-16')
+  })
+  it('列出最近几期，跨年；当前周期不在其中', () => {
+    expect(finishedPeriods(utc('2026-01-20T00:00:00Z'), 4)).toEqual(['2026-01-01', '2025-12-16', '2025-12-01', '2025-11-16'])
+  })
+  it('窗口左闭右开，结束于北京时间零点', () => {
+    expect(periodFromStart('2026-12-16')).toEqual({ start: '2026-12-16', endExclusive: '2027-01-01' })
+    expect(periodFromStart('2026-10-05')).toBeNull()
+    expect(periodFinished('2026-10-01', utc('2026-10-15T15:59:59Z'))).toBe(false)
+    expect(periodFinished('2026-10-01', utc('2026-10-15T16:00:00Z'))).toBe(true)
+    expect(periodLabel('2028-02-16')).toBe('2028-02-16 至 2028-02-29')
+    expect(periodLabel('2026-10-01', '2026-10-16')).toBe('2026-10-01 至 2026-10-15')
+  })
+})
+
+describe('家长链接', () => {
+  const token = 'abcDEF123_-'.repeat(4)
+  it('用服务地址拼出绝对链接', () => {
+    expect(shareUrl('https://xueban.example.cn', `/r/${token}`)).toBe(`https://xueban.example.cn/r/${token}`)
+    expect(shareUrl('http://127.0.0.1:8000/', `/r/${token}`)).toBe(`http://127.0.0.1:8000/r/${token}`)
+  })
+  it('拒绝非 /r/ 路径或外部地址', () => {
+    for (const bad of [`//evil.test/r/${token}`, `/v1/report-links/${token}`, `/r/${token}?x=1`, '/r/short']) expect(() => shareUrl('https://xueban.example.cn', bad)).toThrow()
+    expect(() => shareUrl('javascript:alert(1)', `/r/${token}`)).toThrow()
+  })
+  it('有效、已撤销、已过期', () => {
+    const now = Date.parse('2026-10-20T00:00:00Z')
+    expect(shareState({ revoked_at: null, expires_at: '2026-11-01T00:00:00Z' }, now)).toBe('active')
+    expect(shareState({ revoked_at: '2026-10-19T00:00:00Z', expires_at: '2026-11-01T00:00:00Z' }, now)).toBe('revoked')
+    expect(shareState({ revoked_at: null, expires_at: '2026-10-19T00:00:00Z' }, now)).toBe('expired')
+  })
+})
+
+describe('写入前的本地规则', () => {
+  it('一道题只有一个主要知识点', () => {
+    const links = [link(), link({ id: 'qkl_2', knowledge_id: 'kp-compare', knowledge_name: '比较', role: 'secondary' })]
+    expect(primaryConflict(links, 'kp-compare', 'primary')).toContain('有理数加减')
+    expect(primaryConflict(links, 'kp-compare', 'secondary')).toBeNull()
+    expect(primaryConflict(links, 'kp-rational-add-sub', 'primary')).toBeNull()
+    expect(primaryConflict(links, 'kp-new', 'primary', 'kp-rational-add-sub')).toBeNull()
+    expect(primaryConflict([link({ status: 'rejected' })], 'kp-new', 'primary')).toBeNull()
+  })
+  it('看过提示的作答不能标为独立', () => {
+    const attempt = sampleWorkspace.attempts[0]
+    expect(helpSeen(attempt, [])).toBe(true)
+    const clean = { ...attempt, record: { ...attempt.record, help_condition: 'none_reported' as const } }
+    expect(helpSeen(clean, [])).toBe(false)
+    expect(helpSeen(clean, sampleWorkspace.hints)).toBe(true)
+  })
+  it('记忆：学科困难必须引用有效证据，内容不超过 120 字', () => {
+    const valid = new Set(['evidence_1'])
+    expect(memoryIssue({ category: 'recurring_difficulty', content: '异号相加时符号易错', knowledge_id: null, evidence_ids: [] }, valid)).toContain('证据')
+    expect(memoryIssue({ category: 'recurring_difficulty', content: '异号相加时符号易错', knowledge_id: null, evidence_ids: ['evidence_x'] }, valid)).toContain('有效')
+    expect(memoryIssue({ category: 'recurring_difficulty', content: '异号相加时符号易错', knowledge_id: null, evidence_ids: ['evidence_1'] }, valid)).toBeNull()
+    expect(memoryIssue({ category: 'support_agreement', content: '好'.repeat(121), knowledge_id: null, evidence_ids: [] }, valid)).toContain('120')
+    expect(memoryIssue({ category: 'support_agreement', content: '先读题两遍', knowledge_id: null, evidence_ids: [] }, valid)).toBeNull()
+  })
+  it('已核实薄弱范围至少两条证据', () => {
+    expect(diagnosisIssue('verified_weak_scope', '负数加法符号', ['e1'])).toContain('两条')
+    expect(diagnosisIssue('suspected_cause', '可能是异号相加取符号', ['e1'])).toBeNull()
+  })
+  it('答案按逗号或换行拆分', () => {
+    expect(parseAnswerValues(' 3/4 ，0.75\nB、 ')).toEqual(['3/4', '0.75', 'B'])
+  })
+})
+
+describe('学情接口请求', () => {
+  const ORIGIN = 'http://127.0.0.1:8000'
+  const response = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } })
+  async function signedIn(...responses: (Response | Error)[]) {
+    const transport = vi.fn().mockResolvedValueOnce(response({ access_token: 'session-token', expires_at: '2099-01-01T00:00:00Z', must_change_password: false }))
+    for (const item of responses) item instanceof Error ? transport.mockRejectedValueOnce(item) : transport.mockResolvedValueOnce(item)
+    const api = new StaffApi(ORIGIN, { transport: transport as unknown as typeof fetch })
+    await api.login('teacher.a', 'synthetic-password-123')
+    return { api, learning: new LearningApi(api), transport }
+  }
+  const gate = { open: true, reasons: [], school_tasks_complete: { value: true, source: 'staff', actor: 'staff_a', at, detail: 'staff_confirmed' }, has_capacity: { value: true, source: 'staff', actor: 'staff_a', at },
+    extra_minutes: 10, remaining_minutes: 10, window_revision: 1, checked_at: at }
+
+  it('PUT 带幂等键；结果未知时用原方法、原键重试并按手写校验', async () => {
+    const { api, learning, transport } = await signedIn(new TypeError('network'), response(gate))
+    const body = { expected_revision: 0, capacity_observed: true, extra_minutes: 10, school_tasks_confirmed: true }
+    await expect(learning.setWindow('student_a', body)).rejects.toMatchObject({ status: 0 })
+    expect(api.hasPendingWrite()).toBe(true)
+    const { value } = await api.retryPendingWrite()
+    expect(value).toEqual(gate)
+    const [first, second] = [transport.mock.calls[1], transport.mock.calls[2]]
+    expect(first[0]).toBe(`${ORIGIN}/v1/students/student_a/optional-window`)
+    expect([first[1].method, second[1].method]).toEqual(['PUT', 'PUT'])
+    expect(second[1].headers['Idempotency-Key']).toBe(first[1].headers['Idempotency-Key'])
+    expect(JSON.parse(second[1].body)).toEqual(body)
+  })
+  it('报告编辑用 PATCH；不符合校验的成功响应视为 502', async () => {
+    const { learning, transport } = await signedIn(response({ ...report, revision: 4 }), response({ ...report, snapshot: { focus: 'x' } }))
+    await learning.editReport('report_1', { expected_revision: 3, staff_note: '认真', next_step: null })
+    expect(transport.mock.calls[1][1].method).toBe('PATCH')
+    await expect(learning.report('report_1')).rejects.toMatchObject({ status: 502 })
+  })
+  it('本地拒绝不合规的周期起点和额外时间，不发请求', async () => {
+    const { learning, transport } = await signedIn()
+    expect(() => learning.generateReport('student_a', '2026-10-05')).toThrow()
+    expect(() => learning.setWindow('student_a', { expected_revision: 0, capacity_observed: true, extra_minutes: 90, school_tasks_confirmed: null })).toThrow()
+    expect(transport).toHaveBeenCalledTimes(1)
+  })
+})

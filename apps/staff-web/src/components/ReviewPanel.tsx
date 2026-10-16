@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Bot, Camera, Check, ChevronDown, CircleHelp, FileCheck2, History, Lightbulb, LoaderCircle, MessageCircle, RefreshCcw, ShieldCheck, UserCheck } from 'lucide-react'
 import type { Basis, HelpRequest, Hint, SubmitReview, Verdict } from '../api/contracts.generated'
 import { helpStatusLabels, kindLabels } from '../queue'
@@ -14,13 +14,15 @@ const hintLevels: Record<Hint['level'], string> = { direction: '方向提示', k
 const actionLabels: Record<SubmitReview['action'], string> = { confirm: '确认候选', replace: '更正判断', retract: '撤销判断', leave_unresolved: '保留待核实', manual_initial: '人工初次核实' }
 const at = (value: string) => new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
 
-export default function ReviewPanel({ ws, focus, actorId, block, sample, busy, attemptId, onAttempt, onClaim, onComplete, onReview, onStartCheck }: {
+export default function ReviewPanel({ ws, focus, actorId, block, sample, busy, attemptId, onAttempt, onClaim, onComplete, onReview, onStartCheck, learning }: {
   ws: CaseWorkspace; focus: HelpRequest | null; actorId: string | undefined; block: string | null; sample: boolean; busy: boolean
   attemptId: string; onAttempt: (id: string) => void
   onClaim: (help: HelpRequest) => Promise<boolean>
   onComplete: (help: HelpRequest, outcome: 'resolved' | 'unresolved', note: string) => Promise<boolean>
   onReview: (payload: SubmitReview) => Promise<boolean>
   onStartCheck: () => Promise<boolean>
+  /** Help condition and knowledge links of this case; absent in the synthetic preview. */
+  learning?: ReactNode
 }) {
   const decision = ws.decision?.record ?? null
   const [form, setForm] = useState<ReviewForm>({ action: decision ? 'confirm' : 'manual_initial', verdict: '', reason: '', basis: '', regions: [] })
@@ -88,6 +90,8 @@ export default function ReviewPanel({ ws, focus, actorId, block, sample, busy, a
         </button>
       </li>)}</ol>
     </section>
+
+    {learning}
 
     <section className="panel-section">
       <div className="section-heading"><span><Lightbulb size={17} />提示记录</span><small>{ws.hints.length} 条</small></div>

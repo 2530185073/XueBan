@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { BookOpen, CircleHelp, Eye, LoaderCircle, LockKeyhole, LogOut, ShieldCheck, Sparkles, X } from 'lucide-react'
+import { Brain, BookOpen, CircleHelp, ClipboardCheck, Eye, FileText, Library, LoaderCircle, LockKeyhole, LogOut, Network, ShieldCheck, Sparkles, UserRound, X } from 'lucide-react'
 import { ApiError, errorMessage, isConflict, StaffApi } from './api/client'
+import { LearningApi } from './api/learning'
+import type { AttemptCondition } from './api/learningTypes'
 import type { Accepted, HelpRequest, IdentityContext, ImageAsset, QuestionRead, RepairLayout, ReviseAnswer, ReviseQuestion, SubmitReview } from './api/contracts.generated'
 import type { ReviewQueueItem } from './api/types'
 import { isTerminal, pollJob } from './jobs'
@@ -11,14 +13,27 @@ import CaseDesk, { type RepairState } from './components/CaseDesk'
 import { LoginScreen, PasswordScreen } from './components/LoginScreen'
 import QueuePanel from './components/QueuePanel'
 import ReviewPanel from './components/ReviewPanel'
+import AttemptConditionSection from './components/AttemptConditionSection'
+import KnowledgeLinkArea from './components/KnowledgeLinkArea'
+import KnowledgeLinkEditor from './components/KnowledgeLinkEditor'
+import type { LearningContext } from './components/LearningCommon'
+import MemoryArea from './components/MemoryArea'
+import PracticeArea from './components/PracticeArea'
+import ReportArea from './components/ReportArea'
+import StudentProfileArea from './components/StudentProfileArea'
+import { attemptChain } from './workspace'
 
 type Phase = 'login' | 'password' | 'ready' | 'sample'
+type Area = 'desk' | 'links' | 'profile' | 'memory' | 'reports' | 'practice'
+const areas: [Area, string, typeof BookOpen][] = [['desk', '坐班工作台', ClipboardCheck], ['links', '知识点映射确认', Network], ['profile', '学员画像', UserRound],
+  ['memory', '学伴记忆', Brain], ['reports', '半月报告', FileText], ['practice', '题库审核与选做', Library]]
 const STAFF_ROLES = ['sitting_teacher', 'campus_admin']
 // setTimeout delays above 2^31-1 ms overflow and fire immediately.
 const MAX_TIMER = 2_147_000_000
 
 export default function App() {
   const api = useMemo(() => new StaffApi(window.location.origin, { proxyLoopbackAssets: import.meta.env.DEV }), [])
+  const learning = useMemo(() => new LearningApi(api), [api])
   const [phase, setPhase] = useState<Phase>('login')
   const [username, setUsername] = useState('')
   const [expiresAt, setExpiresAt] = useState<number | null>(null)
@@ -37,6 +52,10 @@ export default function App() {
   const [repair, setRepair] = useState<RepairState | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [area, setArea] = useState<Area>('desk')
+  const [studentId, setStudentId] = useState<string | null>(null)
+  const [dataVersion, setDataVersion] = useState(0)
+  const [conditions, setConditions] = useState<Map<string, AttemptCondition>>(new Map())
   const epoch = useRef(0)
   const images = useRef(new Map<string, string>())
   const imageHomework = useRef<string | null>(null)
@@ -55,6 +74,7 @@ export default function App() {
     selectionRef.current = null
     setPhase(next); setExpiresAt(null); setIdentity(null); setHelp(emptyQueue()); setReview(emptyQueue()); setNames(new Map())
     setSelection(null); setWs(null); setAttemptId(''); setQueueLoading(false); setWsLoading(false); setBusy(false); setWriteUncertain(false); setRepair(null)
+    setArea('desk'); setStudentId(null); setConditions(new Map())
     setNotice(null); setError(message)
   }, [dropImages])
 
@@ -247,7 +267,29 @@ export default function App() {
     } finally { if (generation === epoch.current) setBusy(false) }
   }
 
+  /** Learning-area writes: same lock and conflict handling as `mutate`; open panels re-read through `dataVersion`. */
+  async function act<T>(operation: () => Promise<T>, success: string | null): Promise<T | null> {
+    if (!ready || busy || writeUncertain) return null
+    setBusy(true); setError(null); setNotice(null)
+    const generation = epoch.current
+    try {
+      const value = await operation()
+      if (generation !== epoch.current) return null
+      setWriteUncertain(false); if (success) setNotice(success)
+      return value
+    } catch (cause) {
+      if (generation !== epoch.current) return null
+      setWriteUncertain(api.hasPendingWrite())
+      if (isConflict(cause)) setError(errorMessage(cause))
+      else fail(cause)
+      return null
+    } finally {
+      if (generation === epoch.current) { setBusy(false); setDataVersion(v => v + 1) }
+    }
+  }
+
   const retry = () => mutate(() => api.retryPendingWrite(), '服务端已确认原操作。已读取最新记录。', ({ path, value }) => {
+    setDataVersion(v => v + 1)
     if (path.endsWith('/layout-revisions') && repairBefore.current) trackRepair(value as Accepted, repairBefore.current.homeworkId, repairBefore.current.caseIds)
   }, true)
 
@@ -273,6 +315,18 @@ export default function App() {
   const block = ws ? editBlock(ws, focus, identity?.actor_id, sample) : null
   const studentName = ws ? identity?.authorized_students.find(s => s.student_id === ws.correction.scope.student_id)?.display_name ?? names.get(ws.correction.id) ?? '已授权学生' : ''
   const signedIn = ready || sample
+  const students = identity?.authorized_students ?? []
+  const student = studentId ?? students[0]?.student_id ?? null
+  const ctx: LearningContext = { learning, act, busy: busy || writeUncertain, version: dataVersion, students, origin: api.origin }
+  const viewed = ws ? ws.attempts.find(a => a.record.id === (attemptId || ws.correction.current_attempt_id)) : undefined
+  const caseLearning = ready && ws && viewed ? <>
+    <AttemptConditionSection key={viewed.record.id} ctx={ctx} attempt={viewed} hints={ws.hints} label={attemptChain(ws.attempts, ws.correction.current_attempt_id).find(entry => entry.attempt.record.id === viewed.record.id)?.label ?? '这次作答'}
+      recorded={conditions.get(viewed.record.id)} onRecorded={condition => setConditions(old => new Map(old).set(condition.attempt_id, condition))}
+      locked={ws.homework.processing_blocked ? '这份作业已停止处理，不能继续操作。' : null} />
+    <KnowledgeLinkEditor key={ws.question.record.question_id} ctx={ctx} questionId={ws.question.record.question_id}
+      locked={ws.correction.lifecycle !== 'active' ? '此题已被替代，请在新题上确认知识点。' : ws.homework.processing_blocked ? '这份作业已停止处理，不能继续操作。' : null} />
+  </> : null
+  const openCase = (caseId: string) => { setArea('desk'); select({ caseId, helpId: null }) }
 
   return <div className="app-shell">
     <header className="app-header">
@@ -293,7 +347,15 @@ export default function App() {
     {!signedIn ? <main id="main" className="auth-stage">
       <div className="auth-intro"><p className="eyebrow">让孩子继续自己的作业</p><h1>每一次卡住，<br />都有人接住。</h1><p>对照原图核实 AI 判断、接手孩子的求助、修订识别与切题。所有结论都记录依据，并与 AI 候选分开保存。</p></div>
       {phase === 'password' ? <PasswordScreen busy={busy} username={username} onChange={changePassword} onLogout={() => void logout()} /> : <LoginScreen busy={busy} onLogin={login} onSample={startSample} />}
-    </main> : <main id="main" className="workbench">
+    </main> : <>
+    {ready && <nav className="area-nav" aria-label="工作区">{areas.map(([value, text, Icon]) =>
+      <button key={value} aria-current={area === value ? 'page' : undefined} className={area === value ? 'active' : ''} onClick={() => { setArea(value); setError(null); setNotice(null) }}><Icon size={15} />{text}</button>)}</nav>}
+    {ready && area === 'links' ? <KnowledgeLinkArea ctx={ctx} onOpenCase={openCase} />
+    : ready && area === 'profile' ? <StudentProfileArea ctx={ctx} studentId={student} onStudent={setStudentId} />
+    : ready && area === 'memory' ? <MemoryArea ctx={ctx} studentId={student} onStudent={setStudentId} />
+    : ready && area === 'reports' ? <ReportArea ctx={ctx} studentId={student} onStudent={setStudentId} />
+    : ready && area === 'practice' ? <PracticeArea ctx={ctx} studentId={student} onStudent={setStudentId} />
+    : <main id="main" className="workbench">
       <QueuePanel tab={tab} onTab={setTab} help={help} review={review} names={names} selection={selection} onSelect={select} loading={queueLoading} busy={busy} sample={sample}
         onRefresh={() => { setError(null); void refreshAll() }} onMore={more => void loadQueues(identity, more)} />
       {ws ? <>
@@ -307,6 +369,7 @@ export default function App() {
           onClaim={target => mutate(() => api.claim(target), '已接手这条求助。')}
           onComplete={(target, outcome, note) => mutate(() => api.complete(target, outcome, note), outcome === 'resolved' ? '已记录：帮助已结束。题目对错仍以复核记录为准。' : '已记录：仍需帮助。')}
           onReview={(payload: SubmitReview) => mutate(() => api.submitReview(ws.correction.id, payload), '复核记录已保存。')}
+          learning={caseLearning}
           onStartCheck={() => { const attempt = currentAttempt(ws)!; return mutate(() => api.startCheck(ws.correction.id, { expected_revision: ws.correction.revision, attempt_id: attempt.record.id, question_revision: ws.question.current_revision, attempt_recognition_revision: attempt.record.recognition_revision }), '已请求重新检查，完成后会自动刷新这道题。', watchCheck) }} />
       </> : <>
         <section className="document-panel"><div className="desk-empty"><div className="empty-illustration"><span className="paper-line" /><span className="paper-line" /><span className="paper-line short" /><span className="empty-stamp"><LockKeyhole size={24} /></span></div>
@@ -317,6 +380,7 @@ export default function App() {
           <div className="principle"><span>01</span><p>AI 初判与老师确认<br />清楚区分</p></div><div className="principle"><span>02</span><p>帮助结束与题目答对<br />分别记录</p></div><div className="principle"><span>03</span><p>保留原图和修改过程<br />不覆盖历史</p></div></aside>
       </>}
     </main>}
+    </>}
     <footer className="app-footer"><span>学伴 · 坐班支持</span><span>{sample ? '预览中的题目与人物均为合成' : '登录凭据只保留在本页内存中，不写入浏览器存储'}</span></footer>
   </div>
 }
