@@ -91,7 +91,8 @@
         "evals/correction/"
       ],
       "acceptance": "开发/校准/保留集分开，题目及拍摄变体分组去泄漏；标注由具备能力的内容审核者核实，阈值在保留集前冻结",
-      "evidence": "离线CLI、4份Schema、3组合成文件与归一化说明；30项测试通过。尚无真实授权样本/独立标签/供应商实测，不能作为发布证据。"
+      "evidence": "离线CLI、4份Schema、3组合成文件与归一化说明；30项测试通过。尚无真实授权样本/独立标签/供应商实测，不能作为发布证据。",
+      "ci_evidence": "https://github.com/2530185073/XueBan/actions/runs/38913784169 (8217e2b6df0356d37cf6e9d398620c174f8d053d): success"
     },
     {
       "id": "A06",
@@ -127,7 +128,7 @@
         "services/backend/"
       ],
       "acceptance": "生产鉴权、迁移、学生授权、重启持久化与跨生负向测试；演示身份不能替代",
-      "evidence": "4个实际操作；JWT与数据库授权、Alembic、作业和幂等事务已实现。本机32 passed/2 PG-only skipped；异常日期500已修为422，PG17 CI待执行，真实身份平台未接通。"
+      "evidence": "4个实际操作；JWT与数据库授权、Alembic、作业和幂等事务；本机32 passed/2 skipped；远程PG17+SQLite 66 passed/2 SQLite-only skips，PG并发实际通过。真实身份平台未接通。https://github.com/2530185073/XueBan/actions/runs/38913784169"
     },
     {
       "id": "B02",
@@ -200,7 +201,8 @@
         "apps/staff-web/"
       ],
       "acceptance": "原图/候选/帮助历史同屏，接单/修订/确认/无法判断/冲突；后端真实联调后验收",
-      "evidence": "契约生成TS+AJV、工作台与显式合成预览；12项API测试及build通过，浏览器窄屏/三栏与原图交互已检查。真实求助/复核后端、正式登录与刷新恢复未接通。"
+      "evidence": "契约生成TS+AJV、工作台与显式合成预览；12项API测试及build通过，浏览器窄屏/三栏与原图交互已检查。真实求助/复核后端、正式登录与刷新恢复未接通。",
+      "ci_evidence": "https://github.com/2530185073/XueBan/actions/runs/38913784169 (8217e2b6df0356d37cf6e9d398620c174f8d053d): success"
     },
     {
       "id": "C01",

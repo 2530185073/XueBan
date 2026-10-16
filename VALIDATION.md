@@ -58,13 +58,17 @@ v3.4 历史轮次确认 Android 平台，新增 ANDROID_PHASE1.md 并关联 16 �
 | 模块 | 已执行与结果 | 不由本次结果证明的部分 |
 |---|---|---|
 | 离线评测 | `python3 -m unittest discover -s evals/correction/tests -v`：30 项通过；CLI 生成 19 个合成切片，标明 `synthetic_fixture_only` 和 `not_assessed` | 真实 OCR/模型准确率、图片题框匹配、真实标签及独立保留集 |
-| 后端基础 | 本机 SQLite 替身：32 项通过、2 项 PG 并发跳过、1 条 Starlette 依赖弃用提示；覆盖 JWT/数据库授权、幂等、事务回滚、迁移及新进程读回 | PostgreSQL 结果需看远程 CI；真实身份提供方、上线环境和其余 28 个契约操作未接通 |
+| 后端基础 | 本机 SQLite 替身：32 项通过、2 项 PG 并发跳过；远程 SQLite+PG 合计66通过、2跳过、1条依赖提示；覆盖 JWT/数据库授权、幂等、事务回滚、迁移及新进程读回 | 真实身份提供方、上线环境和其余28个契约操作未接通 |
 | 坐班工作台 | 12 项 API/契约测试；类型检查和 Vite 构建通过；浏览器检查默认窄屏及 1440×1000 三栏、题区开关、原图展开、合成操作禁用 | 实际求助队列、接单、复核服务、身份登录产品流程与现场老师使用 |
 | 共享契约 | 4 Schema、328 引用、32 操作、49 样例及19拒绝检查复验通过 | 不等于32个服务操作已实现 |
 
 交叉审查发现并修复：后端非字符串分页时间与极值 UTC 转换导致裸500（新增5项422回归）；坐班连接中身份过期未清会话；未知写入结果无法沿用原内容重试。现在未确认写入锁定表单并提供同内容/同幂等键重试。刷新浏览器仍会丢失仅内存的会话与待确认请求，跨刷新恢复留在后续范围。
 
-新增 `phase1-engineering-checks.yml`：评测、坐班构建、PostgreSQL 17 三个独立任务。PG 任务强制 `--require-postgres`，缺少测试数据库即失败；每例使用独立随机 schema，并执行真实迁移。远程结果取得后在此登记，不能先把本机 SQLite 结果写成 PostgreSQL 已通过。
+新增 `phase1-engineering-checks.yml`：评测、坐班构建、PostgreSQL 17 三个独立任务。PG 任务强制 `--require-postgres`，缺少测试数据库即失败；每例使用独立随机 schema，并执行真实迁移。
+
+提交 `8217e2b6df0356d37cf6e9d398620c174f8d053d` 的 [Phase-one engineering checks](https://github.com/2530185073/XueBan/actions/runs/38913784169) **三任务全部成功**。PG17先连续两次升级迁移，再跑SQLite与PG两组：**66 passed、2 skipped、1 warning**；两项跳过是SQLite实例不测PG锁争用，对应PG实例的同载荷/不同载荷并发测试均实际通过。远程评测30项、坐班12项及构建也通过；合成工具报告 artifact 为 `correction-synthetic-tool-check`（ID 12051716159），不含真实学生资料。相同提交的 [Reference checks](https://github.com/2530185073/XueBan/actions/runs/38913784306) 成功，原44项参考测试及一期契约通过。
+
+已记录非失败提示：Starlette/AnyIO弃用、Actions旧Node运行时被托管平台切换至Node24，以及ubuntu-latest即将迁移镜像。它们不改变本次成功结果；后续维护应固定/更新CI运行环境并重新验证。上述PG验证只证明本切片及测试条件下的行为，不代表旧全产品RLS、真实部署或现场验收。
 
 ## 当前工程边界
 

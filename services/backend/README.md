@@ -75,4 +75,4 @@ python -m pytest services/backend/tests -q --require-postgres
 
 用例覆盖 JWT 签名/issuer/audience/expiry/iat/算法、伪造角色无效、撤权与越权、契约拒绝、幂等冲突、事务失败回滚、游标隔离、精确 CORS、迁移重复执行/降级后重建、关闭原服务后由新 Python 进程读回已提交数据。PG 专用用例同时测试同键同载荷和同键不同载荷并发。
 
-本轮本机只有 SQLite 验证；PostgreSQL 实跑结果以集成 CI 为准。JWKS 路径使用运行时生成的公钥与受控网络替身检查，真实外部身份提供方、密钥轮转、生产 TLS、托管授权录入及真实设备联调仍待集成；本切片不能作为上线验收。
+本机 SQLite 为32通过、2跳过；[远程PG17 CI](https://github.com/2530185073/XueBan/actions/runs/38913784169) 已对提交 `8217e2b6df0356d37cf6e9d398620c174f8d053d` 执行双次升级及SQLite/PG两组测试：66通过、2跳过，两个跳过仅限SQLite锁争用场景，对应PG用例通过。JWKS 路径使用运行时生成的公钥与受控网络替身检查，真实外部身份提供方、密钥轮转、生产 TLS、托管授权录入及真实设备联调仍待集成；本切片不能作为上线验收。
