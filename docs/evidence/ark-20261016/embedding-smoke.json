@@ -1,0 +1,58 @@
+{
+  "synthetic_only": true,
+  "model": "skylark-embedding-vision-251215",
+  "steps": [
+    {
+      "role": "corpus",
+      "space": {
+        "model": "skylark-embedding-vision-251215",
+        "dimension": 2048,
+        "profile_id": "358ca609784a3f6682a8ebf8cf4d9c5aa171e7e28a922d5d3a075f06abd433c3"
+      },
+      "metadata": {
+        "request_id": "02179216465503785f4608cdee6bbc8f8aaf952504d48fd29490c",
+        "response_id": "02179216465503785f4608cdee6bbc8f8aaf952504d48fd29490c",
+        "usage": {
+          "prompt_tokens": 38,
+          "total_tokens": 38,
+          "text_tokens": 38,
+          "image_tokens": 0
+        },
+        "latency_ms": 2655,
+        "status_code": 200,
+        "cost": null,
+        "charge_status": "unknown"
+      },
+      "vector_length": 2048,
+      "norm": 1.0
+    },
+    {
+      "role": "query",
+      "space": {
+        "model": "skylark-embedding-vision-251215",
+        "dimension": 2048,
+        "profile_id": "358ca609784a3f6682a8ebf8cf4d9c5aa171e7e28a922d5d3a075f06abd433c3"
+      },
+      "metadata": {
+        "request_id": "02179216465659485f4608cdee6bbc8f8aaf952504d48fd1a437d",
+        "response_id": "02179216465659485f4608cdee6bbc8f8aaf952504d48fd1a437d",
+        "usage": {
+          "prompt_tokens": 49,
+          "total_tokens": 49,
+          "text_tokens": 49,
+          "image_tokens": 0
+        },
+        "latency_ms": 1545,
+        "status_code": 200,
+        "cost": null,
+        "charge_status": "unknown"
+      },
+      "vector_length": 2048,
+      "norm": 0.9999999999999999
+    }
+  ],
+  "release_approval": "not_assessed",
+  "cosine": 0.46376507837962566,
+  "status": "passed",
+  "execution_note": "Executed before final timeout/checkpoint hardening; later changes verified with mocked regression tests, without repeating paid calls."
+}

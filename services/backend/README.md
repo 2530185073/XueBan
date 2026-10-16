@@ -49,6 +49,12 @@ JWT 内的角色、租户、学生自报字段一律不用于授权。数据库�
 
 响应错误遵循 `Problem` Schema，隐藏 SQL、凭据和完整请求。`X-Request-Id` 由服务端产生。应用无上传/检查成功的假结果，数据库不可用不会冒充创建成功。
 
+## Ark 模型组件与合成实调
+
+新增 [providers](xueban_backend/providers/README.md) 是独立同步Worker组件，API启动不会自动调用。五个角色统一使用 `deepseek-v4-1-flash-260910`；向量另用 `skylark-embedding-vision-251215`。服务端配置参考 [.env.example](.env.example)，凭据不进入安卓/Web。
+
+`scripts/ark_smoke.py` 仅显式 `--live` 时执行最多五个付费请求，默认测试完全离线。实际合成图片五阶段和两次中文向量调用已经通过，完整结果、限制与复验命令见 [证据记录](../../docs/evidence/ark-20261016/README.md)。这没有实现图片上传、切题坐标、任务持久化、公开纠错/提示接口或知识索引；当前公开API仍只有前述4个操作。
+
 ## 验证入口
 
 本机无 PostgreSQL/Docker 时，仅运行 SQLite 替身：

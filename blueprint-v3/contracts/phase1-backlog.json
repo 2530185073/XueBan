@@ -109,7 +109,7 @@
       "title": "真实识别、切题与识别更正",
       "owner_hint": "AI",
       "priority": "P0",
-      "status": "not_started",
+      "status": "in_progress",
       "dependency_ids": [
         "P1-04"
       ],
@@ -120,14 +120,15 @@
       "acceptance_failure": "漏切、错切、不完整题干保留待补拍或待核实；未知知识点和无既有题库 ID 不阻断识别",
       "delivery_waves": [
         "B"
-      ]
+      ],
+      "implementation_note": "已实现Ark候选适配器并完成合成图片实调用；尚无生产图片上传/题区版本/纠错公开接口/真实手写验收，依赖任务仍未放行。"
     },
     {
       "id": "P1-06",
       "title": "按题型检查与可核实错误定位",
       "owner_hint": "AI",
       "priority": "P0",
-      "status": "not_started",
+      "status": "in_progress",
       "dependency_ids": [
         "P1-05"
       ],
@@ -138,7 +139,8 @@
       "acceptance_failure": "缺过程不编错步；模型规则冲突和未支持题型不硬判；候选不冒充确认；覆盖率与误判分别报告",
       "delivery_waves": [
         "B"
-      ]
+      ],
+      "implementation_note": "已实现Ark候选适配器并完成合成图片实调用；尚无生产图片上传/题区版本/纠错公开接口/真实手写验收，依赖任务仍未放行。"
     },
     {
       "id": "P1-07",

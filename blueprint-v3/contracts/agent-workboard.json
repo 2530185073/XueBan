@@ -91,7 +91,7 @@
         "evals/correction/"
       ],
       "acceptance": "开发/校准/保留集分开，题目及拍摄变体分组去泄漏；标注由具备能力的内容审核者核实，阈值在保留集前冻结",
-      "evidence": "离线CLI、4份Schema、3组合成文件与归一化说明；30项测试通过。尚无真实授权样本/独立标签/供应商实测，不能作为发布证据。",
+      "evidence": "离线CLI、4份Schema、3组合成评测文件与归一化说明；30项测试通过。新增Ark合成图片协议实测单独记录，尚无真实授权样本/独立标签，不能作为发布证据。",
       "ci_evidence": "https://github.com/2530185073/XueBan/actions/runs/38913784169 (8217e2b6df0356d37cf6e9d398620c174f8d053d): success"
     },
     {
@@ -110,7 +110,7 @@
         "MODEL_SERVICE_PLAN.md"
       ],
       "acceptance": "准确模型ID、视觉/文本区分、OCR现行接口、采购权限与能力缺口均附官方来源；不冒充账户已开通或效果实测",
-      "evidence": "2026-10-16三Agent只读官方资料核验；尚无密钥/付费推理调用"
+      "evidence": "2026-10-16官方型号/地域核验；按用户指定统一DeepSeek，合成五角色和同平台向量实际调用通过；真实作业效果未评测。MODEL_SERVICE_PLAN.md、docs/evidence/ark-20261016/"
     },
     {
       "id": "B01",
@@ -159,12 +159,15 @@
         "P1-05",
         "P1-06"
       ],
-      "status": "not_started",
+      "status": "in_progress",
       "artifact_paths": [
-        "services/backend/adapters/",
-        "evals/correction/"
+        "services/backend/xueban_backend/providers/",
+        "services/backend/scripts/",
+        "evals/correction/",
+        "docs/evidence/ark-20261016/"
       ],
-      "acceptance": "同开发样本比较路线，报告切题覆盖/错判/漏判/无法判断/成本时延；无密钥时不得称效果通过"
+      "acceptance": "同开发样本比较路线，报告切题覆盖/错判/漏判/无法判断/成本时延；无密钥时不得称效果通过",
+      "evidence": "指定DeepSeek五角色、图片与结构化候选适配器，及独立2048维向量适配器；真实合成5+2请求成功。公开纠错端点、切题坐标、数据库任务和真实作业评测仍未完成。"
     },
     {
       "id": "B04",
@@ -297,11 +300,18 @@
       "acceptance": "具备实际设备/授权/坐班负责人，真实出勤观察，16项验收与R2后发布，记录未覆盖范围"
     }
   ],
-  "execution_round": 2,
+  "execution_round": 3,
   "external_provider_decision": {
     "source": "official_apis",
     "confirmed_by_user": true,
     "decided_at": "2026-10-16",
-    "credentials_received": false
+    "credentials_received": true,
+    "platform": "BytePlus ModelArk AP",
+    "base_url": "https://ark.ap-southeast.bytepluses.com/api/v3",
+    "chat_model": "deepseek-v4-1-flash-260910",
+    "embedding_model": "skylark-embedding-vision-251215",
+    "embedding_dimensions": 2048,
+    "live_validation": "synthetic_protocol_only",
+    "production_integration": false
   }
 }

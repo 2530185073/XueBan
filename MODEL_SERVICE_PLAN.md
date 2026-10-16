@@ -1,40 +1,45 @@
-# 外部 AI 接口选型与申请清单
+# 模型服务路线与最小申请清单
 
-核验日期：2026-10-16。用户已授权优先使用高能力外部 OCR、多模态与推理模型，并愿意协助取得接口资源。本文件记录官方文档核验与工程选型建议；尚未获得项目凭据，未调用付费推理，未测得任何真实作业准确率。服务商能力说明、项目候选方案和实测结果必须分开。用户随后已明确选择官方 API，首轮按各供应商官方标准业务接口接入。
+核验与集成状态日期：2026-10-16。用户已选择 **BytePlus AP 官方 ModelArk 的 `deepseek-v4-1-flash-260910`**，作为一期识别、检查、提示、订正再检、知识抽取五个角色的统一底座。主路线已完成真实 API 合成样例联调：五阶段均返回 HTTP 200，角色流程与本地结构校验通过。此结果只证明当前配置能够调用并走通合成流程，**不代表真实手写准确率、数学批改质量或上线验收通过**。
 
-## 1 先申请什么
+## 1 当前固定配置与证据边界
 
-| 优先级 | 具体资源 | 开通要求 | 在项目中的用途 |
-|---|---|---|---|
-| 第一批 | DeepSeek 标准 API：`deepseek-flash` | 可调用图片与思考模式的标准 API Key、按量额度及实际并发限制 | 作业视觉理解、逐题候选检查、提示的主路线候选 |
-| 第一批 | Kimi 标准 API：`kimi-k3` | 标准开放平台权限、图片输入、结构化输出、试验额度 | 困难题、视觉争议与不同模型家族的质量对照 |
-| 第一批 | 腾讯云 `QuestionSplitOCR` | OCR 试卷切题权限、独立服务账号、测试次数；显式评估 UseNewModel | 整页切题、文字及坐标候选 |
-| 第一批 | 百度“试卷切题与识别（多模态）” | `paper_cut_edu_vlm/create_task` 与 `get_result` 的明确权限、测试额度及报价 | 手写、公式与整页切题的第二条识别路线 |
-| 第二批，可同时申请 | GLM：`glm-5.3`、`glm-5.3-flash`，可选 `glm-ocr` | 确认所用国内/国际平台的准确型号、标准 API 权限及地域 | 文本推理与课程结构抽取；Flash/OCR 作为视觉对照 |
-| 第二批，可同时申请 | 阿里百炼：`qwen3.8-max-0902`、`qwen3.5-ocr` | 项目/Workspace、地域、模型权限和试验额度 | 强多模态与专用文档识别对照 |
-| 建教材检索时 | 百炼 `qwen3.7-text-embedding`、`qwen3.7-text-rerank` | 分别开通向量与重排接口，提供实际端点与维度限制 | 找到对应教材段落与知识点候选，不直接计算掌握度 |
-| 按需对照 | 腾讯试题批改 Agent；Mathpix；豆包 Seed2.1 Pro | 独立试用额度、明确题型与数据处理条件 | 成品批改基线、手写公式专项、另一多模态候选 |
+| 项目 | 当前决定 |
+|---|---|
+| 官方平台 | BytePlus ModelArk，AP 资源；区域标识 `ap-southeast-1`，马来西亚柔佛（Johor） |
+| Base URL | `https://ark.ap-southeast.bytepluses.com/api/v3` |
+| 聊天与图片接口 | `POST /chat/completions`；完整端点 `https://ark.ap-southeast.bytepluses.com/api/v3/chat/completions` |
+| 五角色统一模型 | `deepseek-v4-1-flash-260910`；角色为 `recognition`、`check`、`hint`、`recheck`、`knowledge_extract` |
+| 输出约束 | `response_format: {"type":"json_object"}`，服务端再执行严格 JSON 解析和本地 JSON Schema 校验；不宣称模型原生严格 Schema 保证 |
+| 当前真实调用证据 | 自制印刷图片的识别、检查、提示、订正再检，以及自编文本的知识抽取，五阶段均通过；样例标为 `synthetic_only`，发布验收仍未评估 |
+| 结果权限 | 所有模型输出均为候选；不能直接确认对错、完成订正或把知识点标为已掌握 |
 
-第一批两家识别、两个不同模型家族足以开始主路线对比；更多候选可以并行申请，不要求每道题同时调用所有服务。首轮额度建议按每家约 200 页开发/校准样本、1000—2000 道题申请，包含同页重试及不同路线的额外调用。这是试验申请量，不是已采购或发布样本数；独立保留集另行冻结。
+`bytepluses.com` 的拼写来自官方文档，不是依据用户描述推定。该配置不应称为“中国内地火山端点”或“固定新加坡节点”。官方区域说明允许根据资源调度把部分请求路由到其他区域；区域、数据处理和留存条件需与真实资料使用范围一起核实。[官方快速开始](https://docs.byteplus.com/en/docs/modelark/quick-start)、[区域与跨区路由](https://docs.byteplus.com/en/docs/modelark/region-availability)
 
-用户提供的非密钥信息可以按此格式交接：**官方供应商/账号平台 → API 文档 → Base URL → 准确 model ID 或 Action → 已开通能力 → 地域/项目 → RPM、TPM、并发或 QPS → 计费单位/试用余额 → 数据留存与训练使用安排**。记录实际模型版本是否会自动切换；本轮不依赖统一中转网关。
+最新模型目录对该型号写明仅支持 `json_object` 模式；不要用通用 Chat API 的 `json_schema` 参数列表或旧语言版本说明替代具体型号能力。`thinking.type` 可为 `enabled`／`disabled`，`reasoning_effort` 支持 `none/low/high/max`。此型号的输出预算包含思考与答案；默认预算在目录和专页间有不同表述，项目必须显式指定预算、超时与尝试次数，并记录是否截断。[模型目录](https://ai.byteplus.com/ark/region:ap-southeast-1/docs/model-list)、[型号与参数](https://ai.byteplus.com/ark/region:ap-southeast-1/docs/deepseek-v4-1-flash)
 
-密钥仅进入后端环境或密钥管理，不写进安卓 App、Web 包、GitHub 或聊天正文。研发 Agent 的 Coding 套餐与给学生 App 使用的标准业务 API 分别配置；账号能登录不代表全部接口已开通。
+五个角色使用不同提示和证据输入，但仍是同一个模型；第二次提示不等于独立模型验证。HTTP 200 也不等于结果正确，还须通过完整输出、结构和业务证据检查。合成样例只覆盖协议及角色流程，没有测量学生手写、模糊照片、复杂证明或真实现场吞吐。
 
-## 2 用户指定的模型已核实
+## 2 现在需要什么资源
 
-| 名称 | 正确调用标识与能力 | 建议职责与注意点 |
+| 优先级 | 资源与当前状态 | 需要完成的事项 |
 |---|---|---|
-| GLM 5.3 | `glm-5.3`；官方明确纯文本、1M 上下文，思考始终开启，low/high/max | OCR 后的复杂推理、教材概念与关系候选抽取；不能直接读取照片。[官方模型页](https://docs.z.ai/guides/llm/glm-5.3) |
-| GLM 视觉系列 | `glm-5.3-flash`、`glm-5.3-flashx` 支持图片等输入；`glm-ocr` 是专门识别候选 | 与 DeepSeek/Kimi 使用同一批照片比较，不能因为名称带 Flash 就认定能力弱。[Flash](https://docs.z.ai/guides/vlm/glm-5.3-flash)、[OCR](https://docs.z.ai/guides/vlm/glm-ocr) |
-| Kimi K3 | 标准 API 为 `kimi-k3`，原生视觉、1M 上下文，官方例子含 strict JSON Schema | 复杂题与结构化输出对照；Kimi Code 的 `k3`/`k3-256k` 属另一配置体系。[标准 K3 文档](https://platform.kimi.com/docs/guide/kimi-k3-quickstart)、[Code 配置](https://www.kimi.com/help/kimi-code/models) |
-| DeepSeek V4.1 Flash | 标准 API 为 `deepseek-flash`；图片/文本、1M 上下文、JSON 和工具调用 | 日常纠错主候选，仍须服务端校验结构和数学结论。[规格](https://api-docs.deepseek.com/quick_start/pricing/)、[视觉接口](https://api-docs.deepseek.com/guides/vision/) |
+| 已接通，继续使用 | AP `deepseek-v4-1-flash-260910` | 沿用当前服务端配置；确认项目实际额度、账单和预算告警，按授权样本继续评测，无需再次索取一批聊天密钥 |
+| 已接通纯文本向量 | AP `skylark-embedding-vision-251215` | 当前账号的中文合成语料／查询两次真实调用均 HTTP 200，返回 2048 维并使用相同空间配置；图文调用、索引、检索质量和数据库接入尚未验证 |
+| 可后置，未接入未测 | Knowledge Base `base-multilingual-rerank`，备选 `m3-v2-rerank` | 仅在召回排序效果有明确需求时开通知识库服务、专用鉴权和额度；不阻塞拍照纠错 |
+| 发现识别短板后按需 | 腾讯／百度教育 OCR，或百炼 `qwen3.5-ocr` | 用同一授权样本证明漏切、符号或手写识别短板，再申请对应接口试验；不要求现在全部开通 |
 
-国内智谱文档本次多次超时，GLM 以上能力来自官方 Z.AI 文档；不能据此推定国内账号权限、人民币价格或处理地域。Z.AI 模型页的协议表与标准调用样例地址也需按实际账号复核，不把 Coding 端点直接写成生产默认值。
+模型激活状态和 API Key 按区域隔离，同一账号已有聊天权限不代表向量或知识库服务已开通。只需交接非密钥信息：**平台与区域 → 准确模型或 Action → 开通状态 → 实际 RPM/TPM/QPS → 额度与计费 → 数据处理安排**。[模型激活与 API Key](https://ai.byteplus.com/ark/region:ap-southeast-1/docs/quick-start)
 
-DeepSeek 旧 Flash 型号名会转发到 V4.1 Flash；关于 `deepseek-v4-pro`，发布公告与当前价目页仍有不同表述。不能用两个名字就认定为两个独立模型，独立复核优先跨供应商家族。[发布公告](https://deepseek.com/news/deepseek-v4-1-flash/)
+密钥仅进入后端环境或密钥管理，不写进安卓 App、Web 包、GitHub 或聊天正文。研发 Agent 的 Coding 套餐与学生 App 使用的标准业务 API 分别配置。本轮使用官方业务接口；保留适配能力，不以中转网关为默认前提。
 
-阿里官方当前视觉列表包含 `qwen3.8-max-0902`，`qwen3.5-ocr` 面向文档、试卷和手写提取；火山官方列有 `doubao-seed-2-1-pro-260915`。它们可作为追加实验组，是否对项目账户开放仍需控制台验证。[百炼视觉模型](https://help.aliyun.com/zh/model-studio/vision-model)、[方舟模型列表](https://docs.volcengine.com/docs/ark/model-list?lang=zh&redirect=1)
+以下是后续对照候选，不能混用账号、端点或模型名，也不自动成为当前回退路线。**型号更新不等于更适合本项目**，替换须由相同样本上的误伤、漏检、覆盖、延迟与成本结果决定。
+
+| 平台 | 可选准确 ID | 账号与用途边界 |
+|---|---|---|
+| 当前 BytePlus AP 平台 | `dola-seed-2-1-turbo-260628`、`glm-5-3-flash-260828` | 同平台模型对照，仍需分别激活并确认账户权限；不能套用国内豆包或 Z.AI 的型号拼写。[AP 模型目录](https://ai.byteplus.com/ark/region:ap-southeast-1/docs/model-list) |
+| 中国火山方舟账号 | `doubao-seed-2-1-pro-260915` | 属于另一个账号／区域与接入配置，不是 AP `dola-seed` 的可互换名字；按需追加多模态实验组。[中国方舟模型目录](https://docs.volcengine.com/docs/ark/model-list?lang=zh&redirect=1) |
+| 阿里云百炼账号 | `qwen3.8-max-0902`、`qwen3.5-ocr` | 前者用于多模态对照，后者用于文字与文档提取；确认 Workspace、地域和独立权限。OCR 提取不等于数学批改。[Max 型号](https://help.aliyun.com/zh/model-studio/qwen3-8-max)、[OCR 型号](https://help.aliyun.com/zh/model-studio/qwen3-5-ocr) |
 
 ## 3 OCR 与成品批改的区别
 
@@ -52,11 +57,11 @@ OCR 不能只统计整段文字相似度。负号、分数线、根号、上下�
 
 ## 4 模型如何分工
 
-三条路线在同一开发样本上比较：
+当前先把统一 DeepSeek 的完整纠错闭环接实，后续按评测结果追加路线：
 
-1. **多模态直读**：原图/题区交给 DeepSeek Flash、Kimi K3 等，分别输出题干、孩子作答与检查依据。
-2. **专用识别加核验**：OCR 保存文字、公式、区域与版本，再交强推理模型核验；核验时必要时补原图，避免把 OCR 错误当成孩子错误。
-3. **成品批改对照**：腾讯批改 Agent 等单独评测完整流程；输出归一化到同一证据结构，不能直接覆盖老师决定或学生画像。
+1. **当前主路线**：原图／题区交给 `deepseek-v4-1-flash-260910`，分角色生成原始作答识别、判题候选、逐级提示与本次订正再检结果；知识抽取也使用同一型号。
+2. **可追加识别路线**：专用 OCR 保存文字、公式、区域与版本，再由当前 DeepSeek 核验；必要时同时提供原图，避免把 OCR 错误当成孩子错误。
+3. **可追加对照路线**：同 AP 的其他模型或成品批改服务，仅在固定开发样本上比较；结果归一化到同一证据结构，不能直接覆盖老师决定或学生画像。
 
 先独立读题/求解，再对照学生作答；能用确定性算术、符号等价或已核实答案校验时增加校验器。另一个模型复核应尽量独立读取题目，避免先喂第一个模型的结论造成附和。原始图像、识别和判题版本均保留。不同模型一致不等于事实已确认；当前契约仍规定模型仅提出候选。
 
@@ -72,9 +77,16 @@ OCR 不能只统计整段文字相似度。负号、分数线、根号、上下�
 
 `孩子的照片/作答/提示/订正/复核 → 有效纠错证据 → 映射知识点 → 后续更新个人状态与智能体记忆`
 
-GLM 5.3、Kimi K3 可用于离线教材结构与关系抽取，DeepSeek/其他模型作为对照。每个节点和关系附教材版本、PDF页码、印刷页码、原文区域和抽取版本。章节先后不自动等于知识前置关系；找不到来源的关系保持候选。每个孩子的掌握状态根据有效证据、独立性、帮助条件与时间计算，不能由一次模型回答直接改成“已掌握”。
+教材结构、概念与关系候选当前统一由 `deepseek-v4-1-flash-260910` 的 `knowledge_extract` 角色提取。每个节点和关系附教材版本、PDF 页码、印刷页码、原文区域和抽取版本；实际初中人教版教材须核实年级、册次与版次。章节先后不自动等于知识前置关系，找不到来源的关系保持候选。每个孩子的掌握状态根据有效纠错证据、独立性、帮助条件与时间计算，不能由一次模型回答直接改成“已掌握”。本轮合成规则引用通过不等于真实教材图谱已经建立。
 
-Embedding 帮助召回教材段落，Rerank 对候选证据排序；相关性分数不等于孩子掌握度。建议首测 `qwen3.7-text-embedding` 与 `qwen3.7-text-rerank`，固定模型/维度/索引版本；换模型重建相应索引。[Embedding](https://help.aliyun.com/zh/model-studio/embedding-interfaces-compatible-with-openai/)、[Rerank](https://help.aliyun.com/zh/model-studio/text-rerank-api)
+知识抽取、Embedding 和 Rerank 是不同职责。Embedding 只帮助召回教材段落与相似题目，Rerank 只排序候选证据；相似度和相关性分数都不等于孩子掌握度。
+
+| 检索能力 | 当前选型与接口 | 边界 |
+|---|---|---|
+| 文本与多模态 Embedding | `skylark-embedding-vision-251215`；`POST https://ark.ap-southeast.bytepluses.com/api/v3/embeddings/multimodal` | 纯文本使用 `input` 中的 `text` 项，图文用对应类型组合；一组混合输入整体返回一个向量，不是自动批量切段。`dimensions` 仅 1024／2048，默认 2048；纯文本可选稀疏向量。本轮已验证中文合成文本的 2048 维调用，图文与稀疏输出未实测。[API](https://ai.byteplus.com/ark/region:ap-southeast-1/docs/multimodal-vectorization-api)、[教程](https://ai.byteplus.com/ark/region:ap-southeast-1/docs/vectorization) |
+| 可后置的 KB Rerank | `base-multilingual-rerank`，可选 `m3-v2-rerank`；`POST https://api-knowledgebase.mlp.ap-southeast-1.bytepluses.com/api/knowledge/service/rerank` | 柔佛 Knowledge Base 独立服务，最多 200 个候选；需知识库专用 Key／适用的 IAM API key 或 AK/SK 权限，不能假设普通聊天 Key 通用。当前未接入、未实测，账号权限未核实。[接口](https://docs.byteplus.com/en/docs/RAG_Cloud/Rerank)、[区域和鉴权](https://docs.byteplus.com/en/docs/RAG_Cloud/Signature_authentication) |
+
+固定 Embedding 型号、维度、切段规则和索引版本；更换后重建对应索引。首轮可先使用稠密检索与可追溯来源，不把独立知识库或 Rerank 的开通设为纠错前置。
 
 一期可以用 PostgreSQL 保存节点、关系与来源，不先引入复杂图平台。Docling 可作带页码和区域来源的解析候选；仍需核验中文公式。[文档模型](https://docling-project.github.io/docling/reference/docling_document/)。Microsoft GraphRAG 当前仓库说明主要处于维护状态；本项目不把它设为一期前置，可在后续跨文档探索时评估。[官方仓库](https://github.com/microsoft/graphrag)
 
@@ -84,25 +96,22 @@ Embedding 帮助召回教材段落，Rerank 对候选证据排序；相关性分
 
 | 服务 | 本次核到的公开单位价格 | 边界 |
 |---|---|---|
-| DeepSeek Flash | 高峰每百万 token：非缓存输入 $0.30、缓存输入 $0.006、输出 $1.20；闲时半价 | 图片与思考用量要计入；并发上限不保证实际等待时间。[官方价格](https://api-docs.deepseek.com/quick_start/pricing/) |
-| Kimi K3 | 每百万 token：输入 ¥20、输出 ¥100、缓存命中 ¥2 | 标准 API 开通条件、累计充值等级配额与缓存写入另核。[价格](https://platform.kimi.com/docs/pricing/chat)、[额度](https://platform.kimi.com/docs/pricing/limits) |
-| Z.AI GLM 5.3 / Flash | 每百万 token：5.3 输入 $1.40、输出 $4.40；Flash 输入 $0.15、输出 $0.50 | 国际站价格，不能替代国内 BigModel 报价；缓存价另列。[价格](https://docs.z.ai/guides/overview/pricing) |
+| BytePlus AP DeepSeek V4.1 Flash | 高峰每百万 token：非缓存输入 $0.30、缓存命中输入 $0.006、输出 $1.20；非高峰分别 $0.15、$0.003、$0.60 | 当前平台官方价格，不套用 DeepSeek 直营或其他转售平台账单。高峰为 UTC+8 周一至周五 09:00–12:00、14:00–18:00；图片、思考、缓存存储另按实际用量核对。[官方价格，2026-10-13 更新](https://ai.byteplus.com/ark/region:ap-southeast-1/docs/model-pricing) |
+| BytePlus `skylark-embedding-vision` | 每百万输入 token：文本 $0.125、图片 $0.325 | 不把单次返回的维度当作计费单位。[官方价格](https://ai.byteplus.com/ark/region:ap-southeast-1/docs/model-pricing) |
+| Knowledge Base `rerank_knowledge` | 每千输入 token $0.00004 | 属知识库计费项；知识库上传文档后还可能持续产生计算资源费用，不能把此价格当成整套服务成本；独立接口实际计费待核。[知识库价格](https://ai.byteplus.com/ark/region:ap-southeast-1/docs/knowledge-base-pricing) |
 | 腾讯切题 / 批改 Agent | 后付费分别 ¥0.24/次、¥0.15/题 | 十题照片的批改按题计费，非一张一次；失败规则另核。[计费](https://cloud.tencent.com/document/product/866/17619) |
 | 百度多模态切题识别 | 本次未核实准确单价，申请商业报价 | 不能套普通 OCR 或普通切题价格 |
 | Mathpix | 首百万图档 $0.002/图 | 超过12行可能按PDF页价计费，不能套整页预算。[价格](https://website.mathpix.com/pricing/api) |
 
-用实际调用记录计算：`每次作业成本 = OCR/切题 + 模型输入输出 + 必要复核 + 订正再检 + 失败重试 + 存储`。按供应商请求 ID 去重分摊整页费用，不对同一请求产生的每道题重复计费。先对 100—200 页测出实际用量与等待，再决定主路线与峰值额度。
+用实际调用记录计算：`每次作业成本 = OCR/切题 + 模型输入输出 + 必要复核 + 订正再检 + 失败重试 + 存储`。按供应商请求 ID 去重分摊整页费用，不对同一请求产生的每道题重复计费。成功和失败尝试都记录请求标识、模型版本、延迟及可得用量；超时／失败的费用保持未知，不能当成免费。当前合成联调的用量不代表真实整页成本，须用授权开发样本测出实际用量与等待后再调整峰值额度。
 
 腾讯、百度具体教育接口的完整留存/训练使用/处理地域，本次未核实，取得供应商答复后再配置真实资料流程。Mathpix 的图片与结果留存受 `metadata.improve_mathpix` 等设置影响，第一轮优先无身份的自制公式样本。[Mathpix 留存说明](https://docs.mathpix.com/concepts/data-retention)
 
 ## 7 分阶段执行与当前交付
 
-第一阶段：完成本申请清单、供应商能力核验、离线评测结构；同时开发不依赖外部密钥的后端身份/授权/作业持久化和坐班页面。当前已分别派给三个 Agent，主 Agent 负责集成与契约审查。
-
-第二阶段：取得接口后，先用合成题验证授权、图片、格式、故障和计费，再用授权开发样本比较路线。固定参数、题目分组和版本，独立保留集不用于选择模型或调参。
-
-第三阶段：选定主路线与必要备选，接入真实上传、任务与订正再检查。按项目 C0/R1 验收，再进入真实现场。来源失效、技术失败和无法判断不能从分母消失。
-
-第四阶段：使用一期有效纠错记录完善个人知识图谱和专属智能体；教材抽取可提前离线验证，图谱完整度不阻塞一期纠错。
+1. **已完成的接入证据**：统一 DeepSeek 五角色真实合成联调全部 HTTP 200，识别／检查／提示／订正再检／知识抽取流程通过；没有真实学生数据或手写准确率结论。实现入口为 `services/backend/scripts/ark_smoke.py`，合成图片位于 `evals/correction/fixtures/ark-smoke/`。只保存可审查的脱敏结论，不把密钥或私有报告位置写入仓库。
+2. **向量合成协议实测已通过**：同一有效账号调用 `skylark-embedding-vision-251215`，中文合成语料与查询均 HTTP 200、2048 维，使用相同空间配置。语料请求 38 tokens／2655ms，查询请求 49 tokens／1545ms；这是两次观测，不是延迟基准，费用未核账且不能写为零。索引构建、检索质量与数据库接入仍未完成；图文／稀疏向量和 Rerank 尚未实测。后续继续完成错误保存、预算与适配器测试；模型优化依据评测，不以“最新”作为替换理由。
+3. **上线前仍须完成**：把模型候选接入真实上传、版本化任务、坐班核实与订正再检流程，使用获准作业和可信标注评测。按题目与拍摄组隔离开发／保留集，保留集不得用于选模型或调参。按 C0/R1 验收进入试点；正确题误伤、错题漏检、覆盖率、仍错订正错误放行及分位延迟分别报告，来源失效、技术失败、漏题和缺输出不能从分母消失。
+4. **后续建设**：用有效纠错记录完善个人知识图谱和专属智能体。教材抽取可提前离线验证，图谱完整度与知识库重排序开通不阻塞一期纠错，也不为填充图谱增加学生练习压力。
 
 资源之外还需要：实际教材版本、第一批可获准使用的真实作业和可信标注、目标安卓平板，以及后端部署环境与身份系统。可先用自制样例开发，不能用合成测试成绩证明学生作业识别效果。

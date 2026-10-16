@@ -1,0 +1,242 @@
+{
+  "schema_version": "ark-smoke.v1",
+  "synthetic_only": true,
+  "purpose": "live_protocol_and_role_integration_only",
+  "release_approval": "not_assessed",
+  "created_at": "2026-10-16T15:25:01.764823+00:00",
+  "steps": [
+    {
+      "role": "recognition",
+      "status": "candidate",
+      "candidate": {
+        "readable": true,
+        "question_text": "Expand 3(x - 2).",
+        "student_answer": "3x - 2",
+        "uncertainties": [
+          "Image is a synthetic fixture with printed text only; no handwriting or teacher markings are present.",
+          "No evidence of whether the student has mastered or corrected the item."
+        ]
+      },
+      "metadata": {
+        "requested_model": "deepseek-v4-1-flash-260910",
+        "model": "deepseek-v4-1-flash-260910",
+        "request_id": "021792164303806c2670fe791a5f29d61bdea8e0ada6c5d5a8e5b",
+        "response_id": "021792164303806c2670fe791a5f29d61bdea8e0ada6c5d5a8e5b",
+        "usage": {
+          "prompt_tokens": 669,
+          "completion_tokens": 70,
+          "total_tokens": 739,
+          "cached_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "latency_ms": 3972,
+        "attempts": [
+          {
+            "number": 1,
+            "status_code": 200,
+            "code": "ok",
+            "latency_ms": 3971,
+            "request_id": "021792164303806c2670fe791a5f29d61bdea8e0ada6c5d5a8e5b",
+            "model": "deepseek-v4-1-flash-260910",
+            "usage": {
+              "prompt_tokens": 669,
+              "completion_tokens": 70,
+              "total_tokens": 739,
+              "cached_tokens": 0,
+              "reasoning_tokens": 0
+            },
+            "charge_status": "unknown"
+          }
+        ]
+      }
+    },
+    {
+      "role": "check",
+      "status": "candidate",
+      "candidate": {
+        "verdict": "incorrect",
+        "evidence_summary": "Image shows the question \"Expand 3(x - 2).\" and the printed student answer \"3x - 2\". The correct expansion is 3x - 6, so the student's expression is not equivalent to the given product.",
+        "error_summary": "The student likely applied the distributive property only to x and left -2 unchanged, giving -2 instead of multiplying -2 by 3 to get -6. The answer should be 3x - 6."
+      },
+      "metadata": {
+        "requested_model": "deepseek-v4-1-flash-260910",
+        "model": "deepseek-v4-1-flash-260910",
+        "request_id": "021792164305942c2670fe791a5f29d61bdea8e0ada6c5d8dffed",
+        "response_id": "021792164305942c2670fe791a5f29d61bdea8e0ada6c5d8dffed",
+        "usage": {
+          "prompt_tokens": 746,
+          "completion_tokens": 224,
+          "total_tokens": 970,
+          "cached_tokens": 0,
+          "reasoning_tokens": 112
+        },
+        "latency_ms": 2597,
+        "attempts": [
+          {
+            "number": 1,
+            "status_code": 200,
+            "code": "ok",
+            "latency_ms": 2595,
+            "request_id": "021792164305942c2670fe791a5f29d61bdea8e0ada6c5d8dffed",
+            "model": "deepseek-v4-1-flash-260910",
+            "usage": {
+              "prompt_tokens": 746,
+              "completion_tokens": 224,
+              "total_tokens": 970,
+              "cached_tokens": 0,
+              "reasoning_tokens": 112
+            },
+            "charge_status": "unknown"
+          }
+        ]
+      }
+    },
+    {
+      "role": "hint",
+      "status": "candidate",
+      "candidate": {
+        "level": 1,
+        "content": "你已把括号外的 3 与括号里的 x 相乘了，但括号里还有另一项。想一想：分配律要求括号外的因数与括号内**每一项**都相乘，那么 -2 这一项是否也被 3 乘到了？请检查后再改。",
+        "exposes_answer": false
+      },
+      "metadata": {
+        "requested_model": "deepseek-v4-1-flash-260910",
+        "model": "deepseek-v4-1-flash-260910",
+        "request_id": "021792164308547c2670fe791a5f29d61bdea8e0ada6c5d73cb78",
+        "response_id": "021792164308547c2670fe791a5f29d61bdea8e0ada6c5d73cb78",
+        "usage": {
+          "prompt_tokens": 749,
+          "completion_tokens": 115,
+          "total_tokens": 864,
+          "cached_tokens": 0,
+          "reasoning_tokens": 37
+        },
+        "latency_ms": 2195,
+        "attempts": [
+          {
+            "number": 1,
+            "status_code": 200,
+            "code": "ok",
+            "latency_ms": 2193,
+            "request_id": "021792164308547c2670fe791a5f29d61bdea8e0ada6c5d73cb78",
+            "model": "deepseek-v4-1-flash-260910",
+            "usage": {
+              "prompt_tokens": 749,
+              "completion_tokens": 115,
+              "total_tokens": 864,
+              "cached_tokens": 0,
+              "reasoning_tokens": 37
+            },
+            "charge_status": "unknown"
+          }
+        ]
+      }
+    },
+    {
+      "role": "recheck",
+      "status": "candidate",
+      "candidate": {
+        "verdict": "correct",
+        "evidence_summary": "The question asks to expand 3(x - 2). The student answer is 3x - 6, which matches the correct distribution: 3·x + 3·(-2) = 3x - 6.",
+        "error_summary": null
+      },
+      "metadata": {
+        "requested_model": "deepseek-v4-1-flash-260910",
+        "model": "deepseek-v4-1-flash-260910",
+        "request_id": "021792164310731c2670fe791a5f29d61bdea8e0ada6c5d7ce40a",
+        "response_id": "021792164310731c2670fe791a5f29d61bdea8e0ada6c5d7ce40a",
+        "usage": {
+          "prompt_tokens": 683,
+          "completion_tokens": 130,
+          "total_tokens": 813,
+          "cached_tokens": 0,
+          "reasoning_tokens": 64
+        },
+        "latency_ms": 2853,
+        "attempts": [
+          {
+            "number": 1,
+            "status_code": 200,
+            "code": "ok",
+            "latency_ms": 2852,
+            "request_id": "021792164310731c2670fe791a5f29d61bdea8e0ada6c5d7ce40a",
+            "model": "deepseek-v4-1-flash-260910",
+            "usage": {
+              "prompt_tokens": 683,
+              "completion_tokens": 130,
+              "total_tokens": 813,
+              "cached_tokens": 0,
+              "reasoning_tokens": 64
+            },
+            "charge_status": "unknown"
+          }
+        ]
+      }
+    },
+    {
+      "role": "knowledge_extract",
+      "status": "candidate",
+      "candidate": {
+        "concept": "Distributive property: multiplication outside brackets applies to every term inside the brackets.",
+        "source_ref": "synthetic-rule-001",
+        "source_quote": "Distributive property: multiplication outside brackets applies to every term inside the brackets."
+      },
+      "metadata": {
+        "requested_model": "deepseek-v4-1-flash-260910",
+        "model": "deepseek-v4-1-flash-260910",
+        "request_id": "021792164313587c2670fe791a5f29d61bdea8e0ada6c5db7639b",
+        "response_id": "021792164313587c2670fe791a5f29d61bdea8e0ada6c5db7639b",
+        "usage": {
+          "prompt_tokens": 329,
+          "completion_tokens": 56,
+          "total_tokens": 385,
+          "cached_tokens": 0,
+          "reasoning_tokens": 0
+        },
+        "latency_ms": 1388,
+        "attempts": [
+          {
+            "number": 1,
+            "status_code": 200,
+            "code": "ok",
+            "latency_ms": 1387,
+            "request_id": "021792164313587c2670fe791a5f29d61bdea8e0ada6c5db7639b",
+            "model": "deepseek-v4-1-flash-260910",
+            "usage": {
+              "prompt_tokens": 329,
+              "completion_tokens": 56,
+              "total_tokens": 385,
+              "cached_tokens": 0,
+              "reasoning_tokens": 0
+            },
+            "charge_status": "unknown"
+          }
+        ]
+      }
+    }
+  ],
+  "planned_roles": [
+    "recognition",
+    "check",
+    "hint",
+    "recheck",
+    "knowledge_extract"
+  ],
+  "fixture_sha256": {
+    "original.png": "18fb1fd482a188c058bd1b9255b7c4441427294615eb582d33af90f510d396ff",
+    "corrected.png": "16e7379b5334e147482fd701786f8219cc9670eb49527991e8c5f0b443e58eea"
+  },
+  "cost": {
+    "amount": null,
+    "currency": null,
+    "basis": "billing_not_reconciled"
+  },
+  "warnings": [
+    "Printed synthetic fixtures do not measure handwriting or real homework quality.",
+    "All roles use one model; a second prompt is not independent verification.",
+    "No student facts, mastery states or production correction records are written."
+  ],
+  "source_quote_verified": true,
+  "smoke_status": "passed",
+  "execution_note": "Executed before final timeout/checkpoint hardening; later changes verified with mocked regression tests, without repeating paid calls."
+}
