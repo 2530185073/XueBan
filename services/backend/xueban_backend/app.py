@@ -273,6 +273,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     install_service_metrics(app, engine, cfg)
     from .learning_api import install_learning
     install_learning(app, engine, cfg, database_session, current_actor)
+    from .agent_memory import install_agent
+    install_agent(app, engine, cfg, database_session, current_actor)
     from .ops import install_ops
     install_ops(app, engine, cfg)
     from .student_web import install_student_web

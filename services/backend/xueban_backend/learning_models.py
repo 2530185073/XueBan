@@ -175,3 +175,48 @@ class LearningOutbox(Base):
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AgentMemoryItem(Base):
+    """One long-term memory of a learner's personal agent, always traceable to evidence."""
+    __tablename__ = "agent_memory_items"
+    __table_args__ = (student_fk(), Index("ix_agent_memory_student", "student_id", "status"),
+                      Index("ix_agent_memory_rule", "student_id", "rule_key"))
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    student_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    category: Mapped[str] = mapped_column(String(32), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    knowledge_id: Mapped[str | None] = mapped_column(String(64))
+    evidence_ids: Mapped[list] = mapped_column(JSON, nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    status_reason: Mapped[str | None] = mapped_column(String(48))
+    rule_key: Mapped[str | None] = mapped_column(String(160))
+    proposed_by: Mapped[str | None] = mapped_column(String(64))
+    confirmed_by: Mapped[str | None] = mapped_column(String(64))
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    supersedes_id: Mapped[str | None] = mapped_column(String(64))
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AgentRun(Base):
+    """What one agent output read (versions, evidence, memories) and produced."""
+    __tablename__ = "agent_runs"
+    __table_args__ = (student_fk(), Index("ix_agent_runs_student", "student_id", "purpose"))
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    student_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    subject_ref: Mapped[str | None] = mapped_column(String(64))
+    context: Mapped[dict] = mapped_column(JSON, nullable=False)
+    output: Mapped[dict | None] = mapped_column(JSON)
+    model_metadata: Mapped[dict | None] = mapped_column(JSON)
+    requested_by: Mapped[str | None] = mapped_column(String(64))
+    failure_code: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
