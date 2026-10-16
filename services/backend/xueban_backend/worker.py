@@ -308,10 +308,12 @@ def main():
     settings = Settings.from_environment()
     engine = create_database_engine(settings.database_url, allow_sqlite=settings.allow_sqlite_for_tests)
     try:
+        from .governance import DeletionExecutor
+        deletions = DeletionExecutor(engine, settings)
         with CorrectionPipeline.from_env() as pipeline:
             worker = CorrectionWorker(engine, settings, pipeline)
             while True:
-                worked = worker.run_once()
+                worked = deletions.run_once() or worker.run_once()
                 if args.once:
                     break
                 if not worked:

@@ -81,6 +81,14 @@ class LocalAssetStore:
         finally:
             Path(temporary).unlink(missing_ok=True)
 
+    def delete(self, asset_id: str) -> None:
+        if self.root is None:
+            return
+        try:
+            self.path(asset_id).unlink(missing_ok=True)
+        except OSError:
+            raise Problem(503, "service", "storage_error", "图片删除失败，请稍后重试。") from None
+
     def read(self, asset_id: str, document: dict) -> bytes:
         path = self.path(asset_id)
         try:

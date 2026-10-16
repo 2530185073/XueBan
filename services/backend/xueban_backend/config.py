@@ -20,6 +20,8 @@ class Settings:
     allow_sqlite_for_tests: bool = False
     cors_allowed_origins: tuple[str, ...] = ()
     student_web_dist: Path | None = None
+    deletion_ledger_path: Path | None = None
+    device_cache_retention_seconds: int = 604800
     contracts_dir: Path = Path(__file__).resolve().parents[3] / "contracts" / "phase1"
 
     @classmethod
@@ -42,6 +44,8 @@ class Settings:
             "allow_sqlite_for_tests": os.environ.get("ALLOW_SQLITE_FOR_TESTS") == "1",
             "cors_allowed_origins": tuple(value.strip() for value in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if value.strip()),
             "student_web_dist": Path(os.environ["STUDENT_WEB_DIST"]) if os.environ.get("STUDENT_WEB_DIST") else None,
+            "deletion_ledger_path": Path(os.environ["DELETION_LEDGER_PATH"]) if os.environ.get("DELETION_LEDGER_PATH") else None,
+            "device_cache_retention_seconds": int(os.environ.get("DEVICE_CACHE_RETENTION_SECONDS", "604800")),
         }
         if os.environ.get("CONTRACTS_DIR"):
             options["contracts_dir"] = Path(os.environ["CONTRACTS_DIR"])

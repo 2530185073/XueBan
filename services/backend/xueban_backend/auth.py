@@ -92,6 +92,6 @@ class TokenVerifier:
         if account is not None and account.must_change_password and not allow_password_change:
             raise Problem(403, "authorization", "password_change_required", "请先修改初始密码再进入作业。")
         roles = tuple(session.scalars(select(PrincipalRole.role).where(PrincipalRole.principal_id == principal.id).order_by(PrincipalRole.role)))
-        if not set(roles).intersection({"student", "sitting_teacher", "campus_admin"}):
+        if not set(roles).intersection({"student", "sitting_teacher", "campus_admin", "data_steward"}):
             raise Problem(403, "authorization", "access_denied", "该身份没有此接口权限。")
         return Actor(principal.id, principal.tenant_id, roles, account.student_id if account else None)
