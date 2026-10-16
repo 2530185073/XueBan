@@ -29,7 +29,8 @@ from .errors import Problem
 from .governance import register_downstream_purger
 from .learning_models import (KnowledgeEdge, KnowledgeNode, OptionalWindow, PracticeItem, PracticeResponse, PracticeSession,
                               StudentKnowledgeState, StudentLearningProfile)
-from .learning_projection import enqueue, new_id, register_job_handler, require_published_graph
+from .correction_core import remember_idempotent, replay_idempotent
+from .learning_projection import OptionalKey, enqueue, new_id, register_job_handler, require_published_graph
 from .learning_reports import SHANGHAI, local_day, register_report_section
 from .models import Homework, Student
 from .providers.prompts import Role
@@ -476,11 +477,14 @@ def install_practice(app, engine, cfg, database_session, current_actor):
         return body
 
     @app.post("/v1/students/{student_id}/practice-sessions", status_code=201, operation_id="startPracticeSession")
-    def start(student_id: str, payload: StartInput, actor: ActorDep, session: SessionDep):
+    def start(student_id: str, payload: StartInput, actor: ActorDep, session: SessionDep, idempotency_key: OptionalKey = None):
+        operation = f"POST /v1/students/{student_id}/practice-sessions"
         student = require_student(session, actor, student_id)
         if "student" not in actor.roles:
             raise Problem(403, "authorization", "forbidden", "额外活动只能由孩子本人选择开始。")
         session.scalar(select(Student).where(Student.id == student_id).with_for_update())
+        if (replay := replay_idempotent(session, actor, student_id, operation, idempotency_key, payload.model_dump(mode="json"))) is not None:
+            return replay
         if session.scalar(select(PracticeSession.id).where(PracticeSession.student_id == student_id, PracticeSession.status == "active")):
             active = session.scalar(select(PracticeSession).where(PracticeSession.student_id == student_id, PracticeSession.status == "active"))
             _expire(active, now())
@@ -512,8 +516,11 @@ def install_practice(app, engine, cfg, database_session, current_actor):
                                                                             "at": at.isoformat()}},
                               status="active", started_at=at, budget_ends_at=at + timedelta(minutes=gate["remaining_minutes"]))
         session.add(row)
+        session.flush()
+        result = remember_idempotent(session, actor, student_id, operation, idempotency_key, payload.model_dump(mode="json"),
+                                     session_dict(session, row))
         session.commit()
-        return session_dict(session, row)
+        return result
 
     @app.get("/v1/students/{student_id}/practice-sessions", operation_id="listPracticeSessions")
     def list_sessions(student_id: str, actor: ActorDep, session: SessionDep):
@@ -555,8 +562,11 @@ def install_practice(app, engine, cfg, database_session, current_actor):
         return {"item_id": item_id, "hint_text": item.hint_text}
 
     @app.post("/v1/practice-sessions/{session_id}/responses", status_code=201, operation_id="answerPracticeItem")
-    def answer(session_id: str, payload: AnswerInput, actor: ActorDep, session: SessionDep):
+    def answer(session_id: str, payload: AnswerInput, actor: ActorDep, session: SessionDep, idempotency_key: OptionalKey = None):
         row = load_session(session, actor, session_id, lock=True)
+        operation = f"POST /v1/practice-sessions/{session_id}/responses"
+        if (replay := replay_idempotent(session, actor, row.student_id, operation, idempotency_key, payload.model_dump(mode="json"))) is not None:
+            return replay
         at = now()
         _expire(row, at)
         if row.status != "active" or payload.item_id not in row.item_ids:
@@ -575,8 +585,10 @@ def install_practice(app, engine, cfg, database_session, current_actor):
         answered = session.scalar(select(func.count()).select_from(PracticeResponse).where(PracticeResponse.session_id == row.id))
         if answered == len(row.item_ids):
             row.status, row.ended_at = "completed", at
+        body = remember_idempotent(session, actor, row.student_id, operation, idempotency_key, payload.model_dump(mode="json"),
+                                   {"item_id": item.id, "result": result, "solution_text": item.solution_text, "session_status": row.status})
         session.commit()
-        return {"item_id": item.id, "result": result, "solution_text": item.solution_text, "session_status": row.status}
+        return body
 
     @app.post("/v1/practice-sessions/{session_id}/exit", operation_id="exitPracticeSession")
     def exit_session(session_id: str, payload: ExitInput, actor: ActorDep, session: SessionDep):

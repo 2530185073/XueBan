@@ -97,6 +97,30 @@ def reserve_idempotency(session, actor, student_id, operation, key, payload):
     return record, None
 
 
+def replay_idempotent(session, actor, student_id, operation, key, payload):
+    """Optional-key variant for later-phase creates: replay a finished request before any validation runs."""
+    if key is None:
+        return None
+    record = session.scalar(select(IdempotencyRecord).where(IdempotencyRecord.principal_id == actor.id, IdempotencyRecord.student_id == student_id, IdempotencyRecord.operation == operation, IdempotencyRecord.key == key))
+    if record is None:
+        return None
+    if record.payload_hash != fingerprint(payload):
+        conflict(code="idempotency_conflict")
+    return deepcopy(record.response_json)
+
+
+def remember_idempotent(session, actor, student_id, operation, key, payload, result):
+    """Store the response under the key just before commit; a concurrent twin wins and this write is discarded."""
+    if key is None:
+        return result
+    record, replay = reserve_idempotency(session, actor, student_id, operation, key, payload)
+    if replay is not None:
+        session.rollback()
+        return replay
+    record.response_json = result
+    return result
+
+
 def create_task(session, contracts, homework, kind, inputs, resource=None):
     identifier = new_id("job")
     timestamp = iso()

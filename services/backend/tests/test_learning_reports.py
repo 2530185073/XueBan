@@ -82,6 +82,8 @@ def test_current_period_cannot_be_generated_and_writes_need_staff(flow):
     teacher(flow)
     assert flow.client.post("/v1/students/student_a/reports", json=body).status_code == 422
     assert flow.client.post("/v1/students/student_a/reports", json={"period_start": "2026-10-05"}).status_code == 422
+    assert flow.client.get("/v1/reports?status=anything").status_code == 422
+    assert flow.client.get("/v1/reports?limit=1").json()["next_offset"] is None
 
 
 def test_published_report_is_corrected_by_a_new_version_with_explanation(flow, after_period):

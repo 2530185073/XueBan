@@ -66,6 +66,10 @@ export interface AttemptCondition { id: string; attempt_id: string; assistance_l
 export function isAttemptCondition(value: unknown): value is AttemptCondition {
   return record(value) && id(value.id) && id(value.attempt_id) && oneOf(ASSISTANCE_INPUTS)(value.assistance_level) && optStr(value.note) && time(value.created_at)
 }
+export interface ConditionRead { attempt_id: string; current: AttemptCondition | null }
+export function isConditionRead(value: unknown): value is ConditionRead {
+  return record(value) && id(value.attempt_id) && (value.current === null || isAttemptCondition(value.current))
+}
 
 // Student knowledge
 

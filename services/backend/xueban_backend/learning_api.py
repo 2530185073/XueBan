@@ -17,7 +17,8 @@ from .correction_models import Entity
 from .errors import Problem
 from .learning_models import (AttemptCondition, KnowledgeDiagnosis, KnowledgeEdge, KnowledgeNode, LearningEvidence,
                               LearningProjection, QuestionKnowledgeLink, StudentKnowledgeState, StudentLearningProfile)
-from .learning_projection import fingerprints, new_id, published_graph
+from .correction_core import remember_idempotent, replay_idempotent
+from .learning_projection import OptionalKey, fingerprints, new_id, published_graph
 from .learning_rules import RULE_VERSION, chapter_rollup, hints_seen_before
 from .models import Homework, Student
 
@@ -75,6 +76,11 @@ def _link_dict(link: QuestionKnowledgeLink, names: dict) -> dict:
             "knowledge_id": link.knowledge_id, "knowledge_name": names.get(link.knowledge_id), "role": link.role,
             "source": link.source, "status": link.status, "rationale": link.rationale, "actor_id": link.actor_id,
             "supersedes_id": link.supersedes_id, "created_at": link.created_at.isoformat()}
+
+
+def diagnosis_dict(row: KnowledgeDiagnosis) -> dict:
+    return {"id": row.id, "knowledge_id": row.knowledge_id, "kind": row.kind, "scope_text": row.scope_text,
+            "evidence_ids": row.evidence_ids, "status": row.status, "actor_id": row.actor_id, "created_at": row.created_at.isoformat()}
 
 
 def current_links(session, question_id) -> dict[str, QuestionKnowledgeLink]:
@@ -226,9 +232,13 @@ def install_learning(app, engine, cfg, database_session, current_actor):
         if payload.knowledge_id not in names:
             raise Problem(422, "validation", "invalid_request", "只能关联已发布的知识点（不含章节）。")
         session.scalar(select(Entity).where(Entity.id == question_id).with_for_update())
-        current = current_links(session, question_id).get(payload.knowledge_id)
+        links = current_links(session, question_id)
+        current = links.get(payload.knowledge_id)
         if (current.id if current else None) != payload.expected_link_id:
             raise Problem(409, "conflict", "revision_conflict", "题目知识点已被他人修改，请刷新后核实。")
+        if payload.role == "primary" and payload.status == "confirmed" and any(
+                l.role == "primary" and l.status == "confirmed" and k != payload.knowledge_id for k, l in links.items()):
+            raise Problem(409, "conflict", "revision_conflict", "这道题已有主知识点；请先把原主知识点改为次要或驳回。")
         link = QuestionKnowledgeLink(id=new_id("qkl"), tenant_id=student.tenant_id, student_id=student.id, homework_id=homework.id,
                                      question_id=question_id, question_revision=question.revision, knowledge_id=payload.knowledge_id,
                                      graph_version=graph.version, role=payload.role, source="staff", status=payload.status,
@@ -237,6 +247,24 @@ def install_learning(app, engine, cfg, database_session, current_actor):
         session.add(link)
         session.commit()
         return _link_dict(link, names)
+
+    def condition_dict(row):
+        return {"id": row.id, "attempt_id": row.attempt_id, "assistance_level": row.assistance_level, "note": row.note,
+                "actor_id": row.actor_id, "created_at": row.created_at.isoformat()}
+
+    def current_condition(session, attempt_id):
+        return session.scalar(select(AttemptCondition).where(AttemptCondition.attempt_id == attempt_id)
+                              .order_by(AttemptCondition.created_at.desc(), AttemptCondition.id.desc()))
+
+    @app.get("/v1/attempts/{attempt_id}/condition", operation_id="getAttemptCondition")
+    def get_condition(attempt_id: str, actor: ActorDep, session: SessionDep):
+        _staff(actor)
+        attempt = session.get(Entity, attempt_id)
+        if attempt is None or attempt.kind != "attempt":
+            raise Problem(404, "not_found", "not_found", "资源不存在或不可访问。")
+        require_student(session, actor, session.get(Homework, attempt.homework_id).student_id)
+        row = current_condition(session, attempt_id)
+        return {"attempt_id": attempt_id, "current": condition_dict(row) if row else None}
 
     @app.post("/v1/attempts/{attempt_id}/condition", status_code=201, operation_id="recordAttemptCondition")
     def record_condition(attempt_id: str, payload: ConditionInput, actor: ActorDep, session: SessionDep):
@@ -247,8 +275,7 @@ def install_learning(app, engine, cfg, database_session, current_actor):
         homework = session.get(Homework, attempt.homework_id)
         student = require_student(session, actor, homework.student_id)
         session.scalar(select(Entity).where(Entity.id == attempt_id).with_for_update())
-        current = session.scalar(select(AttemptCondition).where(AttemptCondition.attempt_id == attempt_id)
-                                 .order_by(AttemptCondition.created_at.desc(), AttemptCondition.id.desc()))
+        current = current_condition(session, attempt_id)
         if (current.id if current else None) != payload.expected_condition_id:
             raise Problem(409, "conflict", "revision_conflict", "作答帮助条件已被他人修改，请刷新后核实。")
         hints = [e.document for e in session.scalars(select(Entity).where(Entity.homework_id == attempt.homework_id, Entity.kind == "hint"))
@@ -261,13 +288,16 @@ def install_learning(app, engine, cfg, database_session, current_actor):
                                created_at=datetime.now(timezone.utc))
         session.add(row)
         session.commit()
-        return {"id": row.id, "attempt_id": attempt_id, "assistance_level": row.assistance_level, "note": row.note,
-                "actor_id": actor.id, "created_at": row.created_at.isoformat()}
+        return condition_dict(row)
 
     @app.post("/v1/students/{student_id}/knowledge/{knowledge_id}/diagnoses", status_code=201, operation_id="addKnowledgeDiagnosis")
-    def add_diagnosis(student_id: str, knowledge_id: str, payload: DiagnosisInput, actor: ActorDep, session: SessionDep):
+    def add_diagnosis(student_id: str, knowledge_id: str, payload: DiagnosisInput, actor: ActorDep, session: SessionDep,
+                      idempotency_key: OptionalKey = None):
         _staff(actor)
         student = require_student(session, actor, student_id)
+        operation = f"POST /v1/students/{student_id}/knowledge/{knowledge_id}/diagnoses"
+        if (replay := replay_idempotent(session, actor, student_id, operation, idempotency_key, payload.model_dump(mode="json"))) is not None:
+            return replay
         _, nodes = graph_nodes(session)
         if knowledge_id not in {n.id for n in nodes}:
             raise Problem(404, "not_found", "not_found", "知识点不存在。")
@@ -282,9 +312,21 @@ def install_learning(app, engine, cfg, database_session, current_actor):
                                  kind=payload.kind, scope_text=payload.scope_text.strip(), evidence_ids=payload.evidence_ids,
                                  status="active", actor_id=actor.id, created_at=datetime.now(timezone.utc))
         session.add(row)
+        session.flush()
+        result = remember_idempotent(session, actor, student_id, operation, idempotency_key, payload.model_dump(mode="json"),
+                                     diagnosis_dict(row))
         session.commit()
-        return {"id": row.id, "knowledge_id": knowledge_id, "kind": row.kind, "scope_text": row.scope_text,
-                "evidence_ids": row.evidence_ids, "status": row.status, "created_at": row.created_at.isoformat()}
+        return result
+
+    @app.get("/v1/students/{student_id}/knowledge/{knowledge_id}/diagnoses", operation_id="listKnowledgeDiagnoses")
+    def list_diagnoses(student_id: str, knowledge_id: str, actor: ActorDep, session: SessionDep):
+        _staff(actor)
+        require_student(session, actor, student_id)
+        rows = session.scalars(select(KnowledgeDiagnosis).where(KnowledgeDiagnosis.student_id == student_id,
+                                                                KnowledgeDiagnosis.knowledge_id == knowledge_id,
+                                                                KnowledgeDiagnosis.supersedes_id.is_(None))
+                               .order_by(KnowledgeDiagnosis.created_at.desc(), KnowledgeDiagnosis.id))
+        return {"student_id": student_id, "knowledge_id": knowledge_id, "items": [diagnosis_dict(r) for r in rows]}
 
     @app.post("/v1/diagnoses/{diagnosis_id}/retract", operation_id="retractKnowledgeDiagnosis")
     def retract_diagnosis(diagnosis_id: str, actor: ActorDep, session: SessionDep):

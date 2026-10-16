@@ -11,16 +11,18 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 import hashlib
 import logging
+from typing import Annotated
 from uuid import uuid4
 
+from fastapi import Header
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from .correction_models import CorrectionEvent, Entity
 from .governance import register_downstream_purger
 from .learning_models import (AttemptCondition, CurriculumGraph, KnowledgeDiagnosis, KnowledgeNode, LearningEvidence,
-                              LearningOutbox, LearningProjection, QuestionKnowledgeLink, StudentKnowledgeState,
-                              StudentLearningProfile)
+                              LearningOutbox, LearningProjection, PracticeResponse, PracticeSession, QuestionKnowledgeLink,
+                              StudentKnowledgeState, StudentLearningProfile)
 from .learning_rules import RULE_VERSION, compute_state, derive_evidence
 from .models import Homework, Student
 
@@ -73,6 +75,9 @@ def published_graph(session) -> CurriculumGraph | None:
                           .order_by(CurriculumGraph.published_at.desc()))
 
 
+OptionalKey = Annotated[str | None, Header(alias="Idempotency-Key", min_length=8, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")]
+
+
 def require_published_graph(session) -> CurriculumGraph:
     from .errors import Problem
     graph = published_graph(session)
@@ -107,8 +112,12 @@ def fingerprints(session, student_ids=None) -> dict[str, str]:
         events = events.where(Homework.student_id.in_(student_ids))
     for student_id, count, latest in session.execute(events):
         parts[student_id].append(f"e{count}:{latest}")
-    for model in (QuestionKnowledgeLink, AttemptCondition, KnowledgeDiagnosis):
-        query = select(model.student_id, func.count(model.id), func.max(model.created_at)).group_by(model.student_id)
+    # Practice never changes knowledge state, but report drafts summarize it, so it must trigger the followups.
+    sources = [(QuestionKnowledgeLink, QuestionKnowledgeLink.created_at), (AttemptCondition, AttemptCondition.created_at),
+               (KnowledgeDiagnosis, KnowledgeDiagnosis.created_at), (PracticeResponse, PracticeResponse.occurred_at),
+               (PracticeSession, func.coalesce(PracticeSession.ended_at, PracticeSession.started_at))]
+    for model, stamp in sources:
+        query = select(model.student_id, func.count(model.id), func.max(stamp)).group_by(model.student_id)
         if student_ids is not None:
             query = query.where(model.student_id.in_(student_ids))
         for student_id, count, latest in session.execute(query):

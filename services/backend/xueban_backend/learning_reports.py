@@ -14,10 +14,10 @@ import hashlib
 import html
 import json
 import secrets
-from typing import Annotated
+from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import Depends
+from fastapi import Depends, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, select
@@ -379,13 +379,15 @@ def install_reports(app, engine, cfg, database_session, current_actor):
         return report_dict(report)
 
     @app.get("/v1/reports", operation_id="listReportQueue")
-    def queue(actor: ActorDep, session: SessionDep, status: str = "draft"):
+    def queue(actor: ActorDep, session: SessionDep, status: Literal["draft", "published", "superseded"] = "draft",
+              limit: Annotated[int, Query(ge=1, le=200)] = 100, offset: Annotated[int, Query(ge=0, le=10000)] = 0):
         require_staff(actor)
         students = accessible_students(actor).with_only_columns(Student.id)
-        rows = session.scalars(select(LearningReport).where(LearningReport.student_id.in_(students), LearningReport.status == status)
-                               .order_by(LearningReport.period_start.desc()).limit(200))
+        rows = list(session.scalars(select(LearningReport).where(LearningReport.student_id.in_(students), LearningReport.status == status)
+                                    .order_by(LearningReport.period_start.desc(), LearningReport.id).offset(offset).limit(limit + 1)))
         return {"items": [{**report_dict(r), "snapshot": None, "focus_count": len(r.snapshot["focus"]),
-                           "sufficient": r.snapshot["sufficient"]} for r in rows]}
+                           "sufficient": r.snapshot["sufficient"]} for r in rows[:limit]],
+                "next_offset": offset + limit if len(rows) > limit else None}
 
     @app.get("/v1/reports/{report_id}", operation_id="getLearningReport")
     def get_report(report_id: str, actor: ActorDep, session: SessionDep):

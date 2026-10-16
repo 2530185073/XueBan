@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Check, HandHelping } from 'lucide-react'
 import type { AttemptRead, Hint } from '../api/contracts.generated'
 import type { AssistanceInput, AttemptCondition } from '../api/learningTypes'
@@ -13,8 +13,18 @@ export default function AttemptConditionSection({ ctx, attempt, label, hints, re
   const seen = helpSeen(attempt, hints)
   const [level, setLevel] = useState<AssistanceInput | ''>('')
   const [note, setNote] = useState('')
-  const disabled = ctx.busy || !!locked
   const isCorrection = attempt.record.parent_attempt_id !== null
+  const [loaded, setLoaded] = useState(!!recorded)
+  const disabled = ctx.busy || !!locked || !loaded
+
+  useEffect(() => {
+    if (recorded) return
+    const controller = new AbortController()
+    ctx.learning.condition(attempt.record.id, controller.signal)
+      .then(read => { if (read.attempt_id === attempt.record.id && read.current) onRecorded(read.current); setLoaded(true) })
+      .catch(() => { if (!controller.signal.aborted) setLoaded(true) })
+    return () => controller.abort()
+  }, [attempt.record.id])
 
   async function submit() {
     if (!level || (level === 'independent' && seen)) return
@@ -26,8 +36,8 @@ export default function AttemptConditionSection({ ctx, attempt, label, hints, re
   return <section className="panel-section review-form" aria-label="作答帮助情况">
     <div className="section-heading"><span><HandHelping size={17} />帮助情况</span><small>{label}</small></div>
     <p className="subtle">记录孩子做这次作答时得到了多少帮助。只有经老师核实的独立首次作答，才算独立完成的证据；订正永远不算独立。</p>
-    {recorded ? <p className="preview-note">本页已记录：{assistanceLabels[recorded.assistance_level]} · {dateTime(recorded.created_at)}</p>
-      : <p className="subtle">此作答此前若已由其他老师记录过（本页看不到那条记录），再次提交会提示冲突。</p>}
+    {recorded ? <p className="preview-note">当前记录：{assistanceLabels[recorded.assistance_level]} · {dateTime(recorded.created_at)}；再次提交会替换这条记录。</p>
+      : <p className="subtle">{loaded ? '这次作答还没有记录帮助情况。' : '正在读取已有记录…'}</p>}
     {locked && <div className="preview-note">{locked}</div>}
     <fieldset className="choice-list" disabled={disabled}>
       <legend>这次作答的帮助情况</legend>

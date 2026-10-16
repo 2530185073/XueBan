@@ -1,6 +1,6 @@
 import { ApiError, type StaffApi } from './client'
 import {
-  isAgentRun, isAgentRunList, isAttemptCondition, isCreatedDiagnosis, isCreatedShareLink, isCurriculumGraph, isGate, isGenerateAccepted, isKnowledgeDetail,
+  isAgentRun, isAgentRunList, isAttemptCondition, isConditionRead, isCreatedDiagnosis, isCreatedShareLink, isCurriculumGraph, isGate, isGenerateAccepted, isKnowledgeDetail,
   isKnowledgeLink, isKnowledgeLinkList, isLearningProfile, isLinkQueue, isMemory, isMemoryList, isOptionalActivities, isPracticeItem, isPracticeItemList,
   isPracticeSessionList, isReport, isReportList, isReportQueue, isRetractedDiagnosis, isShareLink, isShareLinkList, isStudentKnowledge,
   type AssistanceInput, type CurriculumGraph, type DiagnosisInput, type ItemEdits, type ItemInput, type ItemStatus, type LinkDecision, type MemoryInput,
@@ -29,6 +29,7 @@ export class LearningApi {
     if (payload.rationale && payload.rationale.length > 500) throw invalid()
     return this.api.call(`/v1/questions/${segment(questionId)}/knowledge-links`, isKnowledgeLink, { payload })
   }
+  condition(attemptId: string, signal?: AbortSignal) { return this.api.call(`/v1/attempts/${segment(attemptId)}/condition`, isConditionRead, { signal }) }
   recordCondition(attemptId: string, payload: { assistance_level: AssistanceInput; expected_condition_id: string | null; note: string | null }) {
     return this.api.call(`/v1/attempts/${segment(attemptId)}/condition`, isAttemptCondition, { payload })
   }

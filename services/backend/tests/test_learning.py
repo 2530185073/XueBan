@@ -122,10 +122,16 @@ def test_secondary_link_gets_no_negative_evidence_and_independence_needs_staff(f
     teacher(flow)
     case = review(flow, case)
     link(flow, case, "kp-rational-add-sub", "primary")
-    link(flow, case, "kp-rational-compare", "secondary")
-    response = flow.client.post(f"/v1/attempts/{case['current_attempt_id']}/condition",
-                                json={"assistance_level": "independent", "expected_condition_id": None})
+    secondary = link(flow, case, "kp-rational-compare", "secondary")
+    second_primary = flow.client.post(f"/v1/questions/{case['question_id']}/knowledge-links",
+                                      json={"knowledge_id": "kp-rational-compare", "role": "primary", "status": "confirmed",
+                                            "expected_link_id": secondary["id"]})
+    assert second_primary.status_code == 409
+    condition_path = f"/v1/attempts/{case['current_attempt_id']}/condition"
+    assert flow.client.get(condition_path).json()["current"] is None
+    response = flow.client.post(condition_path, json={"assistance_level": "independent", "expected_condition_id": None})
     assert response.status_code == 201, response.text
+    assert flow.client.get(condition_path).json()["current"]["id"] == response.json()["id"]
     stale = flow.client.post(f"/v1/attempts/{case['current_attempt_id']}/condition",
                              json={"assistance_level": "unknown", "expected_condition_id": None})
     assert stale.status_code == 409
@@ -147,9 +153,13 @@ def test_diagnosis_requires_valid_evidence_and_rejected_link_withdraws(flow):
     bad = flow.client.post("/v1/students/student_a/knowledge/kp-rational-add-sub/diagnoses",
                            json={"kind": "verified_weak_scope", "scope_text": "负数加法符号", "evidence_ids": [evidence_id]})
     assert bad.status_code == 422
-    made = flow.client.post("/v1/students/student_a/knowledge/kp-rational-add-sub/diagnoses",
-                            json={"kind": "suspected_cause", "scope_text": "可能是异号相加取符号", "evidence_ids": [evidence_id]})
+    path, body = "/v1/students/student_a/knowledge/kp-rational-add-sub/diagnoses", {
+        "kind": "suspected_cause", "scope_text": "可能是异号相加取符号", "evidence_ids": [evidence_id]}
+    made = flow.client.post(path, json=body, headers={"Idempotency-Key": "diagnosis-key-1"})
     assert made.status_code == 201, made.text
+    assert flow.client.post(path, json=body, headers={"Idempotency-Key": "diagnosis-key-1"}).json() == made.json()
+    assert flow.client.post(path, json={**body, "scope_text": "别的范围"}, headers={"Idempotency-Key": "diagnosis-key-1"}).status_code == 409
+    assert [d["id"] for d in flow.client.get(path).json()["items"]] == [made.json()["id"]]
     learning(flow).drain()
     [state] = knowledge(flow)["states"]
     assert state["diagnoses"][0]["kind"] == "suspected_cause"

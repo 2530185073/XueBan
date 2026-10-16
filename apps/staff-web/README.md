@@ -73,7 +73,7 @@ npm run build     # 契约漂移检查 + tsc 类型检查 + 生产构建到 dist
 | 区域 | 接口 | 要点 |
 |---|---|---|
 | 知识点映射确认 | `GET /v1/knowledge-link-queue`、`GET /v1/curriculum/graph`、`GET/POST /v1/questions/{id}/knowledge-links` | 老师已核实但未确认知识点的题；AI 候选显示理由；确认 / 驳回 / 替换、主要或次要；一道题最多一个主要知识点（本地先拦）。题目工作台右栏也有同一编辑器 |
-| 帮助情况（在题目工作台） | `POST /v1/attempts/{id}/condition` | 按作答记录帮助程度；看过提示或答案的作答不能选“独立”，订正也不能。只有老师亲眼核实才勾选独立 |
+| 帮助情况（在题目工作台） | `GET`/`POST /v1/attempts/{id}/condition` | 按作答记录帮助程度；看过提示或答案的作答不能选“独立”，订正也不能。只有老师亲眼核实才勾选独立 |
 | 学员画像 | `GET /v1/students/{id}/knowledge`、`…/knowledge/{kid}?include_invalidated=true`、诊断 `POST …/diagnoses`、`POST /v1/diagnoses/{id}/retract`、`GET/PUT …/learning-profile` | 章节只计数不平均；`projection.pending` 显示“正在汇总最新改判”；证据区分有效/失效；“可能原因（未核实）”与“已核实薄弱范围”（至少两条证据）；档案维护年级、学期与当前课次 |
 | 学伴记忆 | `GET …/memories?include_inactive=true`、`POST …/memories`、`POST /v1/memories/{id}/confirm|retract`、`POST/GET …/agent-runs` | 来源、状态、有效期与引用证据；学科困难必须引用该生当前有效证据；AI 学情摘要排队后自动轮询，分别显示证据不足、需要老师判断、已过期、失败；AI 提议的记忆进入“待确认” |
 | 半月报告 | `GET /v1/reports?status=draft|published`、`GET/POST …/reports`、`GET/PATCH /v1/reports/{id}`、`POST …/publish`、分享链接 | 只能生成已结束的半月（北京时间）；快照显示真实分母、帮助条件、证据卡片、还不知道的、额外活动和局限说明；更正版本必须写更正说明；`projection_pending` / `report_changed` 给出中文提示；家长链接只显示一次（基于服务地址拼出 `/r/{token}`），可撤销 |
@@ -106,8 +106,6 @@ npm run build     # 契约漂移检查 + tsc 类型检查 + 生产构建到 dist
 
 - 老师账号的开通与重置还没有界面（目前需管理员直接调用 `/v1/admin/staff-accounts`）。
 - 求助列表不含学生姓名和作业标题，需逐条读取 case 补出；数量大时会较慢。
-- 补题/拆合生成的新题若识别完成但尚未检查，不会出现在任何队列；需在题目里点“请求重新检查”或人工初次核实。
 - 复核依据的区域目前固定使用当前题区，还不能单独框选依据区域。
 - 多页大作业、真实设备照片（含 EXIF 方向）和现场平板可用性仍需联合验收。
-- 作答帮助情况没有读取接口：本页只记得自己刚记录的那条；他人先记录过时提交会得到冲突提示。
-- 学情接口目前不读取 `Idempotency-Key`：结果未知时“重试原操作”可能重复创建记忆、题目或分享链接（带版本号的写入会得到 409）。
+- 学情接口中，记忆、诊断、选做开始与作答按 `Idempotency-Key` 去重；题库录入与分享链接不去重（分享链接的令牌不落库，无法重放），结果未知时“重试原操作”可能多出一条，可在列表中撤销或下架。

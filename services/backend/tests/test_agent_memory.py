@@ -51,9 +51,15 @@ def linked_evidence(flow):
 
 def test_student_sees_confirmed_only_and_may_set_own_preferences(flow):
     flow.ready()
-    made = flow.client.post("/v1/students/student_a/memories",
+    made = flow.client.post("/v1/students/student_a/memories", headers={"Idempotency-Key": "memory-key-1"},
                             json={"category": "interface_preference", "content": "提示先给图示再给文字"})
     assert made.status_code == 201, made.text
+    again = flow.client.post("/v1/students/student_a/memories", headers={"Idempotency-Key": "memory-key-1"},
+                             json={"category": "interface_preference", "content": "提示先给图示再给文字"})
+    assert again.json() == made.json()
+    unknown = flow.client.post("/v1/students/student_a/memories",
+                               json={"category": "learning_goal", "content": "练熟", "knowledge_id": "kp-not-in-graph"})
+    assert unknown.status_code == 422
     assert made.json()["status"] == "confirmed" and made.json()["source"] == "student"
     forbidden = flow.client.post("/v1/students/student_a/memories", json={"category": "effective_support", "content": "多鼓励"})
     assert forbidden.status_code == 403

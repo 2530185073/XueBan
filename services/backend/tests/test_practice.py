@@ -112,8 +112,11 @@ def test_variant_uses_reviewed_items_and_never_changes_state(flow, clock):
     assert start(flow, purpose="variant", knowledge_id="kp-rational-add-sub").status_code == 409
     first, second = sorted(body["items"], key=lambda i: not i["has_hint"])
     assert flow.client.post(f"/v1/practice-sessions/{body['id']}/items/{first['id']}/hint").json()["hint_text"] == "先看符号"
-    answered = flow.client.post(f"/v1/practice-sessions/{body['id']}/responses", json={"item_id": first["id"], "answer_text": "5"})
+    key = {"Idempotency-Key": "practice-answer-1"}
+    answered = flow.client.post(f"/v1/practice-sessions/{body['id']}/responses", json={"item_id": first["id"], "answer_text": "5"}, headers=key)
     assert answered.status_code == 201 and answered.json()["result"] == "correct" and answered.json()["solution_text"]
+    assert flow.client.post(f"/v1/practice-sessions/{body['id']}/responses",
+                            json={"item_id": first["id"], "answer_text": "5"}, headers=key).json() == answered.json()
     assert flow.client.post(f"/v1/practice-sessions/{body['id']}/responses",
                             json={"item_id": first["id"], "answer_text": "5"}).status_code == 409
     last = flow.client.post(f"/v1/practice-sessions/{body['id']}/responses", json={"item_id": second["id"], "answer_text": "6"}).json()
@@ -196,8 +199,14 @@ def test_report_mentions_voluntary_activity_and_purge(flow, clock):
     needs_help(flow)
     new_item(flow, family="fam-a")
     open_window(flow, confirm=True)
+    learning(flow).drain()
+    from xueban_backend.learning_projection import dirty_students
+    with Session(flow.database.engine) as session:
+        assert dirty_students(session) == []
     body = start(flow, purpose="variant", knowledge_id="kp-rational-add-sub").json()
     flow.client.post(f"/v1/practice-sessions/{body['id']}/exit", json={})
+    with Session(flow.database.engine) as session:
+        assert ("tenant_a", "student_a") in dirty_students(session)
     from xueban_backend.learning_reports import build_snapshot, period_of, local_day
     from xueban_backend.models import Student
     with Session(flow.database.engine) as session:

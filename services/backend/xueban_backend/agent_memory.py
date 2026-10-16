@@ -22,7 +22,8 @@ from .errors import Problem
 from .learning_models import (AgentMemoryItem, AgentRun, KnowledgeNode, LearningEvidence, LearningProjection,
                               StudentKnowledgeState)
 from .governance import register_downstream_purger
-from .learning_projection import (enqueue, new_id, published_graph, register_evidence_listener, register_job_handler, require_published_graph,
+from .correction_core import remember_idempotent, replay_idempotent
+from .learning_projection import (OptionalKey, enqueue, new_id, published_graph, register_evidence_listener, register_job_handler, require_published_graph,
                                   register_projection_followup)
 from .models import Homework
 from .providers.prompts import Role
@@ -268,8 +269,11 @@ def install_agent(app, engine, cfg, database_session, current_actor):
                 "notice": "学伴只记住有出处的事实和老师确认的约定；证据被撤销后相关记忆自动失效。"}
 
     @app.post("/v1/students/{student_id}/memories", status_code=201, operation_id="createAgentMemory")
-    def create_memory(student_id: str, payload: MemoryInput, actor: ActorDep, session: SessionDep):
+    def create_memory(student_id: str, payload: MemoryInput, actor: ActorDep, session: SessionDep, idempotency_key: OptionalKey = None):
         student = require_student(session, actor, student_id)
+        operation = f"POST /v1/students/{student_id}/memories"
+        if (replay := replay_idempotent(session, actor, student_id, operation, idempotency_key, payload.model_dump(mode="json"))) is not None:
+            return replay
         is_staff = staff(actor)
         allowed = STAFF_CATEGORIES if is_staff else STUDENT_CATEGORIES
         if payload.category not in allowed:
@@ -280,6 +284,9 @@ def install_agent(app, engine, cfg, database_session, current_actor):
             raise Problem(422, "validation", "invalid_request", "记忆只能引用该学生当前有效的证据。")
         if payload.category == "recurring_difficulty" and not payload.evidence_ids:
             raise Problem(422, "validation", "invalid_request", "学科困难必须引用已核实的作答证据。")
+        if payload.knowledge_id is not None and session.scalar(select(KnowledgeNode.id).where(
+                KnowledgeNode.graph_version == require_published_graph(session).version, KnowledgeNode.id == payload.knowledge_id)) is None:
+            raise Problem(422, "validation", "invalid_request", "记忆只能关联已发布的知识点。")
         stamp = now()
         previous = None
         if payload.supersedes_id:
@@ -293,8 +300,10 @@ def install_agent(app, engine, cfg, database_session, current_actor):
                                  confirmed_by=actor.id, confirmed_at=stamp, valid_until=stamp + VALIDITY[payload.category],
                                  supersedes_id=previous.id if previous else None, revision=1, created_at=stamp, updated_at=stamp)
         session.add(memory)
+        session.flush()
+        result = remember_idempotent(session, actor, student_id, operation, idempotency_key, payload.model_dump(mode="json"), memory_dict(memory))
         session.commit()
-        return memory_dict(memory)
+        return result
 
     @app.post("/v1/memories/{memory_id}/confirm", operation_id="confirmAgentMemory")
     def confirm_memory(memory_id: str, actor: ActorDep, session: SessionDep):

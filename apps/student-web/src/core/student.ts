@@ -509,9 +509,9 @@ export class StudentClient {
   }
   /**
    * Later-phase learning endpoints under the same sign-in, student and
-   * account-loss checks as homework reads. The server does not deduplicate
-   * these writes by Idempotency-Key, so they are not journaled; callers
-   * re-read after an unknown outcome instead of replaying.
+   * account-loss checks as homework reads. Each call sends a fresh
+   * Idempotency-Key and these writes are not journaled; callers re-read
+   * after an unknown outcome instead of replaying.
    */
   private async learning<T>(path: (student: string) => string, guard: (value: unknown) => value is T, body?: unknown): Promise<{ value: T; student: string }> {
     const ctx = await this.authorize()
