@@ -59,7 +59,7 @@
         "apps/android/"
       ],
       "acceptance": "真实CameraX实现，私有文件保存，未接服务诚实显示；编译和真机另验",
-      "evidence": "25aa9dbc0112737e3cebff1d7e8eeb0444801517：源码/XML/Wrapper检查及CI编译/lint通过；尚未真机验收，不具备真实纠错"
+      "evidence": "08685ef（Android 0.3.0）：CameraX 拍摄、系统选图、多页旋转裁切与私有文件保存，60 项 JVM 测试与 lint/构建通过；尚未真机验收"
     },
     {
       "id": "A04",
@@ -184,11 +184,12 @@
         "P1-03",
         "P1-04"
       ],
-      "status": "not_started",
+      "status": "artifact_ready",
       "artifact_paths": [
         "apps/android/"
       ],
-      "acceptance": "照片真实进服务，授权切换、重启、网络失败恢复；本地未提交不显示成功"
+      "acceptance": "照片真实进服务，授权切换、重启、网络失败恢复；本地未提交不显示成功",
+      "evidence": "08685ef：账号登录替代配对，上传/识别/检查由 WorkManager 从持久账本续跑，换账号隔离、过期登录、断网未知结果与 0.2.0 账本迁移有 MockWebServer 测试；真机网络与重启待验"
     },
     {
       "id": "B05",
@@ -263,7 +264,8 @@
       "artifact_paths": [
         "infra/",
         "docs/runbooks/",
-        "evals/correction/"
+        "evals/correction/",
+        "apps/android/"
       ],
       "acceptance": "真机安装升级/杀进程、隔离撤权删除、恢复备份重应用删除、运行告警与回滚"
     },

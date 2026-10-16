@@ -70,7 +70,7 @@
       "title": "可安装 App 与相机采集",
       "owner_hint": "FE",
       "priority": "P0",
-      "status": "in_progress",
+      "status": "engineering_complete",
       "dependency_ids": [
         "P1-01",
         "P1-02"
@@ -84,7 +84,7 @@
         "A",
         "B"
       ],
-      "implementation_note": "安卓相机源码与 CI 构建已具备，学生网页端可拍照上传；声明设备实际安装运行待真机验收。"
+      "implementation_note": "Android 0.3.0：账号登录、相机与系统选图、多页（≤4 页/8 MiB）排序删除、90° 旋转与矩形裁切、原图与页面关系本机保存、提交前确认页数；权限拒绝/永久拒绝、存储不足、模糊过暗反光提醒均有恢复路径；60 项 JVM 测试、lint 与 debug/release 构建在 CI 通过。声明设备实际安装运行与真实拍摄待真机验收。"
     },
     {
       "id": "P1-04",
@@ -278,7 +278,7 @@
       "title": "设备生命周期与故障恢复",
       "owner_hint": "FE",
       "priority": "P0",
-      "status": "in_progress",
+      "status": "engineering_complete",
       "dependency_ids": [
         "P1-03",
         "P1-04",
@@ -294,7 +294,7 @@
       "delivery_waves": [
         "D"
       ],
-      "implementation_note": "服务端租约回收、Worker 重启恢复、健康/就绪探针与部署烟测已完成；安卓后台终止、弱网与 App 更新恢复待真机。"
+      "implementation_note": "服务端租约回收、Worker 重启恢复、健康/就绪探针与部署烟测已完成；Android 上传、识别与检查统一由 WorkManager 从版本化持久账本续跑，过期/撤销登录回到登录页且保留本机未上传作业，0.2.0 账本迁移保留原幂等键，均有 JVM 测试。后台终止、弱网与覆盖安装升级待真机验收。"
     },
     {
       "id": "P1-14",
