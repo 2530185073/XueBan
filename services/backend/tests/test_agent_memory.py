@@ -147,3 +147,26 @@ def test_purge_removes_agent_records(flow):
         session.commit()
         for model in (AgentMemoryItem, AgentRun):
             assert session.scalar(select(func.count()).select_from(model)) == 0
+
+
+def test_two_verified_errors_produce_one_rule_memory_that_correction_supersedes(flow):
+    from test_c0_acceptance import submit_correction
+    case = reviewed(flow)
+    teacher(flow)
+    case = review(flow, case)
+    link(flow, case)
+    case = review(flow, submit_correction(flow, case, "incorrect"))
+    learning(flow).drain()
+    learning(flow).drain()
+    [state] = flow.client.get("/v1/students/student_a/knowledge").json()["states"]
+    assert state["reason_codes"] == ["repeated_errors"]
+    [memory] = [m for m in flow.client.get("/v1/students/student_a/memories").json()["items"] if m["source"] == "system_rule"]
+    assert memory["category"] == "recurring_difficulty" and memory["status"] == "confirmed"
+    assert memory["confirmed_by"] == "rule:memory-r1" and len(memory["evidence_ids"]) == 2
+    assert "2 次经老师核实的错误作答" in memory["content"]
+    learning(flow).drain()
+    assert len([m for m in flow.client.get("/v1/students/student_a/memories").json()["items"] if m["source"] == "system_rule"]) == 1
+    review(flow, flow.client.get(f"/v1/cases/{case['id']}").json(), action="replace", verdict="correct")
+    learning(flow).drain()
+    items = {m["id"]: m for m in flow.client.get("/v1/students/student_a/memories?include_inactive=true").json()["items"]}
+    assert items[memory["id"]]["status"] == "invalidated"
