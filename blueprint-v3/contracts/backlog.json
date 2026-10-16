@@ -48,7 +48,8 @@
         "US-02"
       ],
       "work_package": "P03",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_milestone": "C0"
     },
     {
       "id": "US-04",
@@ -61,20 +62,22 @@
         "US-03"
       ],
       "work_package": "P03",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_milestone": "C0"
     },
     {
       "id": "US-05",
       "title": "学生收到可靠纠错",
       "owner_hint": "AI",
-      "acceptance_success": "初判进入 awaiting_review；有能力和权限的坐班老师 confirmed 后学生可用",
-      "acceptance_failure": "超时/拒绝/截断保留原因；老师无把握保留待核实；不得显示已经确认",
+      "acceptance_success": "区分AI候选提示与已确认判定；有过程时定位第一可确认错步，无过程不编步骤；坐班确认后才写正式图谱与报告",
+      "acceptance_failure": "正确题及合法等价解法不能误标错；模糊、冲突、无把握转待核实；初判不得伪装已确认",
       "status": "not_started",
       "dependency_ids": [
         "US-04"
       ],
       "work_package": "P03",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_milestone": "C0"
     },
     {
       "id": "US-06",
@@ -88,7 +91,8 @@
         "US-05"
       ],
       "work_package": "P03",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_milestone": "C0"
     },
     {
       "id": "US-07",
@@ -101,20 +105,23 @@
         "US-06"
       ],
       "work_package": "P03",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_milestone": "C0"
     },
     {
       "id": "US-08",
       "title": "学生完成学校作业订正",
       "owner_hint": "FE",
-      "acceptance_success": "订正形成新 attempt，记录提示和答案暴露；原错误仍可回看",
-      "acceptance_failure": "重复订正去重；看答案后改对不算独立验证；订正结束不自动追加同类题",
+      "acceptance_success": "新attempt关联parent_attempt_id及根作答，保存提示；订正后重新检查，明确通过、仍需帮助或待核实",
+      "acceptance_failure": "只点完成不得通过；原题订正不受额外门禁限制；重复重传去重；提示后改对不算独立掌握，不自动加题",
       "status": "not_started",
       "dependency_ids": [
-        "US-06"
+        "US-06",
+        "US-16"
       ],
       "work_package": "P03",
-      "priority": "P0"
+      "priority": "P0",
+      "delivery_milestone": "C0"
     },
     {
       "id": "US-09",
@@ -219,15 +226,16 @@
       "id": "US-16",
       "title": "学生按需获取分层帮助",
       "owner_hint": "AI",
-      "acceptance_success": "当前学校任务可逐级求助，帮助层级写入 attempt；可选验证中求助可结束验证并切换支持",
-      "acceptance_failure": "验证进行中不泄题；求助后如实标为得到帮助，不伪装独立；不能拒绝必要求助来保独立分数",
+      "acceptance_success": "基础纠错先实现位置/方向→必要关键一步→坐班求助，记录帮助；不依赖完整长期记忆；验证求助后如实转有帮助",
+      "acceptance_failure": "不泄露整页答案或无限反问；未确认提示明确标注，不写成事实；不得拒绝原题求助来保独立分数",
       "status": "not_started",
       "dependency_ids": [
-        "US-13",
-        "US-17"
+        "US-02",
+        "US-05"
       ],
-      "work_package": "P05",
-      "priority": "P0"
+      "work_package": "P03",
+      "priority": "P0",
+      "delivery_milestone": "C0"
     },
     {
       "id": "US-17",
@@ -250,11 +258,12 @@
       "acceptance_failure": "转人工失败不伪装完成；未接单不显示处理中；不得自动转成补课课程或强制新题",
       "status": "not_started",
       "dependency_ids": [
-        "US-06",
-        "US-17"
+        "US-02",
+        "US-06"
       ],
-      "work_package": "P05",
-      "priority": "P0"
+      "work_package": "P03",
+      "priority": "P0",
+      "delivery_milestone": "C0"
     },
     {
       "id": "US-19",
@@ -575,7 +584,7 @@
       "priority": "P1"
     }
   ],
-  "product_version": "v3.1",
+  "product_version": "3.2",
   "dependency_semantics": "dependency_ids 仅表示研发集成先后，不是学生必做任务顺序。US-27/33 可依赖小测相关能力的研发，但半月汇总和报告不以参加或完成小测为运行前提。",
   "service_policy": {
     "setting": "托管班，辅助自主完成学校课程与作业，不增负",
@@ -604,5 +613,25 @@
       "不确定性",
       "低负担建议"
     ]
+  },
+  "first_delivery_gate": {
+    "id": "C0",
+    "title": "平板拍照纠错完整流程",
+    "spec_document": "10-纠错核心流程与首发验收.md",
+    "foundation_ids": [
+      "US-01",
+      "US-02"
+    ],
+    "story_ids": [
+      "US-03",
+      "US-04",
+      "US-05",
+      "US-06",
+      "US-07",
+      "US-08",
+      "US-16",
+      "US-18"
+    ],
+    "note": "首批题型与最小证据底座同时准备；C0不依赖完整长期记忆或图谱展示；图谱与报告不替代纠错验收。"
   }
 }
