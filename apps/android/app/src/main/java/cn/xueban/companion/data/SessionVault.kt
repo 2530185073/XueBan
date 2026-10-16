@@ -3,7 +3,7 @@ package cn.xueban.companion.data
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
-import android.util.AtomicFile
+import androidx.core.util.AtomicFile
 import java.io.File
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -12,8 +12,8 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import org.json.JSONObject
 
-/** Contains backend token and pending pairing code, never a model-provider key. */
-class SessionVault(context: Context) {
+/** Backend session token, server and username; never a password or model-provider key. */
+class SessionVault(context: Context) : SessionStore {
     private val file = AtomicFile(File(context.noBackupFilesDir, "paired-session.enc"))
     private val alias = "xueban-device-session-v2"
     private fun key(): SecretKey {
@@ -25,16 +25,16 @@ class SessionVault(context: Context) {
         }.generateKey()
     }
 
-    @Synchronized fun load(): JSONObject? {
+    @Synchronized override fun load(): JSONObject? {
         if (!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists()) return null
         val bytes = file.readFully()
-        require(bytes.size > 28) { "配对信息无法读取，请重新配对" }
+        require(bytes.size > 28) { "登录信息无法读取，请重新登录" }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
         return JSONObject(String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8))
     }
 
-    @Synchronized fun save(value: JSONObject) {
+    @Synchronized override fun save(value: JSONObject) {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key())
         val bytes = cipher.iv + cipher.doFinal(value.toString().toByteArray(Charsets.UTF_8))
@@ -42,5 +42,5 @@ class SessionVault(context: Context) {
         try { output.write(bytes); file.finishWrite(output) } catch (error: Exception) { file.failWrite(output); throw error }
     }
 
-    @Synchronized fun clear() { file.delete() }
+    @Synchronized override fun clear() { file.delete() }
 }

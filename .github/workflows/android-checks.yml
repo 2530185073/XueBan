@@ -32,11 +32,22 @@ jobs:
         run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"'
       - name: Compile, test and lint network correction app
         run: ./gradlew --no-daemon --stacktrace :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+      - name: Build minified release (unsigned; signing keys never live in CI)
+        run: ./gradlew --no-daemon --stacktrace :app:assembleRelease
       - name: Save development APK
         uses: actions/upload-artifact@v4
         with:
           name: xueban-network-dev
           path: apps/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+      - name: Save unsigned release APK and R8 mapping
+        uses: actions/upload-artifact@v4
+        with:
+          name: xueban-release-unsigned
+          path: |
+            apps/android/app/build/outputs/apk/release/*.apk
+            apps/android/app/build/outputs/mapping/release/mapping.txt
           if-no-files-found: error
           retention-days: 14
       - name: Save lint results

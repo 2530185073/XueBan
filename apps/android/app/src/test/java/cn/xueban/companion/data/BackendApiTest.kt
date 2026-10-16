@@ -43,4 +43,15 @@ class BackendApiTest {
         }
         assertEquals(5, server.requestCount)
     }
+    @Test fun problemCodeIsReadButServerProseIsNot() = withServer { server, base ->
+        val api = BackendApi(base, "synthetic-app-token", true)
+        server.enqueue(MockResponse().setResponseCode(403).setBody("{\"code\":\"password_change_required\",\"detail\":\"secret upstream detail\"}"))
+        val change = assertThrows(ApiFailure::class.java) { api.get("/v1/me") }
+        assertEquals("password_change_required", change.code)
+        assertFalse(change.message.orEmpty().contains("secret upstream"))
+        server.enqueue(MockResponse().setResponseCode(429).setBody("{\"code\":\"login_rate_limited\"}"))
+        assertEquals("login_rate_limited", assertThrows(ApiFailure::class.java) { api.post("/v1/auth/login", JSONObject(), "synthetic-key") }.code)
+        server.enqueue(MockResponse().setResponseCode(500).setBody("{\"code\":\"Not A Code<script>\"}"))
+        assertEquals("http_500", assertThrows(ApiFailure::class.java) { api.get("/v1/me") }.code)
+    }
 }

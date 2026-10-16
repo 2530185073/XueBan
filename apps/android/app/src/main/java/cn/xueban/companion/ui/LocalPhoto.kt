@@ -26,10 +26,10 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 @Composable
-fun LocalPhoto(file: File, modifier: Modifier = Modifier, regions: List<JSONObject> = emptyList(), originalWidth: Int = 0, originalHeight: Int = 0) {
-    val state by produceState<PhotoState>(initialValue = PhotoState.Loading, key1 = file.absolutePath) {
+fun LocalPhoto(file: File, modifier: Modifier = Modifier, regions: List<JSONObject> = emptyList(), originalWidth: Int = 0, originalHeight: Int = 0, version: Any? = null, maxSide: Int = 1600) {
+    val state by produceState<PhotoState>(initialValue = PhotoState.Loading, file.absolutePath, version) {
         value = withContext(Dispatchers.IO) {
-            runCatching { decodePreview(file) }
+            runCatching { decodePreview(file, maxSide) }
                 .fold(onSuccess = { it?.let { bitmap -> PhotoState.Ready(bitmap) } ?: PhotoState.Unreadable }, onFailure = { PhotoState.Unreadable })
         }
     }
@@ -61,17 +61,18 @@ private sealed interface PhotoState {
     data class Ready(val bitmap: ImageBitmap) : PhotoState
 }
 
-private fun decodePreview(file: File): ImageBitmap? {
+/** EXIF-oriented preview, optionally turned further by the student's rotation (multiples of 90°). */
+fun decodePreview(file: File, maxSide: Int = 1600, extraRotation: Int = 0): ImageBitmap? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeFile(file.absolutePath, bounds)
     var sample = 1
-    while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 1600) sample *= 2
+    while (maxOf(bounds.outWidth, bounds.outHeight) / sample > maxSide) sample *= 2
     val original = BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply { inSampleSize = sample })
         ?: return null
     val exif = ExifInterface(file)
     val transform = Matrix().apply {
         if (exif.isFlipped) postScale(-1f, 1f)
-        postRotate(exif.rotationDegrees.toFloat())
+        postRotate((exif.rotationDegrees + extraRotation).toFloat())
     }
     val preview = Bitmap.createBitmap(original, 0, 0, original.width, original.height, transform, true)
     if (preview !== original) original.recycle()

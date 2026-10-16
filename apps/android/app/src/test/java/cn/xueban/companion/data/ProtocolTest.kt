@@ -18,14 +18,16 @@ class ProtocolTest {
             val recovery = processFailureRecovery("recognizing", status)
             assertEquals("failed", recovery.stage)
             assertFalse(recovery.keepActiveRecord)
-            assertFalse(canResumeInForeground(recovery.stage))
+            assertFalse(canResumeAutomatically(recovery.stage))
         }
         listOf(null, 0, 408, 425, 429, 500, 503).forEach { status ->
             val recovery = processFailureRecovery("recognizing", status)
             assertEquals("recognizing", recovery.stage)
             assertTrue(recovery.keepActiveRecord)
-            assertTrue(canResumeInForeground(recovery.stage))
+            assertTrue(canResumeAutomatically(recovery.stage))
         }
+        assertTrue(canResumeAutomatically("queued"))
+        assertFalse(canResumeAutomatically("local"))
     }
     @Test fun correctionHelpMatchesActualRequestContractIncludingOldHintDrafts() {
         val contract = generateSequence(File(requireNotNull(System.getProperty("user.dir")))) { it.parentFile }

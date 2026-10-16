@@ -7,14 +7,23 @@ import kotlinx.coroutines.ensureActive
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Foreground resumable coordinator. Every mutation is journaled before sending. */
-class CorrectionSync(private val repository: LocalCaptureRepository, private val api: BackendApi, private val changed: suspend () -> Unit) {
+private const val MAX_REMOTE_PAGES = 12
+
+/** Resumable coordinator shared by the background worker and foreground actions. Every mutation is journaled before sending. */
+class CorrectionSync(
+    private val repository: LocalCaptureRepository,
+    private val api: BackendApi,
+    private val deadline: Long = Long.MAX_VALUE,
+    private val changed: suspend () -> Unit = {},
+) {
     private val pendingStates = listOf("queued", "running", "retryable_failed")
     private suspend fun update(id: String, action: (JSONObject) -> Unit) { repository.update(id, action); changed() }
     private suspend fun stage(id: String, stage: String) = update(id) { it.put("stage", stage).remove("error") }
+    private suspend fun updatePage(id: String, pageId: String, action: (JSONObject) -> Unit) = update(id) { action(LocalCaptureRepository.page(it, pageId)) }
     private fun post(id: String, op: String, path: String, body: JSONObject) = repository.postOnce(id, op, api, path, body)
     private fun get(path: String) = api.get(path)
     private fun state(id: String) = repository.read(id)
+    private fun checkBudget() { if (System.currentTimeMillis() > deadline) throw ApiFailure(0, "still_running", "检查还在进行，稍后会自动继续") }
 
     suspend fun run(id: String) {
         currentCoroutineContext().ensureActive()
@@ -35,44 +44,16 @@ class CorrectionSync(private val repository: LocalCaptureRepository, private val
         val isRemote = local.getString("id").startsWith("remote_")
         if (!isRemote) {
             stage(id, "uploading")
-            var assetId = local.text("asset_id")
-            var ticket = local.optJSONObject("upload_ticket")
-            if (assetId == null) {
-                val body = JSONObject().put("expected_revision", homework.getInt("revision")).put("page_index", homework.strings("asset_ids").size)
-                    .put("sha256", local.getString("sha256")).put("byte_size", local.getLong("byte_size")).put("mime_type", "image/jpeg").put("width", local.getInt("width")).put("height", local.getInt("height"))
-                ticket = post(id, "upload", "$hwPath/uploads", body)
-                assetId = ticket.getJSONObject("asset").getString("id")
-                update(id) { it.put("asset_id", assetId).put("upload_ticket", ticket) }
-            }
-            val assetPath = "/v1/assets/${idPath(requireNotNull(assetId))}"
-            var asset = get(assetPath)
-            if (asset.getString("status") != "uploaded") {
-                require(asset.getString("status") == "awaiting_upload") { "这张照片未通过核验，请重新拍照" }
-                if (ticket == null || Instant.parse(ticket.getString("expires_at")).isBefore(Instant.now().plusSeconds(15))) {
-                    val saved = state(id)
-                    val previous = saved.optInt("ticket_generation")
-                    val pendingRenewal = saved.getJSONObject("ops").optJSONObject("renew-$previous")
-                    val renew = if (pendingRenewal != null && !pendingRenewal.has("response")) previous else previous + 1
-                    update(id) { it.put("ticket_generation", renew) }
-                    ticket = post(id, "renew-$renew", "$assetPath/upload-ticket", JSONObject().put("expected_revision", asset.getInt("revision")))
-                    update(id) { it.put("upload_ticket", ticket) }
-                }
-                currentCoroutineContext().ensureActive()
-                val file = repository.write(id, state(id)).file
-                require(file.isFile) { "本机照片不存在，请重新拍照" }
-                val activeTicket = requireNotNull(ticket)
-                api.upload(activeTicket.getString("put_url"), activeTicket.getJSONObject("required_headers"), file)
-                asset = get(assetPath)
-                if (asset.getString("status") != "uploaded") {
-                    asset = post(id, "complete", "$assetPath/complete", JSONObject().put("expected_revision", asset.getInt("revision")).put("sha256", local.getString("sha256")).put("byte_size", local.getLong("byte_size")))
-                }
-                require(asset.getString("status") == "uploaded") { "服务端尚未确认图片上传" }
-            }
-            update(id) { it.put("asset", asset).remove("upload_ticket") }
+            val pages = local.pageObjects()
+            require(pages.isNotEmpty() && pages.all { it.optString("status") == "ready" }) { "这份作业没有可上传的照片，请重新拍照" }
+            if (!local.has("page_base")) update(id) { it.put("page_base", homework.strings("asset_ids").size) }
+            val base = state(id).getInt("page_base")
+            pages.forEachIndexed { position, page -> uploadPage(id, hwPath, page.getString("id"), base + position) }
         } else {
-            cacheRemoteImage(id, homework)
+            cacheRemoteImages(id, homework)
         }
         local = state(id)
+        val assetIds = JSONArray(local.pageObjects().mapNotNull { it.text("asset_id") })
         homework = get(hwPath)
         val correction = local.optJSONObject("correction")
         var recognitionJob = local.text("recognition_job_id")
@@ -83,16 +64,17 @@ class CorrectionSync(private val repository: LocalCaptureRepository, private val
                 recognitionJob?.let { job -> update(id) { it.put("recognition_job_id", job) } }
             }
             if (recognitionJob == null) {
+                require(assetIds.length() > 0) { "这份作业没有已上传的照片，请重新拍照" }
                 stage(id, "recognizing")
                 val accepted = if (correction == null) {
-                    post(id, "recognize-$generation", "$hwPath/recognitions", JSONObject().put("expected_revision", homework.getInt("revision")).put("asset_ids", JSONArray().put(local.getString("asset_id"))))
+                    post(id, "recognize-$generation", "$hwPath/recognitions", JSONObject().put("expected_revision", homework.getInt("revision")).put("asset_ids", assetIds))
                 } else {
                     val caseId = correction.getString("case_id")
                     val case = get("/v1/cases/${idPath(caseId)}")
                     val recovering = state(id).getJSONObject("ops").has("correction-$generation")
                     require(recovering || case.getString("current_attempt_id") == correction.getString("parent_attempt_id")) { "这道题已有更新的订正，请先打开最新记录" }
                     post(id, "correction-$generation", "/v1/cases/${idPath(caseId)}/attempts", JSONObject().put("expected_revision", case.getInt("revision")).put("parent_attempt_id", correction.getString("parent_attempt_id"))
-                        .put("question_revision", case.getInt("current_question_revision")).put("asset_ids", JSONArray().put(local.getString("asset_id"))).put("occurred_at", Instant.ofEpochMilli(local.getLong("captured_at")).toString()).put("reported_help", correctionReportedHelp(correction.text("reported_help"))))
+                        .put("question_revision", case.getInt("current_question_revision")).put("asset_ids", assetIds).put("occurred_at", Instant.ofEpochMilli(local.getLong("captured_at")).toString()).put("reported_help", correctionReportedHelp(correction.text("reported_help"))))
                 }
                 recognitionJob = accepted.getJSONObject("job").getString("id")
                 update(id) { it.put("recognition_job_id", recognitionJob) }
@@ -107,7 +89,7 @@ class CorrectionSync(private val repository: LocalCaptureRepository, private val
         update(id) { it.put("homework", homework) }
         val caseIds = correction?.let { listOf(it.getString("case_id")) } ?: homework.strings("case_ids")
         if (caseIds.isEmpty()) {
-            update(id) { it.put("stage", "complete").put("cases", JSONArray()).put("notice", "这张照片暂未识别出可检查的题目，请拍清楚后再试，或请老师一起看。") }
+            update(id) { it.put("stage", "complete").put("cases", JSONArray()).put("notice", "这份作业的照片暂未识别出可检查的题目，请拍清楚后再试，或请老师一起看。") }
             return
         }
         stage(id, "checking")
@@ -156,6 +138,7 @@ class CorrectionSync(private val repository: LocalCaptureRepository, private val
             }
             if (pending.isNotEmpty()) {
                 if (++polls >= 300) { update(id) { it.put("notice", "检查仍在进行，可以稍后从历史继续查看。") }; return }
+                checkBudget()
                 delay(waitSeconds * 1000)
             }
         }
@@ -169,9 +152,52 @@ class CorrectionSync(private val repository: LocalCaptureRepository, private val
             val job = get("/v1/jobs/${idPath(jobId)}")
             update(id) { it.put("last_job", job) }
             if (job.getString("status") !in pendingStates) return job
+            checkBudget()
             delay(job.optLong("retry_after_seconds", 2).coerceIn(2, 15) * 1000)
         }
         throw ApiFailure(0, "still_running", "检查还在进行，稍后可从历史继续查看")
+    }
+
+    private suspend fun uploadPage(id: String, hwPath: String, pageId: String, pageIndex: Int) {
+        currentCoroutineContext().ensureActive()
+        var page = LocalCaptureRepository.page(state(id), pageId)
+        if (isServerConfirmed(page)) return
+        var assetId = page.text("asset_id")
+        var ticket = page.optJSONObject("upload_ticket")
+        if (assetId == null) {
+            val homework = get(hwPath)
+            val body = JSONObject().put("expected_revision", homework.getInt("revision")).put("page_index", pageIndex)
+                .put("sha256", page.getString("sha256")).put("byte_size", page.getLong("byte_size")).put("mime_type", "image/jpeg").put("width", page.getInt("width")).put("height", page.getInt("height"))
+            ticket = post(id, "upload-$pageId", "$hwPath/uploads", body)
+            assetId = ticket.getJSONObject("asset").getString("id")
+            updatePage(id, pageId) { it.put("asset_id", assetId).put("upload_ticket", ticket) }
+        }
+        val assetPath = "/v1/assets/${idPath(requireNotNull(assetId))}"
+        var asset = get(assetPath)
+        if (asset.getString("status") != "uploaded") {
+            require(asset.getString("status") == "awaiting_upload") { "有一页照片未通过核验，请重新拍这一页" }
+            if (ticket == null || Instant.parse(ticket.getString("expires_at")).isBefore(Instant.now().plusSeconds(15))) {
+                val saved = state(id)
+                val previous = LocalCaptureRepository.page(saved, pageId).optInt("ticket_generation")
+                val pendingRenewal = saved.getJSONObject("ops").optJSONObject("renew-$pageId-$previous")
+                val renew = if (pendingRenewal != null && !pendingRenewal.has("response")) previous else previous + 1
+                updatePage(id, pageId) { it.put("ticket_generation", renew) }
+                ticket = post(id, "renew-$pageId-$renew", "$assetPath/upload-ticket", JSONObject().put("expected_revision", asset.getInt("revision")))
+                updatePage(id, pageId) { it.put("upload_ticket", ticket) }
+            }
+            currentCoroutineContext().ensureActive()
+            val file = repository.capture(id).pages.first { it.id == pageId }.upload
+            require(file.isFile) { "本机照片不存在，请重新拍照" }
+            val activeTicket = requireNotNull(ticket)
+            api.upload(activeTicket.getString("put_url"), activeTicket.getJSONObject("required_headers"), file)
+            asset = get(assetPath)
+            page = LocalCaptureRepository.page(state(id), pageId)
+            if (asset.getString("status") != "uploaded") {
+                asset = post(id, "complete-$pageId", "$assetPath/complete", JSONObject().put("expected_revision", asset.getInt("revision")).put("sha256", page.getString("sha256")).put("byte_size", page.getLong("byte_size")))
+            }
+            require(asset.getString("status") == "uploaded") { "服务端尚未确认图片上传" }
+        }
+        updatePage(id, pageId) { it.put("asset", asset).remove("upload_ticket") }
     }
 
     private suspend fun failed(id: String, job: JSONObject, caseId: String?) = update(id) {
@@ -192,14 +218,23 @@ class CorrectionSync(private val repository: LocalCaptureRepository, private val
         changed()
     }
 
-    private fun cacheRemoteImage(id: String, homework: JSONObject) {
-        val record = repository.write(id, state(id))
-        if (record.file.isFile) return
-        val assetId = homework.strings("asset_ids").firstOrNull() ?: return
-        val asset = get("/v1/assets/${idPath(assetId)}")
-        val access = get("/v1/assets/${idPath(assetId)}/access")
-        api.download(access.getString("read_url"), record.file)
-        repository.update(id) { it.put("asset_id", assetId).put("width", asset.getInt("width")).put("height", asset.getInt("height")) }
+    /** Server history pages are cached in homework page order; nothing here writes to the server. */
+    private suspend fun cacheRemoteImages(id: String, homework: JSONObject) {
+        homework.strings("asset_ids").take(MAX_REMOTE_PAGES).forEachIndexed { index, assetId ->
+            currentCoroutineContext().ensureActive()
+            val cached = repository.capture(id).pages.firstOrNull { it.assetId == assetId }
+            if (cached != null && cached.upload.isFile) return@forEachIndexed
+            val name = if (cached != null) cached.upload.name else "remote-$index.jpg"
+            val asset = get("/v1/assets/${idPath(assetId)}")
+            val access = get("/v1/assets/${idPath(assetId)}/access")
+            api.download(access.getString("read_url"), repository.file(id, name))
+            update(id) { state ->
+                val pages = state.pageObjects().filter { it.optString("asset_id") != assetId }.toMutableList()
+                pages.add(JSONObject().put("id", "page_$index").put("status", "ready").put("upload_file", name).put("asset_id", assetId)
+                    .put("width", asset.getInt("width")).put("height", asset.getInt("height")).put("page_index", asset.optInt("page_index", index)))
+                state.put("pages", JSONArray(pages.sortedBy { it.optInt("page_index") }))
+            }
+        }
     }
 
     suspend fun requestHint(id: String, caseId: String, level: String) {

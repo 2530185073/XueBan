@@ -19,7 +19,7 @@ object UrlPolicy {
         val origin = URI(server)
         require(uri.host != null && uri.userInfo == null && uri.fragment == null && uri.port in -1..65535) { "图片访问地址无效" }
         fun port(u: URI) = if (u.port != -1) u.port else if (u.scheme == "https") 443 else 80
-        require(uri.scheme == origin.scheme && uri.host == origin.host && port(uri) == port(origin)) { "图片地址与配对服务器不一致" }
+        require(uri.scheme == origin.scheme && uri.host == origin.host && port(uri) == port(origin)) { "图片地址与登录服务器不一致" }
         require(uri.scheme == "https" || (debug && uri.scheme == "http" && privateHost(uri.host) && uri.host == origin.host && uri.port == origin.port)) { "图片传输地址不安全" }
         return value
     }
@@ -45,7 +45,50 @@ fun processFailureRecovery(previousStage: String, httpStatus: Int?): FailureReco
     val rejected = httpStatus != null && httpStatus in 400..499 && httpStatus !in listOf(408, 425, 429)
     return if (rejected) FailureRecovery("failed", false) else FailureRecovery(previousStage, true)
 }
-fun canResumeInForeground(stage: String): Boolean = stage in listOf("creating", "uploading", "recognizing", "checking")
+fun canResumeAutomatically(stage: String): Boolean = stage in listOf("queued", "creating", "uploading", "recognizing", "checking")
+
+enum class CameraAccess { Granted, NotRequested, Denied, PermanentlyDenied }
+/** Android reports "don't ask again" only as: already asked, not granted, and no rationale to show. */
+fun cameraAccess(granted: Boolean, askedBefore: Boolean, showRationale: Boolean): CameraAccess = when {
+    granted -> CameraAccess.Granted
+    showRationale -> CameraAccess.Denied
+    askedBefore -> CameraAccess.PermanentlyDenied
+    else -> CameraAccess.NotRequested
+}
+
+enum class FailureKind { SessionExpired, PasswordChangeRequired, AccessDenied, Other }
+/** Asset ticket/storage failures are scoped to one image and never end the account session. */
+fun classifyFailure(error: Throwable): FailureKind {
+    if (error !is ApiFailure || error.code in listOf("upload_failed", "image_unavailable")) return FailureKind.Other
+    return when {
+        error.status == 401 -> FailureKind.SessionExpired
+        error.status == 403 && error.code == "password_change_required" -> FailureKind.PasswordChangeRequired
+        error.status == 403 -> FailureKind.AccessDenied
+        else -> FailureKind.Other
+    }
+}
+
+fun JSONObject.pageObjects(): List<JSONObject> = optJSONArray("pages")?.objects().orEmpty()
+fun isServerConfirmed(page: JSONObject): Boolean = page.optJSONObject("asset")?.optString("status") == "uploaded"
+
+/** Anything the server has not confirmed is labelled 未上传, never as received or checked. */
+fun recordStageLabel(state: JSONObject, cases: List<JSONObject>): String {
+    val pages = state.pageObjects()
+    val confirmed = pages.count(::isServerConfirmed)
+    val remote = state.optString("id").startsWith("remote_")
+    return when (state.optString("stage", "local")) {
+        "local" -> "未上传 · 草稿 ${pages.size} 页，确认页数后提交"
+        "queued" -> "未上传 · 已提交 ${pages.size} 页，联网后自动上传"
+        "creating" -> "未上传 · 正在建立作业记录"
+        "uploading" -> "上传中 · 服务器已确认 $confirmed/${pages.size} 页"
+        "recognizing" -> "正在读题与作答"
+        "checking" -> "正在逐题检查"
+        "complete" -> completedPageLabel(cases)
+        "failed" -> if (!remote && (state.text("homework_id") == null || confirmed < pages.size)) "未上传完成 · 处理失败，原图已保留" else "部分处理未完成 · 原图已保留"
+        "remote" -> "服务器历史 · 打开后可刷新结果"
+        else -> "进度已保留"
+    }
+}
 fun currentAttemptPhotoIndex(attemptAssets: List<String>, localAssets: List<String?>): Int? =
     localAssets.indexOfFirst { it != null && it in attemptAssets }.takeIf { it >= 0 }
 /** Local hint_used is evidence, not a valid CreateCorrection.reported_help enum.
