@@ -1,6 +1,6 @@
 // Backend DTOs that are not part of contracts/phase1; validated by hand here.
 
-export type ReviewReason = 'verify_candidate' | 'unable_to_judge' | 'recognition_revision'
+export type ReviewReason = 'verify_candidate' | 'unable_to_judge' | 'recognition_revision' | 'awaiting_check'
 
 export interface ReviewQueueItem {
   case_id: string
@@ -20,7 +20,7 @@ export interface AuthSession { access_token: string; expires_at: string; must_ch
 export interface AccountInfo { username: string; must_change_password: boolean; student_id: string | null }
 
 const ID = /^[a-z][a-z0-9_-]{2,63}$/
-const reasons: ReviewReason[] = ['verify_candidate', 'unable_to_judge', 'recognition_revision']
+const reasons: ReviewReason[] = ['verify_candidate', 'unable_to_judge', 'recognition_revision', 'awaiting_check']
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const text = (value: unknown, max: number) => typeof value === 'string' && value.length > 0 && value.length <= max
 const time = (value: unknown) => typeof value === 'string' && Number.isFinite(Date.parse(value))

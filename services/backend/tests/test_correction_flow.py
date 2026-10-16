@@ -437,6 +437,23 @@ def test_recheck_after_question_revision_keeps_original_capture_version(flow):
     assert case["current_question_revision"] == 2
 
 
+def test_staff_revision_that_clears_judgment_stays_in_review_queue(flow):
+    case = flow.ready()
+    teacher(flow)
+    queue = lambda: {item["case_id"]: item["reason"] for item in flow.client.get("/v1/review-queue").json()["items"]}
+    assert case["id"] not in queue()
+    flow.start_check(case)
+    flow.worker.run_once()
+    question = flow.client.get(f"/v1/questions/{case['question_id']}").json()["record"]
+    response = flow.post(f"/v1/questions/{question['question_id']}/revisions", {"expected_revision": question["revision"], "stem_text": "已核实的题干", "regions": question["regions"], "reason": "核对原图"})
+    assert response.status_code == 201
+    assert flow.client.get(f"/v1/cases/{case['id']}").json()["current_decision"] is None
+    assert queue()[case["id"]] == "awaiting_check"
+    flow.start_check(flow.client.get(f"/v1/cases/{case['id']}").json())
+    flow.worker.run_once()
+    assert queue().get(case["id"]) != "awaiting_check"
+
+
 def test_failed_commit_rolls_back_task_and_idempotency_for_retry(flow, monkeypatch):
     import xueban_backend.correction_api as api
     asset = flow.uploaded()

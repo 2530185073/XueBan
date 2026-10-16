@@ -40,7 +40,7 @@ class ResetPassword(Strict):
     new_password: SecretStr
 
 
-def needs_staff(case: dict, attempt: dict | None) -> str | None:
+def needs_staff(case: dict, attempt: dict | None, question: dict | None = None) -> str | None:
     if case["lifecycle"] != "active" or case["progress"] == "verified_resolved":
         return None
     decision = case["current_decision"]
@@ -52,6 +52,10 @@ def needs_staff(case: dict, attempt: dict | None) -> str | None:
         return None
     if attempt is not None and attempt["recognition_status"] in {"needs_revision", "failed"}:
         return "recognition_revision"
+    # A staff revision or layout repair cleared the judgment; nobody else will start the next check.
+    revised = case["check_ids"] or (question is not None and question.get("source") in {"staff_revision", "staff_layout"})
+    if attempt is not None and attempt["recognition_status"] == "ready" and revised:
+        return "awaiting_check"
     return None
 
 
@@ -162,7 +166,8 @@ def install_staff(app, engine, cfg, database_session, current_actor):
         for row, homework, display_name in session.execute(query.order_by(Entity.id).limit(scan_limit)):
             scanned += 1
             attempt = session.get(Entity, row.document["current_attempt_id"])
-            reason = needs_staff(row.document, attempt.document if attempt else None)
+            question = session.get(Entity, row.document["question_id"])
+            reason = needs_staff(row.document, attempt.document if attempt else None, question.document if question else None)
             if reason is not None:
                 if len(items) == limit:
                     return {"items": items, "next_cursor": last}
