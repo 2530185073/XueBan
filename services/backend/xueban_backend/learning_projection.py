@@ -30,6 +30,7 @@ MAX_TRIES = 5
 EVIDENCE_LISTENERS = []
 JOB_HANDLERS = {}
 PROJECTION_FOLLOWUPS = []
+PERIODIC = []
 
 
 def now():
@@ -57,6 +58,14 @@ def register_projection_followup(function):
     """Called after a projection commits, to enqueue dependent jobs."""
     PROJECTION_FOLLOWUPS.append(function)
     return function
+
+
+def register_periodic(interval: timedelta):
+    """Run (session, worker) in its own transaction at most once per interval per worker."""
+    def decorator(function):
+        PERIODIC.append((function, interval))
+        return function
+    return decorator
 
 
 def published_graph(session) -> CurriculumGraph:
@@ -213,6 +222,7 @@ class LearningWorker:
     def __init__(self, engine, *, client=None, scan_interval=timedelta(seconds=10)):
         self.engine, self.client, self.scan_interval = engine, client, scan_interval
         self.next_scan = datetime.min.replace(tzinfo=timezone.utc)
+        self.periodic_due = {}
 
     def scan(self, force=False):
         if not force and now() < self.next_scan:
@@ -222,6 +232,11 @@ class LearningWorker:
             dirty = dirty_students(session)
             for tenant_id, student_id in dirty:
                 enqueue(session, tenant_id, student_id, "project_student", {}, f"project:{student_id}")
+        for function, interval in PERIODIC:
+            if force or now() >= self.periodic_due.get(function, datetime.min.replace(tzinfo=timezone.utc)):
+                self.periodic_due[function] = now() + interval
+                with Session(self.engine) as session, session.begin():
+                    function(session, self)
         return len(dirty)
 
     def claim(self):

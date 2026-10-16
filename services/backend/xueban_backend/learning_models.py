@@ -220,3 +220,47 @@ class AgentRun(Base):
     failure_code: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class LearningReport(Base):
+    """One version of a half-month report; published versions are never rewritten."""
+    __tablename__ = "learning_reports"
+    __table_args__ = (student_fk(), Index("ix_learning_reports_period", "student_id", "period_start", "version", unique=True),
+                      Index("ix_learning_reports_status", "tenant_id", "campus_id", "status"))
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    campus_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    student_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    period_start: Mapped[str] = mapped_column(String(10), nullable=False)
+    period_end: Mapped[str] = mapped_column(String(10), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
+    staff_note: Mapped[str | None] = mapped_column(Text)
+    next_step: Mapped[str | None] = mapped_column(Text)
+    correction_note: Mapped[str | None] = mapped_column(Text)
+    supersedes_id: Mapped[str | None] = mapped_column(String(64))
+    regenerated_reason: Mapped[str | None] = mapped_column(String(48))
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    published_by: Mapped[str | None] = mapped_column(String(64))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ReportShareLink(Base):
+    """A revocable bearer link for a guardian; only the token digest is stored."""
+    __tablename__ = "report_share_links"
+    __table_args__ = (student_fk(), Index("ix_report_share_token", "token_digest", unique=True))
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    student_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    report_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    token_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    view_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_viewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

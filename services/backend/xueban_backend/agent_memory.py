@@ -45,6 +45,10 @@ def now():
     return datetime.now(timezone.utc)
 
 
+def iso(value):
+    return utc(value).isoformat() if value else None
+
+
 def _parse(value):
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
@@ -66,9 +70,9 @@ def memory_dict(memory, at=None):
     status = "expired" if memory.status == "confirmed" and memory.valid_until and utc(memory.valid_until) <= at else memory.status
     return {"id": memory.id, "category": memory.category, "content": memory.content, "knowledge_id": memory.knowledge_id,
             "evidence_ids": memory.evidence_ids, "source": memory.source, "status": status, "status_reason": memory.status_reason,
-            "confirmed_by": memory.confirmed_by, "confirmed_at": memory.confirmed_at.isoformat() if memory.confirmed_at else None,
-            "valid_until": memory.valid_until.isoformat() if memory.valid_until else None, "supersedes_id": memory.supersedes_id,
-            "revision": memory.revision, "created_at": memory.created_at.isoformat()}
+            "confirmed_by": memory.confirmed_by, "confirmed_at": iso(memory.confirmed_at),
+            "valid_until": iso(memory.valid_until), "supersedes_id": memory.supersedes_id,
+            "revision": memory.revision, "created_at": iso(memory.created_at)}
 
 
 def rule_proposals(states: dict, evidence: dict, names: dict) -> list[dict]:
@@ -389,5 +393,5 @@ def install_agent(app, engine, cfg, database_session, current_actor):
 
 def run_dict(run):
     return {"id": run.id, "purpose": run.purpose, "status": run.status, "context": run.context, "output": run.output,
-            "model_metadata": run.model_metadata, "failure_code": run.failure_code, "created_at": run.created_at.isoformat(),
-            "completed_at": run.completed_at.isoformat() if run.completed_at else None}
+            "model_metadata": run.model_metadata, "failure_code": run.failure_code, "created_at": iso(run.created_at),
+            "completed_at": iso(run.completed_at)}
