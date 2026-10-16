@@ -34,6 +34,9 @@ def load(runtime, *, require_model=False):
     env = os.environ.copy()
     env.update(config["environment"])
     env["PYTHONPATH"] = str(BACKEND)
+    web_dist = REPO / "apps/student-web/dist"
+    if (web_dist / "index.html").is_file():
+        env.setdefault("STUDENT_WEB_DIST", str(web_dist))
     if require_model:
         # Shutdown, status and revocation remain usable when model credentials are removed.
         for line in read_private(Path(config["model_config"])).splitlines():

@@ -259,4 +259,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from .correction_api import install_correction
     install_device_auth(app, engine, cfg)
     install_correction(app, engine, cfg, database_session, current_actor)
+    from .student_web import install_student_web
+    install_student_web(app, cfg.student_web_dist)
     return app

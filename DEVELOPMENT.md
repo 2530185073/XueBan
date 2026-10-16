@@ -2,6 +2,8 @@
 
 本仓库为托管班 AI 自主学习项目的研发起点，当前产品规格 v3.5。先阅读 [项目定位与边界](POSITIONING.md)：学校任务优先、坐班答疑、额外负担默认零，第一核心交付是平板拍照纠错完整流程，个人图谱与精准家长说明由这条流程的可靠证据持续形成。
 
+**最新执行决定（2026-10-17）：学生网页先运行，App后封装。** 当前客户端开发入口为 `apps/student-web`，Mac启动入口为 `启动网页版.command`，详见 [网页运行说明](docs/WEB_LOCAL_RUN.md)。后端、数据与质量要求共用；下文安卓安装/真机条目保留到封装阶段，不阻塞本轮网页联调。
+
 ## 先读什么
 
 1. [一期 App 规格](PHASE1.md) 与 [16 项一期任务](blueprint-v3/contracts/phase1-backlog.json)：这是当前最高优先范围和独立发布依据。
@@ -24,6 +26,7 @@
 | `blueprint-v3/contracts/openapi.reference.json` | 已实现参考接口快照 | 仅用于参考服务；完整生产接口按 06 文件冻结 |
 | `blueprint-v3/contracts/*example.json` | 纯合成契约样例 | 作为开发和演示资料，不作为真实学习效果证据 |
 | `apps/android/` | 安卓联网纠错工程源码 | 按内部 README 配置工具链并验证；开发 APK 已通过本机编译/测试/Lint，真机尚未验收 |
+| `apps/student-web/` | 当前优先学生网页端 | 同源 `/learn/`，复用 `/v1/` 与私有图片；后续App封装保持核心流程一致 |
 | `contracts/phase1/` | 一期 OpenAPI、状态与事件候选 | 32项业务契约；实际已实现范围见后端 README |
 | `services/backend/` | 设备配对、私有照片、作业/题目/作答版本、纠错接口与持久 Worker | 独立迁移与数据库；按内部 README 配置真实身份，不接受演示请求头 |
 | `services/backend/xueban_backend/providers/` | Ark五角色候选和独立向量组件 | 按用户指定统一DeepSeek，显式服务端配置；已接入持久任务和公开纠错端点，Mac 联调状态见验证记录 |

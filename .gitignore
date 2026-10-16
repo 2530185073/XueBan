@@ -6,6 +6,7 @@ __pycache__/
 .env.*
 !.env.example
 .DS_Store
+.playwright-mcp/
 
 # Local delivery snapshots and superseded discussion draft.
 /学伴研发启动包-*.zip

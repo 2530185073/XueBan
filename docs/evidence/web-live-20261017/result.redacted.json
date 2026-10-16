@@ -1,0 +1,209 @@
+{
+  "evidence_class": "synthetic_browser_integration_only",
+  "date": "2026-10-17",
+  "entry": "http://127.0.0.1:8000/learn/",
+  "homework_id": "homework_bb858dac8e3e4424919841d01a5603c1",
+  "fixture": "evals/correction/fixtures/ark-smoke",
+  "attempts": [
+    {
+      "id": "attempt_540038718ac646d583089d8362371841",
+      "parent_attempt_id": null,
+      "root_attempt_id": "attempt_540038718ac646d583089d8362371841",
+      "asset_ids": [
+        "asset_23463d2963974a5b8f899cefa5e9c943"
+      ],
+      "answer_text": "3x - 2",
+      "recognition_status": "ready",
+      "help_condition": "hint_used"
+    },
+    {
+      "id": "attempt_acd032d6ab0a44b482f21ebff82850f9",
+      "parent_attempt_id": "attempt_540038718ac646d583089d8362371841",
+      "root_attempt_id": "attempt_540038718ac646d583089d8362371841",
+      "asset_ids": [
+        "asset_5a39fdc3b5c84dcd93fc5daf5bde20f2"
+      ],
+      "answer_text": "3x - 6",
+      "recognition_status": "ready",
+      "help_condition": "hint_used"
+    }
+  ],
+  "hints": [
+    {
+      "id": "hint_4efc992b9d144b7db78560798f6fa875",
+      "attempt_id": "attempt_540038718ac646d583089d8362371841",
+      "level": "direction",
+      "content": "请检查括号内的每一项是否都参与了运算。",
+      "exposes_answer": false,
+      "validity": "stale",
+      "first_shown_at": "2026-10-16T18:11:09.412000Z"
+    }
+  ],
+  "decisions": [
+    {
+      "id": "decision_1dc503db9f654679ab893d38e993d6b2",
+      "input_versions": {
+        "question_id": "question_97a80b506e7e47f097171fd90c5e9fe5",
+        "question_revision": 1,
+        "attempt_id": "attempt_540038718ac646d583089d8362371841",
+        "attempt_recognition_revision": 1,
+        "case_revision_at_submission": 1,
+        "fingerprint": "a31d81195836647661de3a42105eb1726743445466d1b73e02318b4cbedd6179"
+      },
+      "verdict": "incorrect",
+      "validity": "stale",
+      "origin": "model"
+    },
+    {
+      "id": "decision_142423934e704d03a02129dbab0b0d88",
+      "input_versions": {
+        "question_id": "question_97a80b506e7e47f097171fd90c5e9fe5",
+        "question_revision": 1,
+        "attempt_id": "attempt_acd032d6ab0a44b482f21ebff82850f9",
+        "attempt_recognition_revision": 2,
+        "case_revision_at_submission": 7,
+        "fingerprint": "fedce0c8fad2a259e2074bafeba34a2ce1c10ed2daafb1c8bb07c2e3971a3318"
+      },
+      "verdict": "correct",
+      "validity": "candidate",
+      "origin": "model"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "job_75d11483e9144336ad604af43e68a295",
+      "kind": "recognize_homework",
+      "status": "succeeded",
+      "tries": 1,
+      "executions": [
+        {
+          "outcome": "succeeded",
+          "started_at": "2026-10-16T18:10:36.186594Z",
+          "finished_at": "2026-10-16T18:10:40.244419Z",
+          "prompt_version": "photo-correction.v6",
+          "metadata": {
+            "requested_model": "deepseek-v4-1-flash-260910",
+            "model": "deepseek-v4-1-flash-260910",
+            "request_id": "02179217423746615b33ccaa151d3ed7feaaa761bc71c37203a10",
+            "usage": {
+              "prompt_tokens": 2290,
+              "completion_tokens": 243,
+              "total_tokens": 2533,
+              "cached_tokens": 0,
+              "reasoning_tokens": 0
+            },
+            "latency_ms": 4042
+          }
+        }
+      ]
+    },
+    {
+      "id": "job_87662a3a9d8b4315b1275ffc3b42b75e",
+      "kind": "check",
+      "status": "succeeded",
+      "tries": 1,
+      "executions": [
+        {
+          "outcome": "succeeded",
+          "started_at": "2026-10-16T18:10:41.261052Z",
+          "finished_at": "2026-10-16T18:10:44.467865Z",
+          "prompt_version": "photo-correction.v6",
+          "metadata": {
+            "requested_model": "deepseek-v4-1-flash-260910",
+            "model": "deepseek-v4-1-flash-260910",
+            "request_id": "02179217424149215b33ccaa151d3ed7feaaa761bc71c372b0600",
+            "usage": {
+              "prompt_tokens": 2066,
+              "completion_tokens": 300,
+              "total_tokens": 2366,
+              "cached_tokens": 0,
+              "reasoning_tokens": 102
+            },
+            "latency_ms": 3190
+          }
+        }
+      ]
+    },
+    {
+      "id": "job_de70f7f27c124ffea6643cf694d3659e",
+      "kind": "hint",
+      "status": "succeeded",
+      "tries": 1,
+      "executions": [
+        {
+          "outcome": "succeeded",
+          "started_at": "2026-10-16T18:11:04.586243Z",
+          "finished_at": "2026-10-16T18:11:07.556097Z",
+          "prompt_version": "photo-correction.v6",
+          "metadata": {
+            "requested_model": "deepseek-v4-1-flash-260910",
+            "model": "deepseek-v4-1-flash-260910",
+            "request_id": "02179217426550396d528c8df2143421f3e331d7739c2b1dde6ac",
+            "usage": {
+              "prompt_tokens": 1300,
+              "completion_tokens": 81,
+              "total_tokens": 1381,
+              "cached_tokens": 0,
+              "reasoning_tokens": 0
+            },
+            "latency_ms": 2954
+          }
+        }
+      ]
+    },
+    {
+      "id": "job_cbce621a27e644c593c8d131eee435f3",
+      "kind": "recognize_attempt",
+      "status": "succeeded",
+      "tries": 1,
+      "executions": [
+        {
+          "outcome": "succeeded",
+          "started_at": "2026-10-16T18:13:11.894365Z",
+          "finished_at": "2026-10-16T18:13:15.957522Z",
+          "prompt_version": "photo-correction.v6",
+          "metadata": {
+            "requested_model": "deepseek-v4-1-flash-260910",
+            "model": "deepseek-v4-1-flash-260910",
+            "request_id": "02179217439284036582de0ab192f8b1710090b8a2fff5c74b9e0",
+            "usage": {
+              "prompt_tokens": 2294,
+              "completion_tokens": 263,
+              "total_tokens": 2557,
+              "cached_tokens": 0,
+              "reasoning_tokens": 0
+            },
+            "latency_ms": 4054
+          }
+        }
+      ]
+    },
+    {
+      "id": "job_77dbd26b11c0486da13d2078615eaefb",
+      "kind": "check",
+      "status": "succeeded",
+      "tries": 1,
+      "executions": [
+        {
+          "outcome": "succeeded",
+          "started_at": "2026-10-16T18:13:18.977442Z",
+          "finished_at": "2026-10-16T18:13:23.000583Z",
+          "prompt_version": "photo-correction.v6",
+          "metadata": {
+            "requested_model": "deepseek-v4-1-flash-260910",
+            "model": "deepseek-v4-1-flash-260910",
+            "request_id": "02179217439919836582de0ab192f8b1710090b8a2fff5cebd77f",
+            "usage": {
+              "prompt_tokens": 2448,
+              "completion_tokens": 482,
+              "total_tokens": 2930,
+              "cached_tokens": 0,
+              "reasoning_tokens": 334
+            },
+            "latency_ms": 4010
+          }
+        }
+      ]
+    }
+  ]
+}
