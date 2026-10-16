@@ -6,6 +6,7 @@ import { normalizePhoto } from './photo'
 import { valid } from './validation'
 import { bucketOfCase, countBuckets, firstUnresolved, isRetired, orderActiveCases, retiredCases } from './cases'
 import { ObjectUrls } from './objectUrls'
+import { isAgentContext, isKnowledgeDetail, isKnowledgeMap, isMemory, isMemoryList, isOptionalActivities, isPracticeAnswer, isPracticeHint, isPracticeSession, isPracticeSessionList, MEMORY_CONTENT_MAX, MEMORY_CONTENT_MIN, PRACTICE_ANSWER_MAX, type AgentContext, type ExitReason, type KnowledgeDetail, type KnowledgeMap, type Memory, type MemoryList, type OptionalActivities, type PracticeAnswer, type PracticeHint, type PracticeSession, type StartPractice, type StudentMemoryCategory } from './learning'
 
 export const remoteDraftId = (id: string) => `remote_${id}`
 const encoded = encodeURIComponent
@@ -506,5 +507,54 @@ export class StudentClient {
     }
     return this.write(ctx, id, `/v1/cases/${encoded(caseId)}/help-requests`, { expected_revision: row.case.revision, attempt_id: row.attempt.id, kind, note: content }, 'HelpRequest', 'CreateHelp')
   }
+  /**
+   * Later-phase learning endpoints under the same sign-in, student and
+   * account-loss checks as homework reads. The server does not deduplicate
+   * these writes by Idempotency-Key, so they are not journaled; callers
+   * re-read after an unknown outcome instead of replaying.
+   */
+  private async learning<T>(path: (student: string) => string, guard: (value: unknown) => value is T, body?: unknown): Promise<{ value: T; student: string }> {
+    const ctx = await this.authorize()
+    const value = await this.api.request<unknown>(path(encoded(ctx.student)), 'Learning', body === undefined ? undefined : JSON.stringify(body), body === undefined ? undefined : crypto.randomUUID())
+    this.check(ctx)
+    if (!guard(value)) throw new StudentError('invalid_response', 502)
+    return { value, student: ctx.student }
+  }
+  private owned<T extends { student_id: string }>(result: { value: T; student: string }): T { if (result.value.student_id !== result.student) throw new StudentError('access_denied', 403); return result.value }
+  async knowledgeMap(): Promise<KnowledgeMap> { return this.owned(await this.learning(s => `/v1/students/${s}/knowledge`, isKnowledgeMap)) }
+  async knowledgeNode(knowledgeId: string): Promise<KnowledgeDetail> { return (await this.learning(s => `/v1/students/${s}/knowledge/${encoded(knowledgeId)}`, isKnowledgeDetail)).value }
+  async agentContext(caseId: string): Promise<AgentContext> {
+    const { value } = await this.learning(() => `/v1/cases/${encoded(caseId)}/agent-context`, isAgentContext)
+    if (value.case_id !== caseId) throw new StudentError('invalid_response', 502)
+    return value
+  }
+  async memories(): Promise<MemoryList> { return this.owned(await this.learning(s => `/v1/students/${s}/memories`, isMemoryList)) }
+  async addMemory(category: StudentMemoryCategory, content: string): Promise<Memory> {
+    const trimmed = content.trim(), length = [...trimmed].length
+    if (length < MEMORY_CONTENT_MIN || length > MEMORY_CONTENT_MAX) throw new StudentError('memory_length', 422, `请写 ${MEMORY_CONTENT_MIN}–${MEMORY_CONTENT_MAX} 个字。`)
+    return (await this.learning(s => `/v1/students/${s}/memories`, isMemory, { category, content: trimmed })).value
+  }
+  async retractMemory(memoryId: string): Promise<Memory> { return (await this.learning(() => `/v1/memories/${encoded(memoryId)}/retract`, isMemory, {})).value }
+  async optionalActivities(): Promise<OptionalActivities> { return (await this.learning(s => `/v1/students/${s}/optional-activities`, isOptionalActivities)).value }
+  async startPractice(request: StartPractice): Promise<PracticeSession> { return this.owned(await this.learning(s => `/v1/students/${s}/practice-sessions`, isPracticeSession, request)) }
+  async practiceSession(sessionId: string): Promise<PracticeSession> { return this.owned(await this.learning(() => `/v1/practice-sessions/${encoded(sessionId)}`, isPracticeSession)) }
+  /** The student's unfinished activity, if any (e.g. after a reload or an unconfirmed start). */
+  async activePractice(): Promise<PracticeSession | null> {
+    const { value, student } = await this.learning(s => `/v1/students/${s}/practice-sessions`, isPracticeSessionList)
+    return value.items.find(item => item.student_id === student && item.status === 'active' && Date.parse(item.budget_ends_at) > Date.now()) ?? null
+  }
+  async answerPractice(sessionId: string, itemId: string, answer: string): Promise<PracticeAnswer> {
+    const trimmed = answer.trim()
+    if (!trimmed || [...trimmed].length > PRACTICE_ANSWER_MAX) throw new StudentError('answer_length', 422, `请写下答案（不超过 ${PRACTICE_ANSWER_MAX} 个字）。`)
+    const { value } = await this.learning(() => `/v1/practice-sessions/${encoded(sessionId)}/responses`, isPracticeAnswer, { item_id: itemId, answer_text: trimmed })
+    if (value.item_id !== itemId) throw new StudentError('invalid_response', 502)
+    return value
+  }
+  async practiceHint(sessionId: string, itemId: string): Promise<PracticeHint> {
+    const { value } = await this.learning(() => `/v1/practice-sessions/${encoded(sessionId)}/items/${encoded(itemId)}/hint`, isPracticeHint, {})
+    if (value.item_id !== itemId) throw new StudentError('invalid_response', 502)
+    return value
+  }
+  async exitPractice(sessionId: string, reason: ExitReason): Promise<PracticeSession> { return this.owned(await this.learning(() => `/v1/practice-sessions/${encoded(sessionId)}/exit`, isPracticeSession, { reason })) }
 }
 export const createStudentClient = (options: ClientOptions = {}) => new StudentClient(options)

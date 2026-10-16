@@ -2,6 +2,8 @@ import { StudentError } from './errors'
 import { valid } from './validation'
 
 const accountErrorStatus: Record<string, number> = { invalid_credentials: 401, login_rate_limited: 429, password_change_required: 403, username_conflict: 409 }
+// Codes of the later-phase learning endpoints that the phase-one Problem enum does not list.
+export const learningErrorStatus: Record<string, number> = { forbidden: 403, optional_gate_closed: 409, practice_not_needed: 409, course_unknown: 409, no_reviewed_items: 409, hints_disabled: 409 }
 
 export class StudentApi {
   constructor(readonly origin: string, private token: () => string | null, private revoked: () => void, private transport: typeof fetch = (...args) => globalThis.fetch(...args)) {}
@@ -24,7 +26,7 @@ export class StudentApi {
     catch { throw new StudentError('network_unknown') }
     if (!response.ok) {
       let code = `http_${response.status}`
-      try { const problem = JSON.parse(new TextDecoder().decode(await this.bounded(response))) as { code: string; status: number }; if (problem && problem.status === response.status && (valid('Problem', problem) || (path.startsWith('/v1/auth/') || path.startsWith('/v1/admin/')) && accountErrorStatus[problem.code] === response.status)) code = problem.code } catch { /* No provider/body text escapes to the UI. */ }
+      try { const problem = JSON.parse(new TextDecoder().decode(await this.bounded(response))) as { code: string; status: number }; if (problem && problem.status === response.status && (valid('Problem', problem) || (path.startsWith('/v1/auth/') || path.startsWith('/v1/admin/')) && accountErrorStatus[problem.code] === response.status || shape === 'Learning' && learningErrorStatus[problem.code] === response.status)) code = problem.code } catch { /* No provider/body text escapes to the UI. */ }
       // A mistyped current password does not revoke an otherwise valid session.
       if (response.status === 401 && !publicRequest && !(path === '/v1/auth/change-password' && code === 'invalid_credentials')) this.revoked()
       throw new StudentError(code, response.status)
@@ -39,8 +41,8 @@ export class StudentApi {
       if (!p || typeof p.username !== 'string' || !p.username || p.username.length > 64 || typeof p.must_change_password !== 'boolean' || !(p.student_id === null || typeof p.student_id === 'string' && !!p.student_id && p.student_id.length <= 200)) throw new StudentError('invalid_response', 502)
     } else if (shape === 'LoggedOut') {
       if (!value || (value as { logged_out?: unknown }).logged_out !== true) throw new StudentError('invalid_response', 502)
-    } else if (shape === 'AdminResponse') {
-      // Admin components validate their bounded, independently versioned DTOs.
+    } else if (shape === 'AdminResponse' || shape === 'Learning') {
+      // Admin components and core/learning.ts validate their bounded, independently versioned DTOs.
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new StudentError('invalid_response', 502)
     } else if (!valid(shape, value)) throw new StudentError('invalid_response', 502)
     return value as T

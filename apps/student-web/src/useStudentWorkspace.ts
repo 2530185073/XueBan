@@ -81,6 +81,8 @@ export function useStudentWorkspace() {
   return {
     client, account, identity, studentId, loading, busy, error, notice, drafts, history, cursor, draft, detail, hint, summaries, summaryFailed, recordVersion,
     clearError: () => setError(null),
+    /** Learning panels handle their own errors; one that signed the account out is shown like any other. */
+    report: (failure: unknown) => { if (!client.identity) fail(failure) },
     login: (username: string, password: string) => action('正在登录', async () => { clearWork(); await client.login(username, password); await sync(); await deviceNotice() }),
     changePassword: (currentPassword: string, newPassword: string) => action('正在保存新密码', async () => { await client.changePassword(currentPassword, newPassword); await sync(); setNotice('密码已更新，以后用新密码登录同一个作业本。') }),
     reconnect: () => action('正在恢复连接', async () => { await client.restore(); await sync(); await deviceNotice() }),
