@@ -66,13 +66,16 @@ def homework_json(row: Homework) -> dict:
 
 
 def accessible_students(actor: Actor):
-    query = select(Student).join(StudentGrant, and_(StudentGrant.student_id == Student.id, StudentGrant.tenant_id == Student.tenant_id)).where(
-        StudentGrant.principal_id == actor.id,
-        StudentGrant.active.is_(True),
-        Student.tenant_id == actor.tenant_id,
-        Student.active.is_(True),
-    )
-    return query.where(Student.id == actor.bound_student_id) if actor.bound_student_id else query
+    from .account_models import PrincipalCampusGrant
+    granted = select(StudentGrant.student_id).where(StudentGrant.principal_id == actor.id, StudentGrant.active.is_(True), StudentGrant.tenant_id == actor.tenant_id)
+    if actor.bound_student_id:
+        return select(Student).where(Student.id == actor.bound_student_id, Student.id.in_(granted), Student.tenant_id == actor.tenant_id, Student.active.is_(True))
+    conditions = [Student.id.in_(granted)]
+    if set(actor.roles) & {"sitting_teacher", "campus_admin"}:
+        # Staff serve every learner of a campus they are explicitly granted.
+        campuses = select(PrincipalCampusGrant.campus_id).where(PrincipalCampusGrant.principal_id == actor.id, PrincipalCampusGrant.tenant_id == actor.tenant_id, PrincipalCampusGrant.active.is_(True))
+        conditions.append(Student.campus_id.in_(campuses))
+    return select(Student).where(or_(*conditions), Student.tenant_id == actor.tenant_id, Student.active.is_(True))
 
 
 def require_student(session: Session, actor: Actor, student_id: str) -> Student:
@@ -264,6 +267,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     install_correction(app, engine, cfg, database_session, current_actor)
     from .governance import install_governance
     install_governance(app, engine, cfg, database_session, current_actor)
+    from .staff import install_staff
+    install_staff(app, engine, cfg, database_session, current_actor)
     from .student_web import install_student_web
     install_student_web(app, cfg.student_web_dist)
     return app

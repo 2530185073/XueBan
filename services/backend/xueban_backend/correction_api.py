@@ -451,5 +451,7 @@ def install_correction(app, engine, cfg, database_session, current_actor):
         ("/v1/checks/{check_id}", "getCheck", "check", "CheckRun", False),
         ("/v1/decisions/{decision_id}", "getDecision", "decision", "DecisionRead", True),
         ("/v1/hints/{hint_id}", "getHint", "hint", "Hint", False),
+        ("/v1/help-requests/{help_id}", "getHelpRequest", "help", "HelpRequest", False),
+        ("/v1/reviews/{review_id}", "getReview", "review", "Review", False),
     ]:
         read(*args)

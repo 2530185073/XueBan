@@ -1,0 +1,87 @@
+"""Campus teacher accounts, campus-wide access and the verification queue."""
+from dataclasses import replace
+
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
+from xueban_backend.account_auth import grant_campus, set_password_account
+from xueban_backend.account_models import PrincipalCampusGrant
+from xueban_backend.app import create_app
+from xueban_backend.models import Principal, PrincipalRole
+
+from test_correction_flow import flow  # noqa: F401  (pytest fixture reuse)
+
+ADMIN_PASSWORD = "synthetic-admin-password-1"
+STAFF_PASSWORD = "synthetic-teacher-password-1"
+
+
+def keyed(value):
+    return {"Idempotency-Key": value}
+
+
+def staff_setup(flow, tmp_path):
+    from cryptography.hazmat.primitives import serialization
+    key_path = tmp_path / "session-signing.pem"
+    key_path.write_bytes(flow.signing.private.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+    key_path.chmod(0o600)
+    cfg = replace(flow.cfg, signing_private_key_file=str(key_path))
+    with Session(flow.database.engine) as session:
+        session.add(Principal(id="admin_a", tenant_id="tenant_a", issuer=cfg.oidc_issuer, subject="admin-a", active=True))
+        session.flush()
+        session.add(PrincipalRole(principal_id="admin_a", role="campus_admin"))
+        session.flush()
+        grant_campus(session, "admin_a", "campus_a")
+        set_password_account(session, cfg, principal_id="admin_a", username_value="campus.admin", password_value=ADMIN_PASSWORD, must_change=False)
+        session.commit()
+    client = TestClient(create_app(cfg))
+    login = client.post("/v1/auth/login", json={"username": "campus.admin", "password": ADMIN_PASSWORD}, headers=keyed("login-admin-1"))
+    assert login.status_code == 200, login.text
+    return cfg, client, {"Authorization": "Bearer " + login.json()["access_token"]}
+
+
+def test_admin_creates_campus_teacher_who_sees_queue(flow, tmp_path):
+    case = flow.ready()
+    flow.start_check(case)
+    assert flow.worker.run_once()
+    cfg, client, admin = staff_setup(flow, tmp_path)
+
+    bad = client.post("/v1/admin/staff-accounts", json={"username": "teacher.x", "display_name": "合成老师", "campus_ids": ["campus_b"], "roles": ["sitting_teacher"], "initial_password": STAFF_PASSWORD}, headers={**admin, **keyed("staff-create-0")})
+    assert bad.status_code == 403
+    created = client.post("/v1/admin/staff-accounts", json={"username": "teacher.a", "display_name": "合成老师", "campus_ids": ["campus_a"], "roles": ["sitting_teacher"], "initial_password": STAFF_PASSWORD}, headers={**admin, **keyed("staff-create-1")})
+    assert created.status_code == 201, created.text
+    assert created.json()["roles"] == ["sitting_teacher"] and created.json()["must_change_password"]
+    listed = client.get("/v1/admin/staff-accounts", headers=admin).json()
+    assert [item["username"] for item in listed["items"]] == ["teacher.a"]
+
+    login = client.post("/v1/auth/login", json={"username": "teacher.a", "password": STAFF_PASSWORD}, headers=keyed("login-teacher-1")).json()
+    token = {"Authorization": "Bearer " + login["access_token"]}
+    assert client.get("/v1/review-queue", headers=token).status_code == 403
+    changed = client.post("/v1/auth/change-password", json={"current_password": STAFF_PASSWORD, "new_password": STAFF_PASSWORD + "-new"}, headers={**token, **keyed("teacher-change-1")})
+    assert changed.status_code == 200, changed.text
+    token = {"Authorization": "Bearer " + changed.json()["access_token"]}
+
+    # Campus grant reaches the learner without a per-learner grant.
+    queue = client.get("/v1/review-queue", headers=token).json()
+    assert [item["case_id"] for item in queue["items"]] == [case["id"]]
+    assert queue["items"][0]["reason"] == "verify_candidate"
+    assert queue["items"][0]["student_name"] == "合成学生甲"
+    assert client.get(f"/v1/cases/{case['id']}", headers=token).status_code == 200
+    assert client.get("/v1/students/student_b/homeworks", headers=token).status_code == 404
+
+    # Revoking the campus grant removes access at once.
+    with Session(flow.database.engine) as session:
+        grant = session.get(PrincipalCampusGrant, (created.json()["principal_id"], "campus_a"))
+        grant.active = False
+        session.commit()
+    assert client.get(f"/v1/cases/{case['id']}", headers=token).status_code == 404
+    client.close()
+
+
+def test_student_reads_own_help_and_review_records(flow):
+    case = flow.ready()
+    response = flow.post(f"/v1/cases/{case['id']}/help-requests", {"expected_revision": case["revision"], "attempt_id": case["current_attempt_id"], "kind": "appeal", "note": "我觉得这题判错了"})
+    assert response.status_code == 201, response.text
+    help_id = response.json()["id"]
+    read = flow.client.get(f"/v1/help-requests/{help_id}")
+    assert read.status_code == 200 and read.json()["kind"] == "appeal" and read.json()["status"] == "waiting"
+    assert flow.client.get("/v1/reviews/review_" + "0" * 32).status_code == 404
