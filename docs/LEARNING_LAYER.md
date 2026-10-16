@@ -59,7 +59,13 @@
 
 实现直接使用标准库与既有依赖（`zoneinfo`、`fractions`、`secrets`、SQLAlchemy、Alembic、FastAPI），没有引入新的运行时依赖。
 
+## 界面
+
+- 坐班工作台（`apps/staff-web`）：知识点映射确认队列；题目工作台内的作答帮助情况与题目知识点；学员画像（四档状态、章节计数、证据与诊断、学习档案）；学伴记忆与 AI 摘要；半月报告（编辑、发布、更正、分享链接）；题库审核与今日选做窗口。
+- 学生网页（`apps/student-web`）：我的知识地图（有数据才出现入口，不显示百分比或排名）；题目详情中的“学伴记得”；我的偏好与目标；选做活动（门禁卡片、举一反三、预习与小测、随时结束且不记欠账）。
+- 学情接口的记忆、诊断、选做开始与作答接受可选 `Idempotency-Key`，同键同载荷重放原响应、不同载荷 409；分享链接因令牌只存摘要而不重放。选做记录进入投影指纹，因此参加或退出活动后报告草稿随后刷新，发布前会先提示“正在汇总”。
+
 ## 验证与待现场完成
 
-- 自动化：`tests/test_learning_rules.py`、`test_learning.py`、`test_agent_memory.py`、`test_learning_reports.py`、`test_practice.py`、`test_c0_acceptance.py`，SQLite 与 PostgreSQL 双库运行。
+- 自动化：`tests/test_learning_rules.py`、`test_learning.py`、`test_agent_memory.py`、`test_learning_reports.py`、`test_practice.py`、`test_c0_acceptance.py`，SQLite 与 PostgreSQL 双库运行；两个前端各有学情接口校验、规则与组件测试。
 - 待现场：课程图谱教研审核；真实学生数据下的映射工作量与记忆有用性；家长对报告的理解度访谈；题库首批审核题目；额外活动门禁在托管现场的操作负担。这些不能由自动化测试替代。
