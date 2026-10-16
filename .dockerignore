@@ -1,0 +1,14 @@
+.git
+**/node_modules
+**/dist
+**/.venv
+**/__pycache__
+**/.pytest_cache
+infra/secrets
+infra/backups
+infra/*.env
+!infra/*.env.example
+android
+docs
+prototype
+evals/correction/outputs

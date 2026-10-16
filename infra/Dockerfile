@@ -5,6 +5,7 @@
 FROM node:24-bookworm-slim AS student-web
 WORKDIR /src/apps/student-web
 COPY contracts /src/contracts
+COPY apps/staff-web/src/api/contracts.generated.ts /src/apps/staff-web/src/api/contracts.generated.ts
 COPY apps/student-web/package.json apps/student-web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY apps/student-web ./
