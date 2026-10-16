@@ -30,12 +30,12 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Prepare Android SDK
         run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"'
-      - name: Compile and lint development capture app
-        run: ./gradlew --no-daemon --stacktrace :app:assembleDebug :app:lintDebug
+      - name: Compile, test and lint network correction app
+        run: ./gradlew --no-daemon --stacktrace :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
       - name: Save development APK
         uses: actions/upload-artifact@v4
         with:
-          name: xueban-local-capture-dev
+          name: xueban-network-dev
           path: apps/android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14

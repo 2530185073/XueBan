@@ -1,6 +1,6 @@
 # 服务端 Ark 候选适配器
 
-本包是同步 Worker 调用组件，尚未接入任何公开 API、作业状态机或数据落库。导入不启用模型；无凭据或无明确 base URL 时拒绝调用。部署端负责注入已核实的服务域名与凭据，不从学生客户端接受这些配置。
+本包提供同步 Worker 调用组件；公开 API、授权、作业状态机和数据落库由后端 Worker 负责。导入不启用模型；无凭据或无明确 base URL 时拒绝调用。部署端负责注入已核实的服务域名与凭据，不从学生客户端接受这些配置。
 
 ```python
 from xueban_backend.providers import ArkClient, ArkSettings
@@ -39,6 +39,54 @@ with ArkClient(ArkSettings(base_url=verified_base_url, api_key=server_api_key)) 
 `ProviderError` 只携带固定安全错误码与经过筛选的尝试元数据，不包含请求、响应正文、密钥或原始异常消息。本包不记录日志；调用者不能把输入、`data`、配置对象展开后的密钥或完整异常局部变量写入日志。`repr` 隐藏配置中的 URL/密钥与候选正文。
 
 离线验证：`python -m pytest services/backend/tests/test_providers.py -q`。测试全部使用 `httpx.MockTransport` 与合成图片/凭据，不读取部署密钥、不访问 API、不证明真实照片识别质量或生产费用。
+
+## 纯模型照片纠错流水线
+
+`correction_pipeline.py` 复用上述 Ark 适配器，当前不调用腾讯或百度 OCR。四个方法均使用同一服务端配置的模型，默认 `deepseek-v4-1-flash-260910`；不同角色调用不构成独立模型验证。
+
+```python
+from xueban_backend.providers.correction_pipeline import CorrectionPipeline, PipelineImage
+
+# image_data_url 和尺寸由 Worker 从已授权且完成解码校验的原始资产取得。
+image = PipelineImage("asset_example", image_data_url, width_px, height_px)
+with CorrectionPipeline.from_env() as pipeline:
+    recognition = pipeline.recognize(images=(image,))
+    # Worker 保存每空候选、生成数据库 ID/版本，并提交不可变快照后再调用：
+    # pipeline.check(images=(image,), question=question, attempt=attempt, input_versions=versions)
+    # pipeline.hint(..., decision=decision, level="direction")
+    # pipeline.recheck(images=(original_image, corrected_image), ...)
+```
+
+`from_env()` 只读取 `ARK_BASE_URL`、`ARK_API_KEY`、`ARK_MODEL` 环境变量，不查找或打开 `.env` 文件；未配置前两项时保持禁用。默认最多一次付费尝试、单 I/O 60 秒、总调用预算 90 秒；Worker 也可注入自行配置的 `ArkClient`。识别最多输出 80 个独立空位，识别输出预算 8192，其余角色 4096。整页逐题调用的总次数、总费用与任务期限由 Worker 控制；单次限制不是整页预算。
+
+稳定接口：
+
+| 方法 | 输入 | `PipelineResult.data` |
+|---|---|---|
+| `recognize(*, images)` | 1–4 个 `PipelineImage(asset_id, data_url, width_px, height_px)` | `items` 每题／每空一项；`coverage` 保留漏识别与范围未知 |
+| `check(*, images, question, attempt, input_versions)` | 已保存题目和当前作答快照，以及契约 `InputVersions` | `Decision` 的业务字段与内部 `readback`、`uncertainties`；不生成记录 ID／时间 |
+| `recheck(...)` | 与 check 相同；图片必须包含题干资产和本次作答资产 | 只检查当前作答，不接收旧判定或旧提示作为依据 |
+| `hint(*, images, question, attempt, input_versions, decision, level)` | 同一内容版本的来源判定；层级 `direction/key_step/staff_handoff` | 受控提示内容、来源判定 ID／版本、是否需要坐班帮助，不含标准答案 |
+
+`PipelineResult.status` 恒为 `candidate`，另有 `prompt_version` 和 Ark `metadata`。`metadata.model` 为上游返回型号，可为 null；`requested_model` 为请求型号；`attempts` 保存尝试和费用未知状态。本地安全提示回退不调用模型，`attempts=()`、`model=None`，不能当成一次模型成功。
+
+自 `photo-correction.v3` 起，固定任务规则通过 `ArkClient.generate(instructions=...)` 放入 system；该参数仅接受服务端代码定义的规则，不能传入图片文字、学生输入或客户端策略。图片与候选快照只出现在 user JSON 的 `images/task_input`。候选 `correct/incorrect` 合法，禁止的是自行 `confirmed`。`uncertainties` 只容纳影响识别、题目对应或数学结论的实质歧义；印刷/合成属性或无法确认身份不是拒判理由。没有非必需步骤时仍可核验终答，明确要求的证明缺失则保留不确定。若模型仍违规返回无关 uncertainties，代码继续降级并保留原文，不通过后处理删除警告放行。旧版调用与审计保留，提示词改动的真实效果须重新实测。
+
+当前版本 `photo-correction.v4` 明确再检只读取 `attempt_asset_ids` 对应的当前作答，旧答案与新答案不同本身不是冲突。当前图自身的涂改、多个作答或错题对应歧义仍保留。识别字段只移除明确的 `Question:`／`Student answer:` 等字段前缀；`normalize_field_for_comparison(value, field_name)` 让 Worker 题干匹配和 readback 比较共用同一保守规则。它不删除数字题号、不做模糊匹配、不合并数字间隔、不消除指数、括号或负号；readback 原文保留供审计。
+
+`question` 至少含 `question_id/revision/stem_text/regions`，`label` 可选；`attempt` 至少含 `id/question_id/captured_question_revision/recognition_revision/answer_text/answer_regions/recognition_status/asset_ids`。`answer_status` 可显式为 `present/blank/unclear`；省略时非空文字按 present、null 按 unclear，不能把未识别当空白。`input_versions` 使用完整契约字段。来源内容版本必须一致；仅 `case_revision_at_submission` 改变不会使提示失效。Worker 仍须在调用前授权并在落库／展示前再次校验当前版本、作答指针和来源有效性；此组件不能查询数据库完成这些检查。
+
+识别项包含 `label/asset_id/stem_text/answer_text/answer_status/regions/answer_regions/uncertainties`，并由代码补充 `recognition_status=ready|needs_revision`、`location_status=located|unknown`。原始笔迹与题干分开；空白、看不清、涂改分别记录，不用标准解法补笔迹。没有像素框时保留空数组，不能造全页框。契约 `CapturedQuestionRevision.regions` 要求至少一个真实框，因此 Worker 应先保留未定位识别候选，待核实后才能建立该记录。`coverage` 仅为 partial／unknown，模型不负责声明整页无漏题；空 items 也不表示整页正确。
+
+区域严格使用对应资产的 `original_pixels`，拒绝未知资产、负数、零尺寸、越界、把旧作答图位置用于新作答等情况。图片尺寸必须与实际发送的图像像素一致；旋转或缩放需要由上游维护资产版本与坐标关系。边界校验只能证明框在图内，不能证明模型框到了正确题目。
+
+检查和再检必须同时读取原图与识别候选，返回独立 `readback`。只做保守字符规范化，不把上标消成普通数字、不删去内部数字间隔、不做数学等价转换；读回的题干／答案不一致、字迹不确定或识别未就绪时，结果强制为 `unable_to_judge`、`validity=needs_review`。否则也只得到候选；`origin=model`、确认字段恒为 null，依据类型为 `model_hypothesis`。`readback` 和 `uncertainties` 是内部审计扩展，不能原样塞入禁止额外字段的公共 Decision；由 Worker 分开保存。模型摘要也不应直接展示为给孩子的答案或长篇解释。
+
+提示不依赖模型自报“没有泄露答案”。模型只能选择符号、分数、分配律、单位、代入等有限提示类型和可选关注区域，服务端用固定模板形成学生可见内容。自由文本、标准答案字段被 Schema 拒绝；不确定则转为坐班核实。正确候选的提示请求只返回读题自检，不人为制造教师任务。这个版本的提示表达能力受模板限制，后续扩充模板需单独评测。
+
+技术故障通过 `ProviderError` 抛出，不伪装成无法判断或空识别；截断、429、超时、结构不合法和后处理发现的越界均保留可得调用记录／用量。代码不会生成 confirmed、掌握度、图谱更新或订正完成状态。
+
+流水线离线验证：`python -m pytest services/backend/tests/test_correction_pipeline.py services/backend/tests/test_providers.py -q`。全部为合成图片与 MockTransport，覆盖逐空拆项、看不清、漏定位、负号／上标／字母歧义、版本与新作答绑定、提示泄露防护、越界和技术失败。它们证明协议与代码约束，不证明照片识别、定位或数学判断的真实质量。真实调用与授权学生样本评测由集成流程另行执行。
 
 ## 同平台知识资料向量
 

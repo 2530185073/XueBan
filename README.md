@@ -6,7 +6,7 @@
 
 **先把学校作业检查准确、帮助孩子自己改明白，再让纠错证据进入个人图谱和家长报告。** 首个交付关口是照片识别、错误定位、分层提示、孩子订正和重新检查，详见 [纠错核心规格](blueprint-v3/10-纠错核心流程与首发验收.md)。
 
-技术团队接手请先阅读 [开发交接说明](DEVELOPMENT.md)。当前交付包括产品蓝图、参考内核、安卓本地采集工程、一期契约、后端身份/作业服务、坐班工作台、离线评测，以及Ark五角色与向量适配器。指定DeepSeek的合成图片流程和同平台向量已真实调用通过，见 [实测记录](docs/evidence/ark-20261016/README.md)。各模块的验证及未接通部分见 [验证记录](VALIDATION.md)，尚未完成安卓真实照片纠错全流程。
+技术团队接手请先阅读 [开发交接说明](DEVELOPMENT.md)。当前实现已推进到 **Android 0.2.0 联网开发版**：设备配对、照片上传、纯模型识别与检查、分层提示、新订正和再检，配套 PostgreSQL、持久 Worker 和历史证据。Mac 已配置本地运行环境与安卓平板模拟器，入口为 [Mac 本地体验说明](docs/MAC_LOCAL_RUN.md)；实际通过的检查和剩余边界见 [验证记录](VALIDATION.md)。这仍是开发联调版，尚未完成正式手写质量、真机与现场验收。
 
 ## 阅读和开发入口
 
@@ -14,11 +14,11 @@
 |---|---|
 | [一期 App](PHASE1.md) / [一期 16 项任务](blueprint-v3/contracts/phase1-backlog.json) | 当期最高优先范围、完整流程、数据要求与 C0/R1/R2 发布门槛 |
 | [安卓一期实施框架](ANDROID_PHASE1.md) | 六个学生页面、坐班工作台、技术架构、数据/API 边界、AI Agent 交付波次与现场容量 |
-| [外部 AI 接口清单](MODEL_SERVICE_PLAN.md) | 当前模型/OCR名称、采购权限、强模型分工、图谱抽取及评测路线 |
+| [外部 AI 接口清单](MODEL_SERVICE_PLAN.md) | 当前模型名称、二三期 OCR 备选、采购权限、强模型分工、图谱抽取及评测路线 |
 | [Agent 执行计划](AI_AGENT_EXECUTION.md) / [任务看板](blueprint-v3/contracts/agent-workboard.json) | 已派发工作、后续任务、并发分工与验收边界 |
 | [教材资源核验](CURRICULUM_RESOURCES.md) | 初中人教资源、版本证据、可用范围和缺口 |
-| [安卓工程](apps/android/README.md) / [一期契约](contracts/phase1/README.md) | 本地采集源码与接口候选；构建及服务实现状态分别记录 |
-| [后端基础服务](services/backend/README.md) / [坐班工作台](apps/staff-web/README.md) | 真实 JWT 验证、作业持久化；工作台的契约客户端与显式合成预览 |
+| [安卓工程](apps/android/README.md) / [一期契约](contracts/phase1/README.md) | 联网纠错源码与接口契约；构建和实调状态分别记录 |
+| [后端基础服务](services/backend/README.md) / [坐班工作台](apps/staff-web/README.md) | 设备配对、私有上传、纠错任务与历史；工作台的契约客户端与显式合成预览 |
 | [纠错评测工具](evals/correction/README.md) | 漏题/失败保留分母、模型与人工分列、同题分组隔离、时延及成本 |
 | [00 产品总纲](blueprint-v3/00-产品总纲与开发入口.md) | 定位、核心价值、完整产品边界与已交付内容 |
 | [01 市场研究与竞争优势](blueprint-v3/01-市场研究与竞争优势.md) | 六个可比案例、研究证据、优势和服务组合 |

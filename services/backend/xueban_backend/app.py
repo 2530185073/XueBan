@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from .auth import Actor, TokenVerifier
 from .config import Settings
@@ -45,6 +45,9 @@ def parse_time(value: str) -> datetime:
 
 
 def homework_json(row: Homework) -> dict:
+    from .correction_models import Asset, Entity, Task
+    session = object_session(row)
+    entities = session.scalars(select(Entity).where(Entity.homework_id == row.id).order_by(Entity.id)).all() if session else []
     return {
         "id": row.id,
         "revision": row.revision,
@@ -53,11 +56,11 @@ def homework_json(row: Homework) -> dict:
         "title": row.title,
         "created_at": utc_string(row.created_at),
         "occurred_at": utc_string(row.occurred_at),
-        "coverage": {"collection_scope": row.collection_scope, "unrecognized_regions": [], "note": None},
-        "asset_ids": [],
-        "question_ids": [],
-        "case_ids": [],
-        "job_ids": [],
+        "coverage": row.coverage_json or {"collection_scope": row.collection_scope, "unrecognized_regions": [], "note": None},
+        "asset_ids": list(session.scalars(select(Asset.id).where(Asset.homework_id == row.id).order_by(Asset.id))) if session else [],
+        "question_ids": [entity.id for entity in entities if entity.kind == "question"],
+        "case_ids": [entity.id for entity in entities if entity.kind == "case"],
+        "job_ids": list(session.scalars(select(Task.id).where(Task.homework_id == row.id).order_by(Task.id))) if session else [],
         "processing_blocked": row.processing_blocked,
     }
 
@@ -93,7 +96,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         yield
         engine.dispose()
 
-    app = FastAPI(title="XueBan backend foundation", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="XueBan photo correction service", version="0.2.0", lifespan=lifespan)
     app.state.engine = engine
     app.state.settings = cfg
     app.state.verifier = verifier
@@ -102,8 +105,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             CORSMiddleware,
             allow_origins=list(cfg.cors_allowed_origins),
             allow_credentials=False,
-            allow_methods=["GET", "POST"],
-            allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
+            allow_methods=["GET", "POST", "PUT"],
+            allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-Upload-Token"],
             expose_headers=["X-Request-Id"],
         )
 
@@ -252,4 +255,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             next_cursor = base64.urlsafe_b64encode(json.dumps({"student_id": student_id, "created_at": utc_string(last.created_at), "id": last.id}, separators=(",", ":")).encode()).decode().rstrip("=")
         return checked("HomeworkPage", {"items": [homework_json(row) for row in rows[:limit]], "next_cursor": next_cursor})
 
+    from .device_auth import install_device_auth
+    from .correction_api import install_correction
+    install_device_auth(app, engine, cfg)
+    install_correction(app, engine, cfg, database_session, current_actor)
     return app

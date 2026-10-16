@@ -80,6 +80,7 @@ class Homework(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     processing_blocked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    coverage_json: Mapped[dict | None] = mapped_column(JSON)
 
 
 class IdempotencyRecord(Base):

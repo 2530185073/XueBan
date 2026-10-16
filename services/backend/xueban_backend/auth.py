@@ -28,7 +28,7 @@ class TokenVerifier:
             else None
         )
 
-    def subject(self, token: str | None) -> str:
+    def _claims(self, token: str | None) -> dict:
         cfg = self.settings
         if not cfg.auth_configured:
             raise Problem(503, "service", "service_unavailable", "真实身份验证尚未配置，当前拒绝访问。")
@@ -51,7 +51,7 @@ class TokenVerifier:
             subject = claims["sub"]
             if not isinstance(subject, str) or not 1 <= len(subject) <= 255:
                 raise InvalidTokenError("Invalid subject")
-            return subject
+            return claims
         except PyJWKClientConnectionError:
             raise Problem(503, "service", "service_unavailable", "身份密钥服务暂不可用。") from None
         except (InvalidTokenError, PyJWKClientError):
@@ -59,11 +59,25 @@ class TokenVerifier:
         except (OSError, ValueError, PyJWTError):
             raise Problem(503, "service", "service_unavailable", "身份验证配置不可用。") from None
 
+    def subject(self, token: str | None) -> str:
+        return self._claims(token)["sub"]
+
     def actor(self, token: str | None, session: Session) -> Actor:
-        subject = self.subject(token)
+        claims = self._claims(token)
+        subject = claims["sub"]
         principal = session.scalar(select(Principal).where(Principal.issuer == self.settings.oidc_issuer, Principal.subject == subject, Principal.active.is_(True)))
         if principal is None:
             raise Problem(403, "authorization", "access_denied", "该身份尚未获得项目授权或授权已撤回。")
+        if "device_session_id" in claims:
+            from datetime import datetime, timezone
+            from .device_models import DeviceSession
+            session_id = claims["device_session_id"]
+            device = session.get(DeviceSession, session_id) if isinstance(session_id, str) and len(session_id) <= 64 else None
+            expires = device.expires_at if device is not None else None
+            if expires is not None and expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+            if device is None or device.principal_id != principal.id or device.revoked or expires <= datetime.now(timezone.utc):
+                raise Problem(401, "authorization", "authentication_required", "设备授权已过期或撤回，请重新配对。")
         roles = tuple(session.scalars(select(PrincipalRole.role).where(PrincipalRole.principal_id == principal.id).order_by(PrincipalRole.role)))
         if not set(roles).intersection({"student", "sitting_teacher", "campus_admin"}):
             raise Problem(403, "authorization", "access_denied", "该身份没有此接口权限。")

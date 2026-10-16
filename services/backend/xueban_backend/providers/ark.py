@@ -257,7 +257,13 @@ class ArkClient:
     def __exit__(self, *_):
         self.close()
 
-    def generate(self, *, role: Role | str, text: str, output_schema: dict[str, Any], images: tuple[str, ...] = (), thinking: bool | None = None, max_tokens: int | None = None) -> CandidateResult:
+    def generate(self, *, role: Role | str, text: str, output_schema: dict[str, Any], images: tuple[str, ...] = (), thinking: bool | None = None, max_tokens: int | None = None, instructions: str | None = None) -> CandidateResult:
+        """Generate a candidate; instructions must be server-owned task policy.
+
+        Never pass student text, image transcription or client-provided policy
+        as instructions. Those belong exclusively to text/images (user data).
+        The optional default preserves existing callers.
+        """
         started = time.monotonic()
         deadline = started + self.settings.total_timeout_seconds
         if not self.settings.enabled:
@@ -270,21 +276,29 @@ class ArkClient:
             raise ProviderError("invalid_role") from None
         if not isinstance(text, str) or not text.strip() or len(text) > 65_536 or not isinstance(images, (list, tuple)):
             raise ProviderError("invalid_input")
+        if instructions is not None and (not isinstance(instructions, str) or not instructions.strip() or len(instructions) > 16_000):
+            raise ProviderError("invalid_input")
         thinking = self.settings.thinking if thinking is None else thinking
         max_tokens = self.settings.max_tokens if max_tokens is None else max_tokens
         if type(thinking) is not bool or type(max_tokens) is not int or not 1 <= max_tokens <= 8192:
             raise ProviderError("invalid_input")
         try:
             text.encode("utf-8")
+            if instructions is not None:
+                instructions.encode("utf-8")
         except UnicodeError:
             raise ProviderError("invalid_input") from None
         validator = _validator(output_schema)
         image_parts = _images(images)
         content = [{"type": "text", "text": text}, *image_parts] if image_parts else text
+        system = COMMON_PROMPT + "\n角色任务：\n" + ROLE_PROMPTS[role]
+        if instructions is not None:
+            system += "\n服务端可信任务指令：\n" + instructions
+        system += "\nJSON Schema:\n" + json.dumps(output_schema, ensure_ascii=False, allow_nan=False)
         body = {
             "model": self.settings.model,
             "messages": [
-                {"role": "system", "content": COMMON_PROMPT + ROLE_PROMPTS[role] + "\nJSON Schema:\n" + json.dumps(output_schema, ensure_ascii=False, allow_nan=False)},
+                {"role": "system", "content": system},
                 {"role": "user", "content": content},
             ],
             "stream": False,

@@ -11,6 +11,12 @@ class Settings:
     oidc_audience: str = ""
     oidc_jwks_url: str = ""
     jwt_public_key_file: str = ""
+    signing_private_key_file: str = ""
+    device_session_ttl_seconds: int = 28800
+    asset_storage_dir: Path | None = None
+    public_base_url: str = ""
+    upload_ticket_ttl_seconds: int = 900
+    worker_lease_seconds: int = 300
     allow_sqlite_for_tests: bool = False
     cors_allowed_origins: tuple[str, ...] = ()
     contracts_dir: Path = Path(__file__).resolve().parents[3] / "contracts" / "phase1"
@@ -26,6 +32,12 @@ class Settings:
             "oidc_audience": os.environ.get("OIDC_AUDIENCE", ""),
             "oidc_jwks_url": os.environ.get("OIDC_JWKS_URL", ""),
             "jwt_public_key_file": os.environ.get("JWT_PUBLIC_KEY_FILE", ""),
+            "signing_private_key_file": os.environ.get("SIGNING_PRIVATE_KEY_FILE", ""),
+            "device_session_ttl_seconds": int(os.environ.get("DEVICE_SESSION_TTL_SECONDS", "28800")),
+            "asset_storage_dir": Path(os.environ["ASSET_STORAGE_DIR"]) if os.environ.get("ASSET_STORAGE_DIR") else None,
+            "public_base_url": os.environ.get("PUBLIC_BASE_URL", ""),
+            "upload_ticket_ttl_seconds": int(os.environ.get("UPLOAD_TICKET_TTL_SECONDS", "900")),
+            "worker_lease_seconds": int(os.environ.get("WORKER_LEASE_SECONDS", "300")),
             "allow_sqlite_for_tests": os.environ.get("ALLOW_SQLITE_FOR_TESTS") == "1",
             "cors_allowed_origins": tuple(value.strip() for value in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if value.strip()),
         }

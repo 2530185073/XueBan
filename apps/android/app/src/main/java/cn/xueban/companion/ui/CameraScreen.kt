@@ -37,7 +37,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import cn.xueban.companion.BuildConfig
 import cn.xueban.companion.CaptureViewModel
 
 @Composable
@@ -49,6 +48,9 @@ fun CameraScreen(model: CaptureViewModel, onSaved: (String) -> Unit) {
     var saving by remember { mutableStateOf(false) }
     var savedId by rememberSaveable { mutableStateOf<String?>(null) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) { saving = true; model.importPhoto(uri) { capture -> savedId = capture?.id; saving = false } }
+    }
     val saved = model.captures.firstOrNull { it.id == savedId }
 
     DisposableEffect(lifecycleOwner) {
@@ -64,13 +66,12 @@ fun CameraScreen(model: CaptureViewModel, onSaved: (String) -> Unit) {
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("拍照与预览")
-        Text("只采集已获准使用的开发样张。当前没有学生身份，不会上传或批改。")
-        if (!BuildConfig.DEBUG) {
-            Text("正式身份授权尚未接入，此版本不开放采集。请使用 debug 开发构建。")
-        } else if (saved != null) {
+        Text(if (model.isCorrectionCapture) "请拍同一道题的题干和新的作答，保留题目完整内容。" else "拍清题目和自己的作答，检查一下有没有反光或缺角。")
+        OutlinedButton(enabled = !saving, onClick = { picker.launch(arrayOf("image/jpeg", "image/png")) }) { Text("从相册选择") }
+        if (saved != null) {
             LocalPhoto(saved.file, Modifier.fillMaxWidth().heightIn(min = 240.dp, max = 480.dp))
-            Text("照片已保存到本机私有草稿。检查、旋转编辑与裁切待接入。")
-            Button(onClick = { onSaved(saved.id) }) { Text("查看当前状态") }
+            Text("照片已保留。确认题目和作答都清楚后，开始检查。")
+            Button(enabled = !saving, onClick = { onSaved(saved.id) }) { Text("上传并检查") }
             OutlinedButton(onClick = { savedId = null }) { Text("继续拍一张") }
         } else if (!granted) {
             Text("需要相机权限才能拍照。拒绝权限不会创建记录。")
@@ -135,7 +136,7 @@ fun CameraScreen(model: CaptureViewModel, onSaved: (String) -> Unit) {
                     saving = false
                     error = "相机未能开始拍照，请重试：${it.message.orEmpty()}"
                 }
-            }) { Text(if (saving) "正在保存照片…" else if (ready) "拍照并保存在本机" else if (error != null) "相机未就绪，请返回后重试" else "正在启动相机…") }
+            }) { Text(if (saving) "正在保存照片…" else if (ready) "拍照" else if (error != null) "相机未就绪，可从相册选择" else "正在启动相机…") }
         }
         error?.let { Text(it) }
     }

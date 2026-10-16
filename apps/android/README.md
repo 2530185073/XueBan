@@ -1,65 +1,59 @@
-# 安卓拍照纠错 App 工程初稿
+# 学伴 Android 0.2.0 联调版
 
-本目录落实 [安卓一期框架](../../ANDROID_PHASE1.md) 中的安卓端起点。首发已确认**初中、人教版、安卓平板**。当前只实现本地开发采集与六屏骨架，**不是完成的一期 App，也没有完成 C0 / R1 / R2 验收**。没有固定答案、模拟模型、假上传或虚构检查进度。
+安卓平板学生端，支持 CameraX 拍照和系统“从相册选择”，使用已授权身份把学生自己的作业提交给后端真实模型处理。没有内置供应商 Key、假检查结果或本地 OCR；一期走服务端多模态模型，专用 OCR 留后续阶段。
 
-## 已写入的行为
+## 本轮实现
 
-- Kotlin、Compose、ViewModel、CameraX 工程与六条导航：首页、拍照预览、进度、整页结果、单题订正、历史。
-- debug 构建明确显示“开发采集模式、未登录学生”。没有任意输入 studentId 的入口；release 构建不开放采集。
-- 点击后申请相机权限，使用真实后置相机预览和 JPEG 拍照；失败显示错误，不生成检查结果。
-- 照片先写应用私有临时目录，仅 CameraX 保存回调成功后移入完成目录。历史从完成目录恢复；原图不覆盖，预览单独缩采样并按 EXIF 显示方向。
-- 本地草稿可回看和删除。文件在 `noBackupFilesDir/development-captures/`，不写系统相册；不申请共享存储权限，不提供文件分享组件。
-- 后端 HTTPS 地址可以本地保存或清空。**保存地址不代表连接成功**，当前没有网络客户端，Manifest 也不声明 `INTERNET` 权限，不会上传。
-- 后续页面明确“尚未识别 / 没有结果 / 尚未授权”；订正和老师求助按钮禁用，不发送请求，不假设已正确或已解决。
+- 服务器地址和一次性配对码 → `POST /v1/device-sessions` → `GET /v1/me`。只能选择服务端授权学生，无自由输入 studentId 登录。启动时需重新读取 me 确认授权；断网时可点击恢复已有配对连接，不强迫消耗新配对码。配对请求首次发送前持久保存随机幂等键；网络结果未知时沿原码、原键恢复。交换成功先保存 token，再读 me；me 成功后清除配对码和待请求键。
+- Android Keystore AES/GCM 加密私有凭据文件，禁止系统备份。401/到期要求重新配对；无自动刷新 token。退出配对清本机凭据与可见身份，原图继续保留，重新授权同一账号/学生后可见。服务端 session 撤销由服务端管理。
+- CameraX 相机权限、后摄预览、拍照；系统 OpenDocument 支持 JPEG/PNG，读取后复制进应用私有区。20 MB/5000 万像素上限。原始字节保留；上传派生图按 EXIF 正向、最长边 2400、JPEG 92% 生成，以派生图尺寸/哈希为服务端坐标基础。
+- 原图 → 创建作业 → 私有上传票据 → PUT → complete 核验 → recognize job → 逐 case checks job → 轮询 → 整页/单题原图、题区、识别文字、AI 初判、不确定和失败状态。任务成功不表示答对；只有服务端 staff/confirmed 才显示老师确认。学生端不直接展开可能含解法的 basis；帮助通过有曝光记录的提示接口提供。
+- 提示的真实 job、实际显示后的 views 记录；本地 hint_used 保留为证据，提交订正时按契约映射为 unknown（兼容已有草稿），由服务端已确认 views 继承提示使用，不能自行宣称无帮助；重新拍订正建立新 Attempt 并再次检查。识别有问题通过单独的 recognition 求助入口，不伪造成孩子新作答。
+- 私有 `AtomicFile` JSON 操作账本先保存精确 body 和幂等键，再发送；成功响应也存档。网络/超时未知结果保留原操作，409/422 明确拒绝后才能在用户重试时换键/刷新版本。照片、作业/图片/任务 ID 和阶段可重启恢复。400/409/422 等确定拒绝会标记 failed 并清除自动恢复目标，返回前台不抢占新照片导入；网络结果未知、408/429/5xx 保留原请求恢复。终态 failed 只在用户点击后创建新任务；retryable_failed 由服务端有限重试，客户端继续轮询。检查恢复先比较题目/作答版本并复用服务端现有任务。
+- 本机历史与服务器分页历史；不同 server/actor/student 分区可见。相机写原图后中断可在重启授权后恢复处理。
 
-本机草稿没有学生归属，不得在未来登录后自动迁入某名孩子名下。首次生产接入必须重新从经授权的学生会话创建作业并采集。
+## 启动与配对
 
-## 固定构建版本
+1. 启动后端 API、持久 worker、数据库，并启用管理员签发配对码能力；模型凭据只配置在后端。
+2. 管理员为已授权账号生成一次性配对码。App 填服务器根地址（不含 `/v1`）、配对码，确认孩子。
+3. 从相机或相册选择一页作业，预览后点“上传并检查”。也可从历史恢复。
 
-| 项目 | 固定版本 |
-|---|---|
-| JDK | 17 |
-| Gradle Wrapper | 8.11.1 |
-| Android Gradle Plugin | 8.9.2 |
-| Kotlin / Compose Compiler plugin | 2.1.20 / 2.1.20 |
-| compileSdk / targetSdk / minSdk | 35 / 35 / 26 |
-| Build Tools | 35.0.0（AGP 默认） |
-| Compose BOM | 2025.04.01 |
-| CameraX | 1.4.2 |
+Release 只允许 HTTPS。Debug 额外允许字面 RFC1918/loopback IP 的内网 HTTP（如模拟器 `http://10.0.2.2:8000`；adb reverse 后 `http://127.0.0.1:8000`；真机填 Mac 内网 IP），设置页有醒目联调提醒。HTTP 域名包括 localhost 不允许；禁止 URL userinfo/query/fragment。图片票据必须与 API origin 完全一致；不跟随重定向，不向存储请求自动附加业务 Bearer。后端 PUBLIC_BASE_URL 必须是设备可达的同一 origin。
 
-这是可复现起点，未声称所有依赖为最新版或已适配最终平板。官方 [AGP 8.9 兼容说明](https://developer.android.com/build/releases/agp-8-9-0-release-notes) 对应 Gradle 8.11.1、JDK 17、SDK 35；[Kotlin 支持表](https://developer.android.com/build/kotlin-support) 可核对最低 AGP。Compose 编译插件与 Kotlin 保持同版本，依赖由 [Compose BOM](https://developer.android.com/develop/ui/compose/bom/bom-mapping) 统一。相机遵循 [CameraX 文件拍摄 API](https://developer.android.com/media/camera/camerax/take-photo)；[CameraX 发行记录](https://developer.android.com/jetpack/androidx/releases/camera) 可查固定版本。
+## 后端接口依赖
 
-Wrapper 脚本和 jar 来自 Gradle 官方 `v8.11.1` 标签。jar SHA-256 为 `2db75c40782f5e8ba1fc278a5574bab070adccb2d21ca5a6e5ed840888448046`，与 [官方 wrapper 校验值](https://services.gradle.org/distributions/gradle-8.11.1-wrapper.jar.sha256) 对照。发行包 SHA-256 已固定在 wrapper properties；本轮只下载了小型 Wrapper 文件，没有安装 JDK / SDK 或下载 Gradle 发行包。
+沿用 `contracts/phase1`：
 
-## 构建和验证
+| 动作 | 接口 / 返回 |
+| --- | --- |
+| 配对 | POST `/v1/device-sessions` `{pairing_code}` + `Idempotency-Key` → `{access_token,expires_at}` |
+| 身份 | GET `/v1/me` → `IdentityContext` |
+| 作业/历史 | POST/GET `/v1/students/{id}/homeworks`；GET `/v1/homeworks/{id}` |
+| 图片 | POST `/v1/homeworks/{id}/uploads` → `UploadTicket`；PUT 票据 URL；GET asset、POST complete、POST upload-ticket 续期、GET access |
+| 识别 | POST `/v1/homeworks/{id}/recognitions` → `Accepted.job`；GET `/v1/jobs/{id}` |
+| 逐题检查 | GET cases/questions/attempts/checks；POST cases/{id}/checks → job；当前有效结论读取 case.current_decision |
+| 提示 | POST cases/{id}/hints → job → GET hints/{id}；实际展示后 POST hints/{id}/views |
+| 新订正 | 上传到原 homework 后 POST cases/{id}/attempts → recognize_attempt job → 最新 case/attempt → checks |
+| 求助 | POST cases/{id}/help-requests；只有服务端写入成功才显示求助记录 |
 
-本机 2026-10-16 只读检查结果：`/usr/bin/java` 与 `javac` 是 macOS 启动器；`java_home -V` 返回 `Unable to locate a Java Runtime`。未找到 Gradle、sdkmanager、adb；默认 Android SDK、Android Studio、常见 Homebrew JDK 路径不存在，也没有 JAVA_HOME / ANDROID_HOME / ANDROID_SDK_ROOT 配置。因此**本机编译被 JDK 与 SDK 阻塞，未生成 APK，未执行真机检查**。
+所有业务写操作持久幂等，使用当前聚合/识别 revision。未实现的接口或失败均展示真实失败，不虚构完成。
 
-在具有 JDK 17 与 SDK 35 的研发机 / CI 上：
+## 构建与测试
+
+JDK 17、Android SDK Platform 35、AGP 8.9.2、Kotlin 2.1.20、Gradle Wrapper 8.11.1。新增网络库 OkHttp 4.12.0，无本地模型依赖。
 
 ```sh
 cd apps/android
-sh scripts/check-environment.sh
-# SDK 安装位置可由 ANDROID_HOME 或未入库的 local.properties 中 sdk.dir 指定。
-# 需要 platforms;android-35、build-tools;35.0.0 和 platform-tools。
-./gradlew :app:assembleDebug :app:lintDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+# APK: app/build/outputs/apk/debug/app-debug.apk
 ```
 
-首次 Gradle 调用会下载锁定的发行包与 Maven 依赖；上面的步骤供已有开发环境执行，本轮没有自行安装全局工具。远程 [CI 构建](https://github.com/2530185073/XueBan/actions/runs/38907770161) 已通过，源码提交为 `25aa9dbc0112737e3cebff1d7e8eeb0444801517`，执行 assembleDebug / lintDebug 并产出 `xueban-local-capture-dev` 开发 APK。完整运行记录及当前状态见 [验证记录](../../VALIDATION.md)。编译 / lint 通过也不等于 CameraX 在目标平板上通过验收。
+2026-10-17 已在本机 JDK 17 / SDK 35 执行上述三项任务，最终增量构建 `BUILD SUCCESSFUL`，13 项 JVM 测试全部通过。Lint 无错误，14 项警告主要为依赖升级提示，另含备份声明、应用图标与 KTX 建议；本轮未为消除升级提示改变已验证的工具链。
 
-真机需逐项验证并记录机型 / 系统：授权、拒绝与系统设置撤权；没有后置相机；连续拍照；横竖屏与旋转时拍照；存储不足；返回及杀进程后历史原图仍可打开；图片方向；删除；禁止联网时依旧采集；release 模式无法进入采集；所有后续页面始终不伪装检查成功。预览只为采集人工检查，尚无模糊、反光和完整性自动检测。
+纯 JVM 测试覆盖 URL/同源规则、模型候选和确认区分、识别待核实/空题/未检查状态、幂等请求恢复、题目/作答版本隔离、直接读取仓库契约核对 reported_help 枚举及旧草稿兼容，以及 MockWebServer 鉴权/票据隔离/HTTP 错误/不跟随跳转。Keystore、CameraX、系统选图、真实断网/杀进程恢复仍需模拟器/真机验证。实际联调证据由主任务补充，不能把构建或 mock 测试当成完整验收。
 
-## 与后端的接入约束
+## 当前边界
 
-1. 服务端授权应返回可操作的学生 / 设备范围；App 选择当前学生必须依据该范围，不接受任意 studentId。短期令牌及安全存储后续实现，不放进 URL、日志或普通设置。
-2. 只有有授权的作业批次才能申请上传。每张图绑定批次与页序，上传完成须校验完整性并取得服务端 asset ID；本地路径不能当成云端 ID。
-3. 异步任务返回真实 job ID 和状态；上传、识别、检查分别呈现，部分失败和无法判断不算成功，离页之后仍可恢复。
-4. 单题订正依赖有效 question revision、correction case、父 / 根 attempt；没有关联时不能独立创建“已订正”。提示与老师求助也需关联有效来源版本。
-5. 改判、撤销、输入版本变化后按服务端有效版本刷新。客户端不能自行写“已确认正确”或“已解决”。
+这是 0.2.0 联调版本，不是一期完整验收完成。协调器在前台运行；切后台暂停，重回前台/重启后恢复，不承诺系统后台持续上传（尚未加入 WorkManager）。网络调用有 60 秒整体上限；任务轮询单轮最多 300 次，此后保留任务等待手动继续。单次拍照作为一份作业；目前无多页合批、手工裁切、识别文本直接编辑、完整的跨设备多页图切换。服务器历史先下载首张照片；本机仍保留每次订正图片。单题页依据当前 Attempt.asset_ids 选择本机作答图及对应题区；未加载本次图片时明确标注原题照片，避免旧图冒充新作答。原图与规范化上传图均需按后续正式保留/删除策略清理，当前无学生自行删除服务端记录入口。
 
-当前故意不引入 Retrofit、Room、WorkManager 或模型 SDK：没有运行中的上传任务可交给它们。下一步接正式授权 / 上传契约后，再以 Room + WorkManager 实现受控的本地任务、幂等重试和恢复；此处的文件列表不冒充生产队列。
-
-## 未完成
-
-正式身份授权与设备绑定；多页批次 / 裁切 / 编辑旋转 / 质量检测；上传与后端适配；持久任务与后台续传；OCR / 切题 / 判题 / 提示；题区叠加；真正的订正再拍与复查；老师接手 / 申诉；生产历史与审计；数据加密和授权删除联动；升级签名 / 分发 / 崩溃监控；真机与负载验收。拍摄中断留下的 `inflight` 文件不会显示为成功记录，但自动清理与恢复策略仍待实现。
+Android Keystore 与网络安全依据：[Keystore](https://developer.android.com/privacy-and-security/keystore)、[Network security configuration](https://developer.android.com/privacy-and-security/security-config)。
