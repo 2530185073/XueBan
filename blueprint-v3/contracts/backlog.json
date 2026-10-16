@@ -25,10 +25,10 @@
     },
     {
       "id": "US-02",
-      "title": "老师进入授权班级",
+      "title": "坐班人员进入授权班级",
       "owner_hint": "TL",
-      "acceptance_success": "教师只能查询授权范围，学生迁班后权限按新规则生效",
-      "acceptance_failure": "修改 URL、请求体或缓存键不能跨学生/校区/机构；返回不泄露对象存在性",
+      "acceptance_success": "只查询授权范围；坐班老师和教官可一人兼任，按各自授予权限执行",
+      "acceptance_failure": "修改 URL、请求体或缓存键不能越权；只有教官权限不得改判；不要求每班配置五个岗位",
       "status": "not_started",
       "dependency_ids": [
         "US-01"
@@ -38,10 +38,10 @@
     },
     {
       "id": "US-03",
-      "title": "学生上传作业",
+      "title": "学生提交学校作业证据",
       "owner_hint": "BE",
-      "acceptance_success": "同一次上传重试只产生一次提交；页面显示 received/processing",
-      "acceptance_failure": "缺图、损坏、超限、伪装格式有明确错误；文件不可公开访问",
+      "acceptance_success": "记录学校任务来源、题目、作答时间和已知帮助条件；重试只产生一次提交，显示 received/processing",
+      "acceptance_failure": "缺图、损坏、超限、伪装格式明确报错；不因图片不清或知识点未覆盖自动加题；文件不可公开访问",
       "status": "not_started",
       "dependency_ids": [
         "US-01",
@@ -52,10 +52,10 @@
     },
     {
       "id": "US-04",
-      "title": "老师补正识别与切题",
+      "title": "坐班老师补正识别与切题",
       "owner_hint": "FE",
       "acceptance_success": "保存原图、题目边界及人工修订版本；后续分析读取新版",
-      "acceptance_failure": "题干不完整进入 needs_resubmit，不自动编造缺少条件",
+      "acceptance_failure": "题干不完整进入 needs_resubmit 或待核实，不编造条件；不能把无法评分记成答错",
       "status": "not_started",
       "dependency_ids": [
         "US-03"
@@ -67,8 +67,8 @@
       "id": "US-05",
       "title": "学生收到可靠纠错",
       "owner_hint": "AI",
-      "acceptance_success": "初判进入 awaiting_review；老师 confirmed 后学生可用",
-      "acceptance_failure": "模型超时/拒绝/截断保留失败原因；不得显示老师已确认",
+      "acceptance_success": "初判进入 awaiting_review；有能力和权限的坐班老师 confirmed 后学生可用",
+      "acceptance_failure": "超时/拒绝/截断保留原因；老师无把握保留待核实；不得显示已经确认",
       "status": "not_started",
       "dependency_ids": [
         "US-04"
@@ -78,10 +78,10 @@
     },
     {
       "id": "US-06",
-      "title": "学科老师采纳或改判",
+      "title": "坐班老师采纳或改判证据",
       "owner_hint": "BE",
-      "acceptance_success": "判定、错误步骤、解释及原因关联 review_decision",
-      "acceptance_failure": "教官、学生、家长和模型服务不能调用确认命令；旧版本提交返回 409",
+      "acceptance_success": "能力及授权范围内确认判定、错误步骤、解释和帮助条件，关联 review_decision",
+      "acceptance_failure": "学生、家长、模型及仅教官权限不能确认；兼任需有老师权限；旧版本提交返回 409",
       "status": "not_started",
       "dependency_ids": [
         "US-02",
@@ -94,8 +94,8 @@
       "id": "US-07",
       "title": "学生申诉误判",
       "owner_hint": "BE",
-      "acceptance_success": "申诉进入待处理，老师新决定替代旧判断，相关任务可追踪",
-      "acceptance_failure": "旧证据被撤销后不得继续影响当前图谱或新报告；保留原作答",
+      "acceptance_success": "申诉进入待处理，坐班老师新决定替代旧判断；相关证据、图谱、报告和未执行建议可追踪",
+      "acceptance_failure": "撤销证据不继续影响当前状态及新报告；保留原作答，不因申诉新增罚题",
       "status": "not_started",
       "dependency_ids": [
         "US-06"
@@ -105,10 +105,10 @@
     },
     {
       "id": "US-08",
-      "title": "学生完成订正",
+      "title": "学生完成学校作业订正",
       "owner_hint": "FE",
-      "acceptance_success": "订正形成新 attempt，注明已用提示；原错误仍可回看",
-      "acceptance_failure": "重复上传同一订正去重；不能把看答案后改对标为独立验证",
+      "acceptance_success": "订正形成新 attempt，记录提示和答案暴露；原错误仍可回看",
+      "acceptance_failure": "重复订正去重；看答案后改对不算独立验证；订正结束不自动追加同类题",
       "status": "not_started",
       "dependency_ids": [
         "US-06"
@@ -118,10 +118,10 @@
     },
     {
       "id": "US-09",
-      "title": "老师查看知识点诊断",
+      "title": "坐班老师溯源知识薄弱点",
       "owner_hint": "CUR",
-      "acceptance_success": "主/关联知识点和错因分别展示，结论可点击到证据",
-      "acceptance_failure": "无作答过程时显示待核实；一次错误不能自动定性“粗心”",
+      "acceptance_success": "主/关联知识点、错因候选及前置关系分开展示，可回溯学校作业来源、次数和帮助条件",
+      "acceptance_failure": "无过程或条件不明显示待核实；一次错误不自动定性粗心或能力问题；不生成补课方案",
       "status": "not_started",
       "dependency_ids": [
         "US-06"
@@ -133,8 +133,8 @@
       "id": "US-10",
       "title": "学生查看个人知识图谱",
       "owner_hint": "FE",
-      "acceptance_success": "课程图谱叠加个人状态、样本量、日期、证据及下一步",
-      "acceptance_failure": "未观察节点显示数据不足；不把全班平均值填成本人状态",
+      "acceptance_success": "课程范围叠加个人状态、样本量、日期、证据与不确定性；可查看与当前学校任务的关系",
+      "acceptance_failure": "未观察节点显示数据不足，不用班均填补，不为点亮图谱派题或以覆盖率惩罚学生",
       "status": "not_started",
       "dependency_ids": [
         "US-09",
@@ -145,10 +145,10 @@
     },
     {
       "id": "US-11",
-      "title": "系统更新知识状态",
+      "title": "系统用有效作答更新知识状态",
       "owner_hint": "TL",
-      "acceptance_success": "已确认有效证据按版本规则计算；重放得到同一投影",
-      "acceptance_failure": "待审核、被撤销、条件未核实证据不能越权触发高质量验证结果",
+      "acceptance_success": "已确认有效证据按版本规则计算；满足可信独立条件的日常学校作业可验证；重放投影一致",
+      "acceptance_failure": "待审核、撤销、帮助条件不明及答案暴露证据不得冒充独立验证；不得强制小测才计入",
       "status": "not_started",
       "dependency_ids": [
         "US-06",
@@ -159,10 +159,10 @@
     },
     {
       "id": "US-12",
-      "title": "老师修正图谱或题目映射",
+      "title": "老师修正证据或题目映射",
       "owner_hint": "TL",
-      "acceptance_success": "新版本重算受影响状态，旧结果可追溯，待执行计划标 stale",
-      "acceptance_failure": "重算未完成时禁止用旧状态发布报告；重复事件不重复累计证据",
+      "acceptance_success": "新版本重算受影响状态；旧结果可追溯，依据失效的未执行建议标 stale；历史报告按事实影响范围处理",
+      "acceptance_failure": "相关重算未完成不能发布新报告；重复事件不累计；截止后无关新增证据不让所有历史报告失效",
       "status": "not_started",
       "dependency_ids": [
         "US-07",
@@ -175,8 +175,8 @@
       "id": "US-13",
       "title": "每个孩子保有专属智能体",
       "owner_hint": "AI",
-      "acceptance_success": "重登/换设备后加载本人状态；模型升级后个人数据仍在",
-      "acceptance_failure": "两生同时运行无会话、记忆、检索、工具或费用明细串用",
+      "acceptance_success": "重登/换设备后加载本人图谱、记忆和学校任务上下文；模型升级后个人数据仍在",
+      "acceptance_failure": "两生同时运行无串用；不得宣称每生训练了基础模型或把参考演示当生产服务",
       "status": "not_started",
       "dependency_ids": [
         "US-01",
@@ -188,10 +188,10 @@
     },
     {
       "id": "US-14",
-      "title": "学生获得个性学习建议",
+      "title": "学生获得学校任务优先的支持",
       "owner_hint": "AI",
-      "acceptance_success": "同一问题按各自图谱、任务和证据生成不同且可解释的建议",
-      "acceptance_failure": "缺少下一课或证据时 needs_evidence；不得虚构既往表现",
+      "acceptance_success": "根据本人作业和证据给提示或解释；extra_minutes 默认 0；无新增活动建议是合法成功结果",
+      "acceptance_failure": "无证据、未完成学校任务、不愿意或无余力均不得自动加题；不虚构表现或超学校进度加课",
       "status": "not_started",
       "dependency_ids": [
         "US-10",
@@ -205,8 +205,8 @@
       "id": "US-15",
       "title": "学生与老师确认长期记忆",
       "owner_hint": "BE",
-      "acceptance_success": "候选→确认→到期/替代；保留来源、确认人和期限",
-      "acceptance_failure": "学生不能确认学科诊断；模型不能把自述直接写为长期事实",
+      "acceptance_success": "候选→确认→到期/替代；保留来源、确认人和期限；意愿及余力按当前状态更新",
+      "acceptance_failure": "学生不能确认学科诊断；模型不能把自述写成事实；过往愿意不能替代本次选做同意",
       "status": "not_started",
       "dependency_ids": [
         "US-06",
@@ -217,10 +217,10 @@
     },
     {
       "id": "US-16",
-      "title": "学生获取分层帮助",
+      "title": "学生按需获取分层帮助",
       "owner_hint": "AI",
-      "acceptance_success": "当前模式允许的提示逐级出现，提示层级写入 attempt 条件",
-      "acceptance_failure": "测验模式禁提示工具；越级套答案、文档注入和多轮诱导被阻止或转人工",
+      "acceptance_success": "当前学校任务可逐级求助，帮助层级写入 attempt；可选验证中求助可结束验证并切换支持",
+      "acceptance_failure": "验证进行中不泄题；求助后如实标为得到帮助，不伪装独立；不能拒绝必要求助来保独立分数",
       "status": "not_started",
       "dependency_ids": [
         "US-13",
@@ -231,10 +231,10 @@
     },
     {
       "id": "US-17",
-      "title": "智能体调用学习工具",
+      "title": "智能体受约束地调用工具",
       "owner_hint": "AI",
-      "acceptance_success": "工具只访问当前学生批准内容，并记录输入、结果和原因",
-      "acceptance_failure": "未知工具、任意 SQL/URL、跨生 ID、超步数均拒绝；不直接改成绩",
+      "acceptance_success": "仅访问当前学生批准内容；每次执行重查权限、学校来源、进度及选做门禁，记录理由",
+      "acceptance_failure": "拒绝未知工具、任意 SQL/URL、跨生 ID、超步数和伪造学校来源；模型或客户端自报不能绕过门禁",
       "status": "not_started",
       "dependency_ids": [
         "US-13"
@@ -244,10 +244,10 @@
     },
     {
       "id": "US-18",
-      "title": "老师接收智能体转介",
+      "title": "坐班老师接收现场答疑或待核实事项",
       "owner_hint": "BE",
-      "acceptance_success": "needs_human 形成具体责任队列；无老师时待安排并显示原因",
-      "acceptance_failure": "转人工失败不得伪装已完成；未经接单不显示“老师正在处理”",
+      "acceptance_success": "needs_human 形成具体责任队列；能力范围现场答疑；无把握保留待核实并说明原因",
+      "acceptance_failure": "转人工失败不伪装完成；未接单不显示处理中；不得自动转成补课课程或强制新题",
       "status": "not_started",
       "dependency_ids": [
         "US-06",
@@ -258,10 +258,10 @@
     },
     {
       "id": "US-19",
-      "title": "学生做举一反三",
+      "title": "学生自愿进行轻量举一反三",
       "owner_hint": "CUR",
-      "acceptance_success": "每组关联原错点，结构变化与迁移用途明确；老师可替换",
-      "acceptance_failure": "未审核生成题不可投放；连续失败转讲解而非无限加题",
+      "acceptance_success": "仅学校任务完成、孩子愿意、有余力且额外预算大于 0 时提供审核过的轻量选做；与已有薄弱证据关联",
+      "acceptance_failure": "任一门禁缺失不投放；连续困难停止选做并按需支持；不能无限加题或针对未观察节点强制补题",
       "status": "not_started",
       "dependency_ids": [
         "US-08",
@@ -273,10 +273,10 @@
     },
     {
       "id": "US-20",
-      "title": "学生按负担预算完成任务",
+      "title": "学生掌控额外活动负担",
       "owner_hint": "FE",
-      "acceptance_success": "当天纠错/复习/预习共享预算，超预算建议可延期",
-      "acceptance_failure": "取消/替换任务有原因；智能体不能绕过预算重复创建同目标任务",
+      "acceptance_success": "task_origin 区分 school/optional；extra_minutes 默认 0，服务端校验三项门禁；选做可暂停或跳过",
+      "acceptance_failure": "暂停恢复重查意愿及余力；跳过无扣分、欠账或自动补做；不能把额外活动伪装学校任务绕过预算",
       "status": "not_started",
       "dependency_ids": [
         "US-14",
@@ -287,10 +287,10 @@
     },
     {
       "id": "US-21",
-      "title": "老师维护学校课程进度",
+      "title": "坐班老师记录学校课程与任务进度",
       "owner_hint": "BE",
-      "acceptance_success": "进度有学校/教材/学科/确认人/时间，下一课据此确定",
-      "acceptance_failure": "未确认时不能按目录自动认定下一课；旧版本并发更新受冲突检查",
+      "acceptance_success": "进度有学校/教材/学科/来源/确认人/时间，学校布置预习及学校任务来源可核实",
+      "acceptance_failure": "未确认不按目录推定下一课；AI 不超学校进度加课；旧版本并发更新受冲突检查",
       "status": "not_started",
       "dependency_ids": [
         "US-02"
@@ -300,10 +300,10 @@
     },
     {
       "id": "US-22",
-      "title": "学生进入独立预习板块",
+      "title": "学生在独立板块完成学校预习",
       "owner_hint": "FE",
-      "acceptance_success": "显示目标、前置检查、个人缺口、短导学和上课关注点",
-      "acceptance_failure": "进度修改后旧草案失效；新课未学会不直接记为已学知识退步",
+      "acceptance_success": "学校已布置预习按 school 支持，可在其他学校任务未完成时使用；展示已有薄弱点和阅读关注点",
+      "acceptance_failure": "额外预习按 optional 门禁；不自动设先修测验/补课；进度变化使旧建议失效，新课未会不计退步",
       "status": "not_started",
       "dependency_ids": [
         "US-10",
@@ -316,10 +316,10 @@
     },
     {
       "id": "US-23",
-      "title": "老师查看课前课后关联",
+      "title": "坐班老师查看课前课后证据联系",
       "owner_hint": "BE",
-      "acceptance_success": "预习记录可关联课后独立作答，展示条件和时间",
-      "acceptance_failure": "只有缺勤或未采集时标缺失，不能记作预习失败或宣称因果提分",
+      "acceptance_success": "将已有预习记录与后续日常独立学校作业关联，展示时间、帮助条件与不确定性",
+      "acceptance_failure": "未采集或未选做显示缺失，不算预习失败；不能为了证明效果加测或宣称因果提分",
       "status": "not_started",
       "dependency_ids": [
         "US-11",
@@ -330,10 +330,10 @@
     },
     {
       "id": "US-24",
-      "title": "学生使用错题本",
+      "title": "学生和老师整理错题",
       "owner_hint": "FE",
-      "acceptance_success": "支持状态、知识点、错因、时间筛选及打印；历史保留",
-      "acceptance_failure": "误判撤销从有效错题统计剔除；重复照片不增加错误次数",
+      "acceptance_success": "支持状态、知识点、错因、时间筛选及打印；历史保留，优先供当前作业答疑和家长溯源",
+      "acceptance_failure": "误判撤销从有效统计剔除；重复照片不增加次数；到期错题不自动派复习题或形成欠账",
       "status": "not_started",
       "dependency_ids": [
         "US-08",
@@ -345,10 +345,10 @@
     },
     {
       "id": "US-25",
-      "title": "老师创建半月测验",
+      "title": "坐班老师准备可选验证活动",
       "owner_hint": "CUR",
-      "acceptance_success": "周期、目标和通过标准测前冻结，候选卷审核后可实施",
-      "acceptance_failure": "已直接练过的题不能充当新题迁移证据；有题目冲突时阻止发布",
+      "acceptance_success": "仅有明确已观察问题且三项门禁、额外预算满足时提供审核题；实施前固定目的、题目及条件",
+      "acceptance_failure": "小测不是半月报告前提；不为填图谱强制测验；已练题不能充当新题迁移；冲突题不得发布",
       "status": "not_started",
       "dependency_ids": [
         "US-11",
@@ -360,10 +360,10 @@
     },
     {
       "id": "US-26",
-      "title": "学生独立参加小测",
+      "title": "学生自愿参加或跳过小测",
       "owner_hint": "FE",
-      "acceptance_success": "测验模式锁定提示；分题结果与条件保存，缺席进入待补测",
-      "acceptance_failure": "掉线恢复不重复作答；无法核实独立条件时标记条件未核实",
+      "acceptance_success": "小测开始前重新校验意愿和余力；分题条件保存；随时暂停/跳过，未参加记未选做而非待补测",
+      "acceptance_failure": "掉线恢复不重复作答；条件不可信不计独立；求助可结束验证；不参加无惩罚、欠账或自动补测",
       "status": "not_started",
       "dependency_ids": [
         "US-16",
@@ -374,10 +374,10 @@
     },
     {
       "id": "US-27",
-      "title": "老师复盘半月目标",
+      "title": "系统固定汇总半月已有证据",
       "owner_hint": "BE",
-      "acceptance_success": "显示目标总数、已覆盖目标、达标目标和缺测目标，回写下期计划",
-      "acceptance_failure": "缺测不算达标；不同难度个性卷总分不得直接排名或比较涨幅",
+      "acceptance_success": "按上海自然月 1—15/16—月末汇总已有学校作业、订正、观察和可选小测；展示范围分母、覆盖及不确定性",
+      "acceptance_failure": "全周期没有小测也能汇总；未观察/未选做不算答错；不强制追加验证；不同题卷不直接排名",
       "status": "not_started",
       "dependency_ids": [
         "US-11",
@@ -388,10 +388,10 @@
     },
     {
       "id": "US-28",
-      "title": "教官记录学习观察",
+      "title": "现场人员记录学习习惯观察",
       "owner_hint": "FE",
-      "acceptance_success": "分开记录事实、学生自述、推测；有时间/场景/观察者",
-      "acceptance_failure": "不允许自动识别情绪或诊断心理；观察不能修改学科掌握分",
+      "acceptance_success": "分开记录事实、自述、推测及时间/场景/观察者；兼任坐班老师按授权操作",
+      "acceptance_failure": "不自动识别情绪或诊断心理；习惯观察不能改掌握分，不因走神或疲劳增加惩罚题",
       "status": "not_started",
       "dependency_ids": [
         "US-01",
@@ -402,10 +402,10 @@
     },
     {
       "id": "US-29",
-      "title": "教官执行习惯干预",
+      "title": "教官或坐班老师提供习惯支持",
       "owner_hint": "BE",
-      "acceptance_success": "目标、具体行为、责任人、期限、执行与回看结果齐全",
-      "acceptance_failure": "“已提醒”不等于验证成功；撤销或改计划有理由且保留记录",
+      "acceptance_success": "围绕现有学校任务记录具体行为、责任人、提醒方式和回看结果；优先调整求助、检查及休息节奏",
+      "acceptance_failure": "已提醒不等于有效；孩子疲劳时停止额外活动；不把习惯支持变补课或追加题量；修改留记录",
       "status": "not_started",
       "dependency_ids": [
         "US-20",
@@ -416,10 +416,10 @@
     },
     {
       "id": "US-30",
-      "title": "老师和教官交接",
+      "title": "现场人员按权限交接事项",
       "owner_hint": "FE",
-      "acceptance_success": "学科困难转老师，执行困难转教官；待接/处理中/已回执可追踪",
-      "acceptance_failure": "转介只附必要数据；未获学科权限的教官不能查看或修改评分操作",
+      "acceptance_success": "作业疑问、待核实证据与习惯支持有待接/处理中/回执；同人兼任可直接按权限处理",
+      "acceptance_failure": "仅传必要数据；仅教官权限不能改判；无能力确认保留待核实，不默认需要第二位学科老师",
       "status": "not_started",
       "dependency_ids": [
         "US-18",
@@ -430,10 +430,10 @@
     },
     {
       "id": "US-31",
-      "title": "校区查看共性问题",
+      "title": "校区汇总错题并研判来源",
       "owner_hint": "BE",
-      "acceptance_success": "同题/知识点/错因聚合，显示有效作答分母、人数与采集覆盖",
-      "acceptance_failure": "只采错题时不展示知识点错误率；订正和初作不混作一次分母",
+      "acceptance_success": "按同题/知识点/错因聚合，显示作业来源、有效作答分母、人数、采集覆盖、帮助条件及待核实量",
+      "acceptance_failure": "只采错题不展示全量错误率；订正与初作不混为分母；不能从不完整采集断言全班掌握情况",
       "status": "not_started",
       "dependency_ids": [
         "US-09",
@@ -444,10 +444,10 @@
     },
     {
       "id": "US-32",
-      "title": "校区安排个别或小组补学",
+      "title": "校区安排现场支持和家长沟通",
       "owner_hint": "BE",
-      "acceptance_success": "研判单转 intervention，人员、内容、时间、验证明确",
-      "acceptance_failure": "分组随证据调整；家长看不到其他学生名单或原始作答",
+      "acceptance_success": "研判转现场答疑、待核实或沟通待办，明确责任人、依据和处理状态，可回看结果",
+      "acceptance_failure": "不生成补课课程、小组补学或硬性测验；孩子无额外任务也可关闭沟通事项；家长不见其他学生数据",
       "status": "not_started",
       "dependency_ids": [
         "US-29",
@@ -458,10 +458,10 @@
     },
     {
       "id": "US-33",
-      "title": "老师确认家长报告",
+      "title": "坐班老师确认家长报告事实",
       "owner_hint": "FE",
-      "acceptance_success": "报告用锁定证据与数字，学科/习惯分别确认后可发布",
-      "acceptance_failure": "缺确认、投影落后、证据撤销或数值不一致时阻止发布",
+      "acceptance_success": "锁定相关证据和数字，展示薄弱点来源/次数、覆盖分母、帮助条件、不确定性及低负担建议；无小测可确认发布",
+      "acceptance_failure": "缺少必要事实确认、相关投影落后、引用已撤销或数值不一致阻止发布；待核实可明确标注，不能编造结论",
       "status": "not_started",
       "dependency_ids": [
         "US-12",
@@ -473,10 +473,10 @@
     },
     {
       "id": "US-34",
-      "title": "家长收到报告及后续计划",
+      "title": "家长收到半月报告和支持建议",
       "owner_hint": "BE",
-      "acceptance_success": "发送命令有幂等键、回执和发布版本；本人历史可查",
-      "acceptance_failure": "网络超时不能盲目重复发送；更正生成新版并提示旧版已更新",
+      "acceptance_success": "固定半月服务自动汇总、经确认发布；发送幂等及回执可查；家长看到本人版本和证据摘要",
+      "acceptance_failure": "未做选做/小测不阻断报告；超时不盲目重发；事实更正生成新版并标旧版；建议不自动转成孩子作业",
       "status": "not_started",
       "dependency_ids": [
         "US-33"
@@ -486,10 +486,10 @@
     },
     {
       "id": "US-35",
-      "title": "家长反馈与线下面谈跟进",
+      "title": "家长反馈与线下沟通跟进",
       "owner_hint": "FE",
-      "acceptance_success": "反馈转负责人待办，记录约定、行动和回看时间",
-      "acceptance_failure": "无负责人不得显示已处理；新增收费内容与教学建议区分并单独确认",
+      "acceptance_success": "反馈转负责人待办，围绕来源、覆盖、帮助及不确定性说明薄弱点，记录低负担约定和回看时间",
+      "acceptance_failure": "无负责人不显示已处理；不承诺提分、不把汇报转成补课推销；额外活动仍须孩子愿意和有余力",
       "status": "not_started",
       "dependency_ids": [
         "US-34"
@@ -501,8 +501,8 @@
       "id": "US-36",
       "title": "校区应对模型或网络故障",
       "owner_hint": "OPS",
-      "acceptance_success": "已确认任务仍可用，新分析排队或转人工；失败有状态",
-      "acceptance_failure": "不将服务失败计为学生不配合；重试不重复生成任务或费用业务记录",
+      "acceptance_success": "已确认学校任务仍可用，新分析排队或现场支持；故障和待核实状态可查",
+      "acceptance_failure": "不将故障计为不配合；重试不重复业务记录，不因故障补加题；不能把未完成识别当已确认",
       "status": "not_started",
       "dependency_ids": [
         "US-03",
@@ -532,8 +532,8 @@
       "id": "US-38",
       "title": "研发安全发布模型版本",
       "owner_hint": "AI",
-      "acceptance_success": "锁定评测集回归、影子、灰度、版本记录和回滚均可执行",
-      "acceptance_failure": "关键切片退化/越权/泄漏阻止放量；不以总体均分掩盖切片失败",
+      "acceptance_success": "锁定评测回归、影子、灰度、版本及回滚可执行，覆盖零额外预算、拒绝选做和学校任务优先",
+      "acceptance_failure": "越权/泄漏/关键切片退化或绕过不增负规则阻止放量；不以总均分掩盖失败",
       "status": "not_started",
       "dependency_ids": [
         "US-05",
@@ -548,8 +548,8 @@
       "id": "US-39",
       "title": "运维恢复任务与数据",
       "owner_hint": "OPS",
-      "acceptance_success": "Worker 中断、租约失效、服务重启、备份恢复后任务可续办",
-      "acceptance_failure": "重复投递不重复更新掌握状态；人工确认不被模型重试覆盖",
+      "acceptance_success": "Worker 中断、租约失效、重启及备份恢复后学校任务与证据可续办；选做恢复先重查当前门禁",
+      "acceptance_failure": "重复投递不重复更新掌握状态；确认不被模型重试覆盖；恢复不能复活已跳过选做或欠账",
       "status": "not_started",
       "dependency_ids": [
         "US-03",
@@ -561,10 +561,10 @@
     },
     {
       "id": "US-40",
-      "title": "负责人评估服务效果与工时",
+      "title": "负责人评估托管服务质量与工时",
       "owner_hint": "PO",
-      "acceptance_success": "分开展示学习、执行、质量、教师负担与学生负担",
-      "acceptance_failure": "采纳率不等于准确率，打开率不等于满意，相关变化不写因果提分",
+      "acceptance_success": "分开统计学校作业支持、证据覆盖、报告按时率、现场答疑/沟通工时及额外负担，兼任工时不重复计算",
+      "acceptance_failure": "不以选做完成率、小测参与率、图谱填满率或加题量考核孩子；采纳率非准确率，相关变化非因果提分",
       "status": "not_started",
       "dependency_ids": [
         "US-27",
@@ -574,5 +574,35 @@
       "work_package": "P09",
       "priority": "P1"
     }
-  ]
+  ],
+  "product_version": "v3.1",
+  "dependency_semantics": "dependency_ids 仅表示研发集成先后，不是学生必做任务顺序。US-27/33 可依赖小测相关能力的研发，但半月汇总和报告不以参加或完成小测为运行前提。",
+  "service_policy": {
+    "setting": "托管班，辅助自主完成学校课程与作业，不增负",
+    "task_origin_values": [
+      "school",
+      "optional"
+    ],
+    "extra_minutes_default": 0,
+    "optional_start_requires": [
+      "school_tasks_complete",
+      "child_willing",
+      "has_capacity",
+      "extra_minutes > 0"
+    ],
+    "gate_authority": "服务端核实当前来源与状态，模型或客户端自报不构成授权",
+    "school_tasks_bypass_optional_gate": true,
+    "pause_or_skip_optional": "无惩罚、无欠账、无次日自动补做；恢复需重新核实意愿和余力",
+    "fixed_half_month_service": "自动汇总已有证据，经确认发布家长报告；小测为可选补充",
+    "independent_homework_evidence": "满足可信独立条件的日常学校作业可验证，不要求另做小测",
+    "unobserved_knowledge": "保留数据不足，禁止为填图谱强制加题",
+    "onsite_staff": "坐班老师能力范围内答疑和确认作业证据，无把握待核实；可兼任教官，不承担补课方案",
+    "parent_report_focus": [
+      "薄弱点来源及次数",
+      "覆盖分母",
+      "帮助条件",
+      "不确定性",
+      "低负担建议"
+    ]
+  }
 }

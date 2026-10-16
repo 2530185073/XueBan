@@ -55,7 +55,7 @@ def snapshot_read(fn):
 
 
 class Kernel:
-    POLICY = "demo-rules-v1"
+    POLICY = "demo-rules-v2-custody"
     GRAPH = "math-demo-v1"
 
     def __init__(self):
@@ -64,7 +64,7 @@ class Kernel:
             "lin": {"id": "lin", "name": "小林（示例）", "tenant_id": "demo-school", "campus_id": "east", "revision": 0, "next_lesson": "equation", "agent_id": "agent-lin"},
             "yu": {"id": "yu", "name": "小雨（示例）", "tenant_id": "demo-school", "campus_id": "east", "revision": 0, "next_lesson": "equation", "agent_id": "agent-yu"},
             "west": {"id": "west", "name": "另一校区示例", "tenant_id": "demo-school", "campus_id": "west", "revision": 0, "next_lesson": "equation", "agent_id": "agent-west"},
-            "other": {"id": "other", "name": "另一机构示例", "tenant_id": "other-school", "campus_id": "east", "revision": 0, "next_lesson": "equation", "agent_id": "agent-other"},
+            "other": {"id": "other", "name": "另一托管运营方示例", "tenant_id": "other-school", "campus_id": "east", "revision": 0, "next_lesson": "equation", "agent_id": "agent-other"},
         }
         self.nodes = {
             "sign": {"label": "带符号运算", "prerequisites": []},
@@ -132,7 +132,7 @@ class Kernel:
                         artifact["stale"] = True
         return event
 
-    def submit_attempt(self, actor, student_id, key, expected_revision, question_id, answer, occurred_at, stage="practice", assistance="none"):
+    def submit_attempt(self, actor, student_id, key, expected_revision, question_id, answer, occurred_at, stage="homework", assistance="none"):
         payload = dict(command="submit_attempt", question_id=question_id, answer=answer, occurred_at=occurred_at, stage=stage, assistance=assistance)
         def action(student):
             if question_id not in self.questions:
@@ -195,8 +195,8 @@ class Kernel:
             if not r or r["retracted"]:
                 continue
             q = self.questions[a["question_id"]]
-            independent = r["independence_confirmed"] and a["assistance"] == "none" and a["stage"] in ("practice", "assessment") and new_question
-            grouped[q["node_id"]].append({"at": stamp(a["occurred_at"]), "correct": r["correct"], "independent": independent, "template": q["template"], "evidence_id": r["evidence_id"]})
+            independent = r["independence_confirmed"] and a["assistance"] == "none" and a["stage"] in ("homework", "practice", "assessment") and new_question
+            grouped[q["node_id"]].append({"at": stamp(a["occurred_at"]), "correct": r["correct"], "independent": independent, "template": q["template"], "evidence_id": r["evidence_id"], "source": {"attempt_id": a["id"], "question_id": a["question_id"], "question": q["prompt"], "occurred_at": a["occurred_at"], "stage": a["stage"], "assistance": a["assistance"], "independent": independent, "new_question": new_question, "correct": r["correct"], "review_id": r["id"], "review_note": r["reason"], "evidence_id": r["evidence_id"]}})
         nodes = []
         for node_id, node in self.nodes.items():
             rows = grouped[node_id]
@@ -225,7 +225,10 @@ class Kernel:
             delayed = stable and bool(anchor) and any(r["at"] >= anchor + timedelta(days=7) for r in wins)
             recent = max((r["at"] for r in valid), default=None)
             conflicting = bool(last_win and any(not r["correct"] and not r["independent"] and r["at"] > last_win for r in rows))
-            nodes.append({"id": node_id, **deepcopy(node), "state": state, "independent_count": len(valid), "verified_attempt_count": len(rows), "successful_dates_after_error": len(dates), "template_coverage_after_error": len(templates), "delayed_verified": delayed, "review_due": bool(recent and now - recent >= timedelta(days=14)), "conflicting_evidence": conflicting, "evidence_sufficiency": "moderate" if stable and not conflicting else "limited", "evidence_ids": [r["evidence_id"] for r in rows]})
+            nodes.append({"id": node_id, **deepcopy(node), "state": state, "independent_count": len(valid), "verified_attempt_count": len(rows), "observed_error_count": sum(not r["correct"] for r in rows), "independent_error_count": len(errors), "successful_dates_after_error": len(dates), "template_coverage_after_error": len(templates), "delayed_verified": delayed, "review_due": bool(recent and now - recent >= timedelta(days=14)), "conflicting_evidence": conflicting, "evidence_sufficiency": "moderate" if stable and not conflicting else "limited", "evidence_ids": [r["evidence_id"] for r in rows], "evidence_sources": [r["source"] for r in rows]})
+        if actor.role == "coach":
+            for n in nodes:
+                n["evidence_sources"] = []  # Observation-only role receives a summary.
         return {"student_id": student_id, "agent_id": student["agent_id"], "graph_version": self.GRAPH, "policy_version": self.POLICY, "evidence_revision": student["revision"], "nodes": nodes, "as_of": now.isoformat()}
 
     @snapshot_read
@@ -248,27 +251,30 @@ class Kernel:
             prerequisites.add(current)
             pending.extend(self.nodes[current]["prerequisites"])
         checks = [n for n in graph["nodes"] if n["id"] in prerequisites and (n["state"] != "stable_for_now" or n["review_due"] or n["conflicting_evidence"])]
-        return {"next_lesson": target, "progress_source": "teacher_confirmed_demo_fixture", "prerequisite_checks": checks, "estimated_minutes": 6, "status": "candidate_needs_teacher_confirmation"}
+        return {"next_lesson": target, "progress_source": "teacher_confirmed_demo_fixture", "prerequisite_checks": checks, "allocated_minutes": 0, "status": "context_only_not_assigned", "notice": "仅供坐班答疑参考；未知节点不自动加题。学校布置的预习按原任务协助，额外预习须通过选做门禁。"}
 
-    def plan(self, actor, student_id, key, expected_revision, minutes=20):
-        payload = dict(command="plan", minutes=minutes)
+    def plan(self, actor, student_id, key, expected_revision, minutes=0, school_tasks_complete=False, child_willing=False, has_capacity=False):
+        payload = dict(command="plan", minutes=minutes, school_tasks_complete=school_tasks_complete, child_willing=child_willing, has_capacity=has_capacity)
         def action(student):
-            if not 5 <= minutes <= 45:
+            if not 0 <= minutes <= 10:
                 raise DomainError(422, "invalid_time_budget")
             graph = self.graph(actor, student_id)
             order = {"needs_support": 0, "needs_diagnosis": 1, "awaiting_independent_check": 2, "consolidating": 3, "insufficient_evidence": 4, "stable_for_now": 5}
+            gate = school_tasks_complete and child_willing and has_capacity and minutes > 0
             remaining, tasks = minutes, []
-            for n in sorted(graph["nodes"], key=lambda x: (0 if x["conflicting_evidence"] else order[x["state"]], not x["review_due"])):
-                if len(tasks) >= 3 or remaining < 5:
+            for n in sorted(graph["nodes"] if gate else [], key=lambda x: (0 if x["conflicting_evidence"] else order[x["state"]], not x["review_due"])):
+                if len(tasks) >= 1 or remaining < 5:
                     break
+                if not n["verified_attempt_count"]:
+                    continue
                 if n["state"] == "stable_for_now" and not n["review_due"] and not n["conflicting_evidence"]:
                     continue
-                kind = "targeted_support" if n["state"] == "needs_support" else "independent_check"
+                kind = "homework_followup" if n["state"] == "needs_support" else "optional_clarification"
                 if n["review_due"] and n["state"] == "stable_for_now":
                     kind = "delayed_review"
-                tasks.append({"node_id": n["id"], "task_type": kind, "minutes": 5, "reason": "conflicting_evidence" if n["conflicting_evidence"] else n["state"], "evidence_ids": n["evidence_ids"]})
+                tasks.append({"node_id": n["id"], "task_type": kind, "task_origin": "optional", "skippable": True, "carry_over_required": False, "minutes": 5, "reason": "conflicting_evidence" if n["conflicting_evidence"] else n["state"], "evidence_ids": n["evidence_ids"]})
                 remaining -= 5
-            result = {"id": uid("plan"), "student_id": student_id, "source_revision": student["revision"], "policy_version": self.POLICY, "status": "teacher_confirmed_reference_plan", "stale": False, "tasks": tasks, "time_budget_minutes": minutes, "allocated_minutes": minutes - remaining}
+            result = {"id": uid("plan"), "student_id": student_id, "source_revision": student["revision"], "policy_version": self.POLICY, "status": "optional_suggestion" if tasks else "schoolwork_and_rest_first", "stale": False, "tasks": tasks, "time_budget_minutes": minutes, "allocated_minutes": minutes - remaining, "extra_minutes": minutes - remaining, "school_tasks_complete": school_tasks_complete, "child_willing": child_willing, "has_capacity": has_capacity, "notice": "先完成学校原任务与必要休息；选做可随时跳过，无惩罚或补做欠账。演示门禁由坐班身份记录，生产须核验当前上下文。"}
             self.plans[result["id"]] = result
             return result
         return self.command(actor, student_id, key, payload, expected_revision, ("teacher",), action)
@@ -294,7 +300,22 @@ class Kernel:
                 raise DomainError(422, "invalid_report_period")
             graph = self.graph(actor, student_id, as_of=period_end)
             period_events = [e for e in self.events if e["student_id"] == student_id and e["event_type"] == "attempt.submitted" and start <= stamp(e["payload"]["occurred_at"]) < end]
-            result = {"id": uid("report"), "student_id": student_id, "period_start": period_start, "period_end": period_end, "source_revision": student["revision"], "status": "draft", "stale": False, "published_by": None, "snapshot": {"period_attempt_count": len(period_events), "knowledge_as_of_period_end": graph["nodes"], "limitations": "示例规则；历史知识状态包含期末之前证据；观察变化不代表因果提分。"}}
+            findings = []
+            for n in graph["nodes"]:
+                if not n["verified_attempt_count"] or (n["state"] == "stable_for_now" and not n["conflicting_evidence"]):
+                    continue
+                if n["conflicting_evidence"]:
+                    interpretation = "不同条件下表现有差异，先核实作答帮助与题型，暂不归因。"
+                elif n["state"] == "needs_support":
+                    interpretation = "已核实的独立作答中反复出错，仅说明这些题型值得关注。"
+                elif n["state"] == "needs_diagnosis":
+                    interpretation = "出现一次独立错误，尚不足以判定持续薄弱。"
+                elif n["state"] == "consolidating":
+                    interpretation = "已有独立正确证据，可在后续学校作业中继续观察。"
+                else:
+                    interpretation = "已有作答记录，独立完成条件或持续表现尚待核实。"
+                findings.append({"knowledge_id": n["id"], "knowledge_name": n["label"], "observed_errors": n["observed_error_count"], "reviewed_attempts": n["verified_attempt_count"], "independent_errors": n["independent_error_count"], "independent_attempts": n["independent_count"], "interpretation": interpretation, "cause": "未核实，不根据结果自动推断粗心、态度或能力。", "scope": "仅限已记录题目及截止时间前的证据，不代表整章或全部学校作业。", "sources": deepcopy(n["evidence_sources"]), "next_step": "在后续学校作业遇到相关问题时，由坐班老师答疑并观察；家庭无需额外加题。"})
+            result = {"id": uid("report"), "student_id": student_id, "period_start": period_start, "period_end": period_end, "source_revision": student["revision"], "status": "draft", "stale": False, "published_by": None, "snapshot": {"period_attempt_count": len(period_events), "knowledge_as_of_period_end": graph["nodes"], "focus_items": findings, "unknown_knowledge_ids": [n["id"] for n in graph["nodes"] if not n["verified_attempt_count"]], "assessment_required": False, "limitations": "示例规则；状态和来源包含期末之前历史证据，周期提交量不等于全部学校作业完成率。没有证据不表示薄弱，不为填图谱强制测验；观察变化不代表因果提分。"}}
             self.reports[result["id"]] = result
             return result
         return self.command(actor, student_id, key, payload, expected_revision, ("teacher",), action)

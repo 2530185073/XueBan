@@ -31,7 +31,7 @@ class AttemptIn(Command):
     question_id: str
     answer: str = Field(max_length=2000)
     occurred_at: str
-    stage: Literal["homework", "correction", "practice", "assessment", "preview"] = "practice"
+    stage: Literal["homework", "correction", "practice", "assessment", "preview"] = "homework"
     assistance: Literal["none", "hint", "answer_seen"] = "none"
 
 
@@ -51,7 +51,10 @@ class ObservationIn(Command):
 
 
 class PlanIn(Command):
-    minutes: int = Field(default=20, ge=5, le=45)
+    minutes: int = Field(default=0, ge=0, le=10)
+    school_tasks_complete: bool = False
+    child_willing: bool = False
+    has_capacity: bool = False
 
 
 class InterventionIn(Command):
@@ -95,13 +98,13 @@ def seed(kernel: Kernel):
         ("yu", "sign-b", True, 2, "8"),
     ]
     for index, (student_id, question_id, correct, days, answer) in enumerate(examples):
-        attempt = kernel.submit_attempt(teacher, student_id, f"seed-a-{index}", kernel.students[student_id]["revision"], question_id, answer, (now - timedelta(days=days)).isoformat(), "assessment", "none")
+        attempt = kernel.submit_attempt(teacher, student_id, f"seed-a-{index}", kernel.students[student_id]["revision"], question_id, answer, (now - timedelta(days=days)).isoformat(), "homework", "none")
         kernel.review(teacher, attempt["id"], f"seed-r-{index}", kernel.students[student_id]["revision"], correct, True, "示例老师已核对；全部为合成样本")
     kernel.observation(ACTORS["coach-east"], "lin", "seed-observation", kernel.students["lin"]["revision"], "self_check", True, "提交前按清单检查一次符号；单次观察", now.isoformat())
 
 
 def create_app(with_seed: bool = True):
-    app = FastAPI(title="学伴个人学习智能体参考内核", version="0.1.0-demo", description="仅用于本机合成数据演示。无真实模型、OCR、持久化或生产认证。OpenAPI 是已实现参考子集，完整产品接口见研发规格。")
+    app = FastAPI(title="学伴托管自主学习参考内核", version="0.2.0-demo", description="托管场景：学校任务优先、额外练习默认零、日常作业证据形成图谱与家长报告。仅用于本机合成数据演示，无真实模型、OCR、持久化或生产认证。OpenAPI 是参考子集。")
     app.state.kernel = Kernel()
     if with_seed:
         seed(app.state.kernel)
@@ -136,7 +139,7 @@ def create_app(with_seed: bool = True):
     def growth(student_id: str, who: Actor = Depends(actor)):
         k = app.state.kernel
         k.authorize(who, student_id, ("teacher", "student", "admin"))
-        return {"items": [e for e in k.events if e["student_id"] == student_id], "notice": "活动事件不自动代表提升；提升须看复测与图谱证据。"}
+        return {"items": [e for e in k.events if e["student_id"] == student_id], "notice": "活动事件不自动代表提升；结合有效独立学校作业等证据及图谱变化观察，无需额外测验。"}
 
     @app.post("/v1/students/{student_id}/attempts", status_code=201, tags=["evidence"])
     def attempt(student_id: str, body: AttemptIn, who: Actor = Depends(actor)):

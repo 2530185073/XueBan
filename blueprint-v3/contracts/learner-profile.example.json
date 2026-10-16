@@ -1,6 +1,6 @@
 {
-  "$comment": "纯合成的完整产品数据契约示例。不是任何真实孩子档案，不是 prototype/core.py 的运行输入，不代表接口已全部实现。",
-  "schema_version": "learner-profile-example-v1",
+  "$comment": "纯合成的托管班产品契约示例，不是真实儿童资料或内核运行输入。全部学科证据来自示例学校日常新作业；没有机构补课或强制测验。",
+  "schema_version": "learner-profile-example-v3.1",
   "synthetic": true,
   "as_of": "2026-10-16T09:00:00+08:00",
   "timezone": "Asia/Shanghai",
@@ -11,20 +11,18 @@
   },
   "actors": [
     {
-      "actor_id": "teacher-example",
-      "role": "subject_teacher",
+      "actor_id": "staff-example",
+      "role": "onsite_staff",
+      "authorized_duties": [
+        "school_homework_support",
+        "habit_support",
+        "report_fact_review"
+      ],
       "tenant_id": "tenant-example",
       "campus_ids": [
         "campus-east-example"
-      ]
-    },
-    {
-      "actor_id": "coach-example",
-      "role": "learning_coach",
-      "tenant_id": "tenant-example",
-      "campus_ids": [
-        "campus-east-example"
-      ]
+      ],
+      "note": "同一人兼任坐班答疑和现场习惯支持；按操作记录职责，不要求五人配置"
     }
   ],
   "student_agent": {
@@ -38,11 +36,11 @@
     "goals": [
       {
         "goal_id": "GOAL-001",
-        "description": "独立处理分配律中的漏乘，并在隔时新题中验证",
+        "description": "帮助自主完成学校任务，减少无效提醒；用自然发生的作业证据解释具体卡点",
         "knowledge_ids": [
           "K-DIST"
         ],
-        "set_by": "teacher-example"
+        "set_by": "staff-example"
       }
     ],
     "memory_item_ids": [
@@ -50,22 +48,29 @@
       "M-002"
     ],
     "active_learning_task_ids": [
-      "T-REVIEW",
+      "T-SCHOOL",
       "T-PREVIEW"
     ],
     "allowed_tools": [
-      "read_authorized_evidence",
+      "read_authorized_school_evidence",
       "read_knowledge_subgraph",
-      "select_approved_item",
-      "propose_learning_task",
-      "request_teacher_review"
+      "give_scaffolded_hint",
+      "request_onsite_homework_help",
+      "draft_half_month_report",
+      "offer_optional_support_after_gates"
     ],
     "prohibited_inferences": [
       "personality_diagnosis",
       "intelligence_score",
       "clinical_attention_diagnosis"
     ],
-    "model_binding": "deployment_configured_not_one_model_per_child"
+    "model_binding": "deployment_configured_not_one_model_per_child",
+    "forbidden_actions": [
+      "assign_tutoring_course",
+      "force_quiz_to_fill_graph",
+      "create_makeup_debt_for_optional_activity",
+      "infer_weakness_from_nonparticipation"
+    ]
   },
   "curriculum_graph": {
     "graph_version": "curriculum-example-v1",
@@ -136,7 +141,7 @@
         "relation_type": "prerequisite_of",
         "scope": "带负因数的括号展开",
         "rationale": "需要处理负数乘法",
-        "reviewer_id": "teacher-example",
+        "reviewer_id": "staff-example",
         "graph_version": "curriculum-example-v1"
       },
       {
@@ -146,7 +151,7 @@
         "relation_type": "prerequisite_of",
         "scope": "需要去括号的方程",
         "rationale": "展开括号是相关解题步骤",
-        "reviewer_id": "teacher-example",
+        "reviewer_id": "staff-example",
         "graph_version": "curriculum-example-v1"
       },
       {
@@ -156,7 +161,7 @@
         "relation_type": "related_to",
         "scope": "完成去分母后的方程求解",
         "rationale": "示例为局部图谱，未穷尽公倍数等前置知识",
-        "reviewer_id": "teacher-example",
+        "reviewer_id": "staff-example",
         "graph_version": "curriculum-example-v1"
       }
     ]
@@ -175,8 +180,9 @@
       ],
       "item_version": 1,
       "review_status": "approved",
-      "reviewer_id": "teacher-example",
-      "source_kind": "synthetic_authored_example"
+      "reviewer_id": "staff-example",
+      "source_kind": "synthetic_school_homework_example",
+      "note": "虚构学校作业题，仅说明数据契约，不声称来自实际学校"
     },
     {
       "item_id": "Q-POS",
@@ -191,8 +197,9 @@
       ],
       "item_version": 1,
       "review_status": "approved",
-      "reviewer_id": "teacher-example",
-      "source_kind": "synthetic_authored_example"
+      "reviewer_id": "staff-example",
+      "source_kind": "synthetic_school_homework_example",
+      "note": "虚构学校作业题，仅说明数据契约，不声称来自实际学校"
     },
     {
       "item_id": "Q-NEG",
@@ -207,8 +214,9 @@
       ],
       "item_version": 1,
       "review_status": "approved",
-      "reviewer_id": "teacher-example",
-      "source_kind": "synthetic_authored_example"
+      "reviewer_id": "staff-example",
+      "source_kind": "synthetic_school_homework_example",
+      "note": "虚构学校作业题，仅说明数据契约，不声称来自实际学校"
     },
     {
       "item_id": "Q-MIX",
@@ -223,8 +231,9 @@
       ],
       "item_version": 1,
       "review_status": "approved",
-      "reviewer_id": "teacher-example",
-      "source_kind": "synthetic_authored_example"
+      "reviewer_id": "staff-example",
+      "source_kind": "synthetic_school_homework_example",
+      "note": "虚构学校作业题，仅说明数据契约，不声称来自实际学校"
     }
   ],
   "attempts": [
@@ -237,11 +246,34 @@
       "item_version": 1,
       "occurred_at": "2026-10-01T18:30:00+08:00",
       "recorded_at": "2026-10-01T18:30:00+08:00",
-      "stage": "practice",
+      "stage": "homework",
       "answer": "3x-2",
       "assistance_level": "independent",
-      "independence_verified_by": "teacher-example",
-      "assessment_id": null
+      "independence_verified_by": "staff-example",
+      "assessment_id": null,
+      "task_origin": "school",
+      "school_assignment": {
+        "assignment_id": "SCHOOL-01",
+        "assigned_date": "2026-10-01",
+        "subject": "数学",
+        "page": 21,
+        "question_number": 1,
+        "step_ref": "第1行括号展开"
+      },
+      "independence_check": {
+        "verified": true,
+        "verified_by": "staff-example",
+        "new_to_student": true,
+        "not_same_as_recent_correction": true,
+        "ai_hint_used": false,
+        "adult_or_peer_help_used": false,
+        "answer_exposure": false,
+        "basis": [
+          "现场观察本次首次作答",
+          "核对平台提示记录与历史题目"
+        ],
+        "limitation": "只证明此次示例作答条件，不推断全天状态"
+      }
     },
     {
       "tenant_id": "tenant-example",
@@ -252,11 +284,34 @@
       "item_version": 1,
       "occurred_at": "2026-10-02T18:30:00+08:00",
       "recorded_at": "2026-10-02T18:30:00+08:00",
-      "stage": "practice",
+      "stage": "homework",
       "answer": "2a+8",
       "assistance_level": "independent",
-      "independence_verified_by": "teacher-example",
-      "assessment_id": null
+      "independence_verified_by": "staff-example",
+      "assessment_id": null,
+      "task_origin": "school",
+      "school_assignment": {
+        "assignment_id": "SCHOOL-02",
+        "assigned_date": "2026-10-02",
+        "subject": "数学",
+        "page": 22,
+        "question_number": 2,
+        "step_ref": "第1行括号展开"
+      },
+      "independence_check": {
+        "verified": true,
+        "verified_by": "staff-example",
+        "new_to_student": true,
+        "not_same_as_recent_correction": true,
+        "ai_hint_used": false,
+        "adult_or_peer_help_used": false,
+        "answer_exposure": false,
+        "basis": [
+          "现场观察本次首次作答",
+          "核对平台提示记录与历史题目"
+        ],
+        "limitation": "只证明此次示例作答条件，不推断全天状态"
+      }
     },
     {
       "tenant_id": "tenant-example",
@@ -267,11 +322,34 @@
       "item_version": 1,
       "occurred_at": "2026-10-03T18:40:00+08:00",
       "recorded_at": "2026-10-03T18:40:00+08:00",
-      "stage": "practice",
+      "stage": "homework",
       "answer": "-2a-6",
       "assistance_level": "independent",
-      "independence_verified_by": "teacher-example",
-      "assessment_id": null
+      "independence_verified_by": "staff-example",
+      "assessment_id": null,
+      "task_origin": "school",
+      "school_assignment": {
+        "assignment_id": "SCHOOL-03",
+        "assigned_date": "2026-10-03",
+        "subject": "数学",
+        "page": 23,
+        "question_number": 3,
+        "step_ref": "第1行括号展开"
+      },
+      "independence_check": {
+        "verified": true,
+        "verified_by": "staff-example",
+        "new_to_student": true,
+        "not_same_as_recent_correction": true,
+        "ai_hint_used": false,
+        "adult_or_peer_help_used": false,
+        "answer_exposure": false,
+        "basis": [
+          "现场观察本次首次作答",
+          "核对平台提示记录与历史题目"
+        ],
+        "limitation": "只证明此次示例作答条件，不推断全天状态"
+      }
     },
     {
       "tenant_id": "tenant-example",
@@ -282,11 +360,34 @@
       "item_version": 1,
       "occurred_at": "2026-10-09T18:40:00+08:00",
       "recorded_at": "2026-10-09T18:40:00+08:00",
-      "stage": "assessment",
+      "stage": "homework",
       "answer": "-x-8",
       "assistance_level": "independent",
-      "independence_verified_by": "teacher-example",
-      "assessment_id": "ASSESS-OCT-H1"
+      "independence_verified_by": "staff-example",
+      "assessment_id": null,
+      "task_origin": "school",
+      "school_assignment": {
+        "assignment_id": "SCHOOL-04",
+        "assigned_date": "2026-10-09",
+        "subject": "数学",
+        "page": 24,
+        "question_number": 4,
+        "step_ref": "第1行括号展开"
+      },
+      "independence_check": {
+        "verified": true,
+        "verified_by": "staff-example",
+        "new_to_student": true,
+        "not_same_as_recent_correction": true,
+        "ai_hint_used": false,
+        "adult_or_peer_help_used": false,
+        "answer_exposure": false,
+        "basis": [
+          "现场观察本次首次作答",
+          "核对平台提示记录与历史题目"
+        ],
+        "limitation": "只证明此次示例作答条件，不推断全天状态"
+      }
     }
   ],
   "review_decisions": [
@@ -297,7 +398,7 @@
       "review_decision_id": "R-01",
       "attempt_id": "A-01",
       "result": "incorrect",
-      "reviewer_id": "teacher-example",
+      "reviewer_id": "staff-example",
       "reviewed_at": "2026-10-01T18:45:00+08:00",
       "reason": "首个错误步骤为括号内第二项漏乘",
       "supersedes_id": null,
@@ -310,7 +411,7 @@
       "review_decision_id": "R-02",
       "attempt_id": "A-02",
       "result": "correct",
-      "reviewer_id": "teacher-example",
+      "reviewer_id": "staff-example",
       "reviewed_at": "2026-10-02T18:45:00+08:00",
       "reason": "核对完整作答步骤；现场确认未使用提示",
       "supersedes_id": null,
@@ -323,7 +424,7 @@
       "review_decision_id": "R-03",
       "attempt_id": "A-03",
       "result": "correct",
-      "reviewer_id": "teacher-example",
+      "reviewer_id": "staff-example",
       "reviewed_at": "2026-10-03T18:45:00+08:00",
       "reason": "核对完整作答步骤；现场确认未使用提示",
       "supersedes_id": null,
@@ -336,7 +437,7 @@
       "review_decision_id": "R-04",
       "attempt_id": "A-04",
       "result": "correct",
-      "reviewer_id": "teacher-example",
+      "reviewer_id": "staff-example",
       "reviewed_at": "2026-10-09T18:45:00+08:00",
       "reason": "核对完整作答步骤；现场确认未使用提示",
       "supersedes_id": null,
@@ -353,7 +454,7 @@
       "review_decision_id": "R-01",
       "knowledge_id": "K-DIST",
       "step_ref": "whole_expansion",
-      "event_type": "diagnostic",
+      "event_type": "school_homework_observed_error",
       "occurred_at": "2026-10-01T18:30:00+08:00",
       "recorded_at": "2026-10-01T18:45:00+08:00",
       "result": "incorrect",
@@ -365,10 +466,15 @@
       "misconception_code": "omitted_second_term",
       "assessment_id": null,
       "intervention_id": null,
-      "source_actor_id": "teacher-example",
+      "source_actor_id": "staff-example",
       "validity": "valid",
       "supersedes_id": null,
-      "artifact_ref": "A-01"
+      "artifact_ref": "A-01",
+      "school_assignment_id": "SCHOOL-01",
+      "source_kind": "school_homework",
+      "not_created_by_additional_testing": true,
+      "diagnostic_use": "observed_error",
+      "source_actor_duty": "school_homework_support"
     },
     {
       "tenant_id": "tenant-example",
@@ -379,7 +485,7 @@
       "review_decision_id": "R-02",
       "knowledge_id": "K-DIST",
       "step_ref": "whole_expansion",
-      "event_type": "independent_variant",
+      "event_type": "school_homework_independent_attempt",
       "occurred_at": "2026-10-02T18:30:00+08:00",
       "recorded_at": "2026-10-02T18:45:00+08:00",
       "result": "correct",
@@ -391,10 +497,15 @@
       "misconception_code": null,
       "assessment_id": null,
       "intervention_id": "I-ACADEMIC",
-      "source_actor_id": "teacher-example",
+      "source_actor_id": "staff-example",
       "validity": "valid",
       "supersedes_id": null,
-      "artifact_ref": "A-02"
+      "artifact_ref": "A-02",
+      "school_assignment_id": "SCHOOL-02",
+      "source_kind": "school_homework",
+      "not_created_by_additional_testing": true,
+      "diagnostic_use": "independent_performance_evidence",
+      "source_actor_duty": "school_homework_support"
     },
     {
       "tenant_id": "tenant-example",
@@ -405,7 +516,7 @@
       "review_decision_id": "R-03",
       "knowledge_id": "K-DIST",
       "step_ref": "whole_expansion",
-      "event_type": "independent_variant",
+      "event_type": "school_homework_independent_attempt",
       "occurred_at": "2026-10-03T18:40:00+08:00",
       "recorded_at": "2026-10-03T18:45:00+08:00",
       "result": "correct",
@@ -417,10 +528,15 @@
       "misconception_code": null,
       "assessment_id": null,
       "intervention_id": "I-ACADEMIC",
-      "source_actor_id": "teacher-example",
+      "source_actor_id": "staff-example",
       "validity": "valid",
       "supersedes_id": null,
-      "artifact_ref": "A-03"
+      "artifact_ref": "A-03",
+      "school_assignment_id": "SCHOOL-03",
+      "source_kind": "school_homework",
+      "not_created_by_additional_testing": true,
+      "diagnostic_use": "independent_performance_evidence",
+      "source_actor_duty": "school_homework_support"
     },
     {
       "tenant_id": "tenant-example",
@@ -431,7 +547,7 @@
       "review_decision_id": "R-04",
       "knowledge_id": "K-DIST",
       "step_ref": "whole_expansion",
-      "event_type": "delayed_check",
+      "event_type": "delayed_school_homework_observation",
       "occurred_at": "2026-10-09T18:40:00+08:00",
       "recorded_at": "2026-10-09T18:45:00+08:00",
       "result": "correct",
@@ -441,12 +557,17 @@
         "combined_brackets"
       ],
       "misconception_code": null,
-      "assessment_id": "ASSESS-OCT-H1",
+      "assessment_id": null,
       "intervention_id": "I-ACADEMIC",
-      "source_actor_id": "teacher-example",
+      "source_actor_id": "staff-example",
       "validity": "valid",
       "supersedes_id": null,
-      "artifact_ref": "A-04"
+      "artifact_ref": "A-04",
+      "school_assignment_id": "SCHOOL-04",
+      "source_kind": "school_homework",
+      "not_created_by_additional_testing": true,
+      "diagnostic_use": "independent_performance_evidence",
+      "source_actor_duty": "school_homework_support"
     },
     {
       "tenant_id": "tenant-example",
@@ -461,14 +582,15 @@
       "review_decision_id": null,
       "knowledge_id": null,
       "result": null,
-      "source_actor_id": "coach-example",
+      "source_actor_id": "staff-example",
       "observation": "约定提交前检查符号；孩子在一次口头提醒后完成检查",
       "opportunity_count": 1,
       "completed_count": 1,
       "prompt_count": 1,
       "intervention_id": "I-HABIT",
       "validity": "valid",
-      "supersedes_id": null
+      "supersedes_id": null,
+      "source_actor_duty": "habit_support"
     },
     {
       "tenant_id": "tenant-example",
@@ -483,18 +605,19 @@
       "review_decision_id": null,
       "knowledge_id": null,
       "result": null,
-      "source_actor_id": "coach-example",
+      "source_actor_id": "staff-example",
       "observation": "提交前主动检查符号；本次现场未提醒",
       "opportunity_count": 1,
       "completed_count": 1,
       "prompt_count": 0,
       "intervention_id": "I-HABIT",
       "validity": "valid",
-      "supersedes_id": null
+      "supersedes_id": null,
+      "source_actor_duty": "habit_support"
     }
   ],
   "rule_configuration": {
-    "rule_version": "product-example-r1",
+    "rule_version": "care-product-example-r1.1",
     "illustrative_not_scientific_thresholds": true,
     "stable_min_distinct_dates": 2,
     "stable_min_elapsed_hours": 24,
@@ -502,7 +625,13 @@
     "delayed_anchor_type": "first_valid_independent_success_after_latest_valid_error",
     "delayed_min_elapsed_days": 7,
     "count_only_confirmed_results": true,
-    "calendar_timezone": "Asia/Shanghai"
+    "calendar_timezone": "Asia/Shanghai",
+    "independent_evidence_sources": [
+      "verified_new_school_homework",
+      "voluntary_optional_activity_with_verified_conditions"
+    ],
+    "insufficient_evidence_action": "retain_unknown_do_not_assign_forced_test",
+    "thresholds_create_student_obligation": false
   },
   "student_knowledge_states": [
     {
@@ -512,7 +641,7 @@
       "knowledge_id": "K-DIST",
       "learning_status": "stable_for_now",
       "evidence_sufficiency": "moderate",
-      "evidence_explanation": "最近错误之后有三个日期、三个题族的独立正确作答；只支持本示例覆盖范围",
+      "evidence_explanation": "全部来自本期学校日常新作业；三次独立正确覆盖三个子范围。初始只观察到一次漏乘，不足以宣布持续薄弱。",
       "coverage_facets_verified": [
         "positive_factor",
         "negative_factor",
@@ -525,7 +654,7 @@
       "last_independent_success_at": "2026-10-09T18:40:00+08:00",
       "delayed_anchor_at": "2026-10-02T18:30:00+08:00",
       "delayed_verified_at": "2026-10-09T18:40:00+08:00",
-      "review_due_at": "2026-10-16T18:30:00+08:00",
+      "review_due_at": null,
       "evidence_ids": [
         "E-01",
         "E-02",
@@ -533,7 +662,7 @@
         "E-04"
       ],
       "graph_version": "curriculum-example-v1",
-      "rule_version": "product-example-r1",
+      "rule_version": "care-product-example-r1.1",
       "state_version": 7,
       "computed_at": "2026-10-09T18:46:00+08:00",
       "open_questions": [
@@ -542,7 +671,14 @@
       "disputed": false,
       "stale": false,
       "teacher_override_ref": null,
-      "successful_independent_dates_after_last_error": 3
+      "successful_independent_dates_after_last_error": 3,
+      "diagnostic_record_ids": [
+        "D-ERROR",
+        "D-CAUSE",
+        "D-UNKNOWN"
+      ],
+      "verified_weak_scope_ids": [],
+      "next_observation_policy": "等待后续学校任务自然提供相关证据，不因间隔到期强制加测"
     },
     {
       "tenant_id": "tenant-example",
@@ -555,10 +691,15 @@
       "valid_evidence_count": 0,
       "evidence_ids": [],
       "graph_version": "curriculum-example-v1",
-      "rule_version": "product-example-r1",
+      "rule_version": "care-product-example-r1.1",
       "state_version": 1,
       "computed_at": "2026-10-09T18:46:00+08:00",
-      "stale": false
+      "stale": false,
+      "diagnostic_record_ids": [
+        "D-EQUATION-UNKNOWN"
+      ],
+      "verified_weak_scope_ids": [],
+      "review_due_at": null
     }
   ],
   "interventions": [
@@ -567,15 +708,15 @@
       "campus_id": "campus-east-example",
       "student_id": "student-example-001",
       "intervention_id": "I-ACADEMIC",
-      "domain": "academic",
+      "domain": "school_homework_support",
       "knowledge_ids": [
         "K-DIST"
       ],
-      "owner_actor_id": "teacher-example",
+      "owner_actor_id": "staff-example",
       "observation_evidence_ids": [
         "E-01"
       ],
-      "action": "示范外部因数乘每一项，再请孩子解释并安排独立新题",
+      "action": "围绕10月1日当前学校题说明括号内每项都要乘外部因数；孩子继续订正原任务，不追加机构练习",
       "started_at": "2026-10-01T18:50:00+08:00",
       "completed_at": "2026-10-01T19:00:00+08:00",
       "status": "completed",
@@ -583,7 +724,10 @@
         "E-02",
         "E-03",
         "E-04"
-      ]
+      ],
+      "scheduled_followup_test": false,
+      "followup_policy": "后续学校新作业自然提供观察",
+      "not_a_tutoring_course": true
     },
     {
       "tenant_id": "tenant-example",
@@ -592,8 +736,8 @@
       "intervention_id": "I-HABIT",
       "domain": "habit",
       "behavior_code": "check_signs_before_submit",
-      "owner_actor_id": "coach-example",
-      "action": "与孩子约定提交前检查符号；先提醒，之后观察能否自行完成",
+      "owner_actor_id": "staff-example",
+      "action": "在原学校作业提交前示范检查符号；逐步减少提醒，不额外增加练习",
       "started_at": "2026-10-02T18:00:00+08:00",
       "status": "monitoring",
       "followup_evidence_ids": [
@@ -604,28 +748,7 @@
       "next_review_at": "2026-10-16T19:00:00+08:00"
     }
   ],
-  "assessments": [
-    {
-      "tenant_id": "tenant-example",
-      "campus_id": "campus-east-example",
-      "student_id": "student-example-001",
-      "assessment_id": "ASSESS-OCT-H1",
-      "kind": "semi_monthly",
-      "planned_period_id": "2026-10-H1",
-      "actual_period_id": "2026-10-H1",
-      "occurred_at": "2026-10-09T18:40:00+08:00",
-      "independent": true,
-      "item_ids": [
-        "Q-MIX"
-      ],
-      "evidence_ids": [
-        "E-04"
-      ],
-      "limitations": [
-        "契约示例只放入一道题，不代表实际半月测题量或完整测验蓝图"
-      ]
-    }
-  ],
+  "assessments": [],
   "growth_milestones": [
     {
       "tenant_id": "tenant-example",
@@ -634,7 +757,7 @@
       "milestone_id": "G-001",
       "at": "2026-10-01T18:45:00+08:00",
       "knowledge_id": "K-DIST",
-      "summary": "发现一次括号内第二项漏乘，需诊断与后续验证",
+      "summary": "学校原题观察到一次漏乘，坐班老师针对该题答疑；持续薄弱原因尚不确定",
       "evidence_ids": [
         "E-01"
       ],
@@ -650,7 +773,7 @@
       "milestone_id": "G-002",
       "at": "2026-10-03T18:45:00+08:00",
       "knowledge_id": "K-DIST",
-      "summary": "正因数、负因数两个子范围各有一次独立新题正确，相隔24小时10分，在该局部范围进入阶段性较稳",
+      "summary": "之后两份学校新作业首次独立作答正确，相隔24小时10分；只支持已出现子范围，无额外测验",
       "evidence_ids": [
         "E-02",
         "E-03"
@@ -671,7 +794,7 @@
       "milestone_id": "G-003",
       "at": "2026-10-09T18:45:00+08:00",
       "knowledge_id": "K-DIST",
-      "summary": "距本轮第一次独立正确7天10分钟后，另一新题独立完成",
+      "summary": "距本轮首次独立正确7天10分钟后，另一份学校新作业首次独立完成；自然提供延迟证据",
       "evidence_ids": [
         "E-02",
         "E-04"
@@ -679,10 +802,11 @@
       "intervention_ids": [
         "I-ACADEMIC"
       ],
-      "claim_type": "delayed_verification",
+      "claim_type": "natural_delayed_observation",
       "limitations": [
-        "不是永久掌握证明",
-        "没有据此认定学科总体提分"
+        "不代表永久掌握",
+        "未据此认定整体提分",
+        "不要求其他孩子为取得同类证据补测"
       ]
     }
   ],
@@ -693,16 +817,16 @@
       "student_id": "student-example-001",
       "memory_item_id": "M-001",
       "category": "verified_learning_history",
-      "text": "分配律曾漏乘；当前所覆盖题型已有独立及延迟验证，分数系数仍待检查",
+      "text": "曾在学校作业中观察到一次漏乘；以后学校新题有三次核实独立正确。持续薄弱原因未确认，分数系数仍未知。",
       "source_evidence_ids": [
         "E-01",
         "E-02",
         "E-03",
         "E-04"
       ],
-      "confirmed_by": "teacher-example",
+      "confirmed_by": "staff-example",
       "valid_from": "2026-10-09T18:45:00+08:00",
-      "review_after": "2026-10-16T18:30:00+08:00",
+      "review_after": null,
       "status": "active",
       "stale": false
     },
@@ -718,9 +842,9 @@
         "H-02"
       ],
       "intervention_id": "I-HABIT",
-      "confirmed_by": "coach-example",
+      "confirmed_by": "staff-example",
       "valid_from": "2026-10-03T18:30:00+08:00",
-      "review_after": "2026-10-16T19:00:00+08:00",
+      "review_after": null,
       "status": "active",
       "stale": false
     }
@@ -730,22 +854,24 @@
       "tenant_id": "tenant-example",
       "campus_id": "campus-east-example",
       "student_id": "student-example-001",
-      "learning_task_id": "T-REVIEW",
+      "learning_task_id": "T-SCHOOL",
       "goal_id": "GOAL-001",
       "knowledge_ids": [
-        "K-DIST"
+        "K-EQUATION"
       ],
-      "task_type": "spaced_review",
-      "reason": "距最近独立验证约一周，检查当前覆盖范围保持情况",
-      "source_evidence_ids": [
-        "E-04"
-      ],
-      "expected_minutes": 5,
-      "due_at": "2026-10-16T19:00:00+08:00",
-      "status": "teacher_confirmed",
-      "owner_actor_id": "teacher-example",
-      "stop_condition": "完成一题及必要反馈；若持续不会转老师",
-      "source_state_version": 7,
+      "task_type": "school_homework",
+      "task_origin": "school",
+      "school_assignment_ref": {
+        "assignment_id": "SCHOOL-CURRENT",
+        "assigned_date": "2026-10-16",
+        "instruction": "虚构学校任务：完成当天方程作业"
+      },
+      "reason": "来自学校当日布置，不由图谱阈值产生",
+      "source_evidence_ids": [],
+      "status": "available",
+      "due_at": "2026-10-17T08:00:00+08:00",
+      "owner_actor_id": "staff-example",
+      "stop_condition": "原学校任务完成；卡住可获得适量帮助或现场答疑",
       "stale": false
     },
     {
@@ -756,20 +882,58 @@
       "knowledge_ids": [
         "K-EQUATION"
       ],
-      "task_type": "next_lesson_preview",
-      "reason": "老师确认下一课是含括号方程，分配律已有局部验证，方程步骤尚无证据",
+      "task_type": "school_assigned_preview",
+      "reason": "示例学校已布置下一课阅读，属于原任务，不是机构额外预习",
       "source_evidence_ids": [
         "E-02",
         "E-03",
         "E-04"
       ],
       "expected_minutes": 6,
-      "due_at": "2026-10-16T19:15:00+08:00",
-      "status": "candidate_needs_teacher_confirmation",
-      "owner_actor_id": "teacher-example",
-      "stop_condition": "完成前置检查并记录一个带入课堂的问题",
+      "due_at": "2026-10-17T08:00:00+08:00",
+      "status": "available",
+      "owner_actor_id": "staff-example",
+      "stop_condition": "完成学校阅读要求，未知处记录给课堂；不追加机构授课",
       "source_state_version": 7,
-      "stale": false
+      "stale": false,
+      "task_origin": "school",
+      "school_assignment_ref": {
+        "assignment_id": "SCHOOL-PREVIEW",
+        "assigned_date": "2026-10-16",
+        "instruction": "虚构学校任务：阅读下一课指定页面，记录一个不懂的问题"
+      }
+    },
+    {
+      "tenant_id": "tenant-example",
+      "campus_id": "campus-east-example",
+      "student_id": "student-example-001",
+      "learning_task_id": "T-OPTIONAL",
+      "knowledge_ids": [
+        "K-DIST"
+      ],
+      "task_type": "optional_variant",
+      "task_origin": "optional",
+      "reason": "仅保留可选工具，不因图谱或周期自动安排",
+      "source_evidence_ids": [
+        "E-01"
+      ],
+      "status": "not_offered",
+      "due_at": null,
+      "owner_actor_id": "staff-example",
+      "eligibility": {
+        "school_tasks_complete": false,
+        "has_capacity": false,
+        "child_willing": false
+      },
+      "makeup_required": false,
+      "skip_penalty": null,
+      "stop_condition": "任何时候不愿继续即可结束",
+      "stale": false,
+      "eligibility_observation": {
+        "capacity": "unknown",
+        "willingness": "not_asked"
+      },
+      "extra_minutes": 0
     }
   ],
   "report": {
@@ -798,10 +962,143 @@
       "G-002",
       "G-003"
     ],
-    "draft_summary": "本期针对括号漏乘做了讲解、独立练习和延迟验证；分数系数尚待检查。提交前检查符号有两次观察，后续继续跟进。",
+    "draft_summary": "本期四道有完整记录的学校作业中，10月1日出现一次括号漏乘，坐班老师针对原题答疑；后续三道学校新题核实为独立正确。只有一次错误，不能认定持续概念薄弱；分数系数尚无证据。提交前检查有两次观察，下一步继续减少不必要提醒，不增加家庭练习。",
     "publication_requires": [
-      "subject_teacher_confirmation",
-      "habit_section_owner_confirmation"
+      "authorized_academic_fact_confirmation",
+      "authorized_habit_fact_confirmation"
+    ],
+    "diagnostic_record_ids": [
+      "D-ERROR",
+      "D-CAUSE",
+      "D-UNKNOWN",
+      "D-EQUATION-UNKNOWN"
+    ],
+    "not_dependent_on_assessment": true,
+    "optional_quiz_note": "本期未参加小测；不扣分、不欠补测、不影响报告。",
+    "school_task_summary": {
+      "sampled_tasks": 4,
+      "confirmed_attempts": 4,
+      "correct_first_attempts": 3,
+      "incorrect_first_attempts": 1,
+      "scope": "仅本例保留的四份学校任务，非孩子全部作业",
+      "help_condition_unknown_count": 0
+    },
+    "parent_evidence_cards": [
+      {
+        "diagnostic_record_id": "D-ERROR",
+        "source_attempt_id": "A-01",
+        "date": "2026-10-01",
+        "location": "第21页第1题，第1行",
+        "observed_step": "3(x-2)被写为3x-2",
+        "help_conditions": "首次独立尝试；之后有坐班答疑，二者分开记录",
+        "frequency": "同一统计范围内1/4出现漏乘；题型并不完全相同",
+        "credibility": "错误事实已核实；原因推测未证实",
+        "onsite_help_ref": "I-ACADEMIC",
+        "minimum_next_step": "后续学校作业出现括号时继续观察，可提示孩子检查每一项；不要求家长另布题"
+      }
+    ],
+    "autonomy_and_burden": {
+      "observed_habit_opportunities": 2,
+      "check_completed": 2,
+      "without_reminder": 1,
+      "additional_assigned_practice_count": 0,
+      "additional_required_test_count": 0,
+      "pressure_self_report": "未收集，不推断",
+      "note": "提醒减少仅是两次现场事实，不认定习惯已形成"
+    },
+    "next_step": "保持学校任务优先；在原作业中按需答疑与观察，资料不足照实保留。"
+  },
+  "service_model": {
+    "setting": "after_school_care",
+    "primary_job": "support_independent_completion_of_school_tasks",
+    "onsite_staff_boundary": "仅处理现场学校作业答疑及习惯支持，不另行补课",
+    "fixed_half_month_report": true,
+    "optional_quiz_required": false,
+    "missed_optional_activity_creates_debt": false,
+    "extra_activity_gates": [
+      "school_tasks_complete",
+      "has_capacity",
+      "child_willing"
     ]
-  }
+  },
+  "diagnostic_records": [
+    {
+      "tenant_id": "tenant-example",
+      "campus_id": "campus-east-example",
+      "student_id": "student-example-001",
+      "diagnostic_id": "D-ERROR",
+      "knowledge_id": "K-DIST",
+      "category": "observed_error",
+      "statement": "10月1日示例学校作业第21页第1题，首行将3(x-2)写为3x-2，第二项漏乘",
+      "evidence_ids": [
+        "E-01"
+      ],
+      "help_conditions": "本次首次作答经现场核实未用提示",
+      "frequency": {
+        "error_count": 1,
+        "eligible_opportunities": 4,
+        "denominator_scope": "本期有完整步骤且帮助条件可核实的四道相关学校新作业题",
+        "caution": "题目子范围不同，只作事实计数，不计算总体掌握率"
+      },
+      "credibility": "原作答与步骤核验支持该错误事实",
+      "verified_by": "staff-example"
+    },
+    {
+      "tenant_id": "tenant-example",
+      "campus_id": "campus-east-example",
+      "student_id": "student-example-001",
+      "diagnostic_id": "D-CAUSE",
+      "knowledge_id": "K-DIST",
+      "category": "suspected_cause",
+      "statement": "当次可能漏看括号内第二项，是否存在概念困难尚未核实",
+      "evidence_ids": [
+        "E-01"
+      ],
+      "credibility": "低，仅为解释假设",
+      "status": "unverified",
+      "not_publishable_as_fact": true
+    },
+    {
+      "tenant_id": "tenant-example",
+      "campus_id": "campus-east-example",
+      "student_id": "student-example-001",
+      "diagnostic_id": "D-UNKNOWN",
+      "knowledge_id": "K-DIST",
+      "category": "unknown",
+      "statement": "没有分数系数作答证据，不能判断该子范围",
+      "evidence_ids": [],
+      "next_step": "等待学校自然出现相关题，不补测"
+    },
+    {
+      "tenant_id": "tenant-example",
+      "campus_id": "campus-east-example",
+      "student_id": "student-example-001",
+      "diagnostic_id": "D-EQUATION-UNKNOWN",
+      "knowledge_id": "K-EQUATION",
+      "category": "unknown",
+      "statement": "当前档案没有可判断的方程作答",
+      "evidence_ids": [],
+      "next_step": "在学校已布置任务中按需支持"
+    }
+  ],
+  "optional_activity_record": {
+    "tenant_id": "tenant-example",
+    "campus_id": "campus-east-example",
+    "student_id": "student-example-001",
+    "activity_kind": "light_quiz",
+    "period_id": "2026-10-H1",
+    "participated": false,
+    "reason": "本期仅使用正常学校作业，无需另测",
+    "score": null,
+    "penalty": null,
+    "makeup_required": false,
+    "affects_report_eligibility": false
+  },
+  "diagnostic_category_vocabulary": [
+    "observed_error",
+    "suspected_cause",
+    "verified_weak_scope",
+    "unknown"
+  ],
+  "diagnostic_example_note": "本例只有一次明确错误及后续正确作答，未达到核实持续薄弱范围的证据条件，因此 verified_weak_scope 为空；不能为演示完整类别而编造结论。"
 }

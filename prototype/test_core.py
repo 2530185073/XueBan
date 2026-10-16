@@ -9,7 +9,7 @@ def k():
     return Kernel()
 
 
-def recorded(k, question="dist-a", correct=False, days=10, student="lin", assistance="none", stage="assessment"):
+def recorded(k, question="dist-a", correct=False, days=10, student="lin", assistance="none", stage="homework"):
     actor = ACTORS["teacher-east"]
     rev = k.students[student]["revision"]
     a = k.submit_attempt(actor, student, f"a-{rev}", rev, question, "synthetic", (datetime.now(timezone.utc)-timedelta(days=days)).isoformat(), stage, assistance)
@@ -111,8 +111,8 @@ def test_stale_revision_rejected(k):
 def test_plans_differ_for_individuals_and_respect_budget(k):
     recorded(k, student="lin")
     recorded(k, question="sign-a", student="yu")
-    a = k.plan(ACTORS["teacher-east"], "lin", "p", 2, 10)
-    b = k.plan(ACTORS["teacher-east"], "yu", "p", 2, 10)
+    a = k.plan(ACTORS["teacher-east"], "lin", "p", 2, 10, school_tasks_complete=True, child_willing=True, has_capacity=True)
+    b = k.plan(ACTORS["teacher-east"], "yu", "p", 2, 10, school_tasks_complete=True, child_willing=True, has_capacity=True)
     assert a["tasks"][0]["node_id"] != b["tasks"][0]["node_id"]
     assert a["allocated_minutes"] <= 10
 
@@ -188,9 +188,9 @@ def test_projection_response_cannot_mutate_shared_graph(k):
 def test_nonindependent_conflicting_evidence_is_visible(k):
     recorded(k, correct=True, days=10)
     recorded(k, "dist-b", True, 8)
-    recorded(k, "dist-d", False, 1, stage="homework")
+    recorded(k, "dist-d", False, 1, stage="homework", assistance="hint")
     assert node(k)["conflicting_evidence"]
-    plan = k.plan(ACTORS["teacher-east"], "lin", "plan", 6)
+    plan = k.plan(ACTORS["teacher-east"], "lin", "plan", 6, 5, school_tasks_complete=True, child_willing=True, has_capacity=True)
     assert plan["tasks"][0]["reason"] == "conflicting_evidence"
 
 
@@ -219,3 +219,83 @@ def test_late_import_before_cutoff_invalidates_historical_report(k):
     report = k.report(ACTORS["teacher-east"], "lin", "history", 0, (end-timedelta(days=15)).isoformat(), end.isoformat())
     recorded(k, days=10)
     assert k.reports[report["id"]]["stale"]
+
+
+def test_school_homework_builds_graph_without_extra_test(k):
+    recorded(k, correct=True, days=9, stage="homework")
+    recorded(k, "dist-b", True, 1, stage="homework")
+    assert node(k)["state"] == "stable_for_now"
+    assert node(k)["delayed_verified"]
+    assert all(a["stage"] == "homework" for a in k.attempts)
+    plan = k.plan(ACTORS["teacher-east"], "lin", "default", 4)
+    assert plan["tasks"] == []
+    assert plan["extra_minutes"] == 0
+
+
+@pytest.mark.parametrize("missing", ["school_tasks_complete", "child_willing", "has_capacity"])
+def test_each_low_burden_gate_is_required(k, missing):
+    recorded(k)
+    gates = dict(school_tasks_complete=True, child_willing=True, has_capacity=True)
+    gates[missing] = False
+    result = k.plan(ACTORS["teacher-east"], "lin", "gate", 2, 10, **gates)
+    assert result["tasks"] == []
+    assert result["allocated_minutes"] == 0
+
+
+def test_unknown_graph_does_not_trigger_optional_drilling(k):
+    result = k.plan(ACTORS["teacher-east"], "lin", "empty", 0, 10, True, True, True)
+    assert result["tasks"] == []
+    assert not k.attempts
+
+
+def test_optional_suggestion_is_small_skippable_and_has_no_debt(k):
+    recorded(k)
+    recorded(k, "sign-a")
+    result = k.plan(ACTORS["teacher-east"], "lin", "optional", 4, 10, True, True, True)
+    assert len(result["tasks"]) == 1
+    task = result["tasks"][0]
+    assert task["skippable"] and not task["carry_over_required"]
+    assert task["task_origin"] == "optional"
+    # A later plan without renewed willingness cannot carry forward a task.
+    later = k.plan(ACTORS["teacher-east"], "lin", "later", 4, 10, True, False, True)
+    assert later["tasks"] == []
+
+
+def test_parent_report_traces_homework_and_does_not_label_unknown_as_weak(k):
+    a, r = recorded(k, stage="homework")
+    now = datetime.now(timezone.utc)
+    report = k.report(ACTORS["teacher-east"], "lin", "evidence", 2, (now-timedelta(days=15)).isoformat(), now.isoformat())
+    k.publish(ACTORS["teacher-east"], report["id"], "publish", 2)
+    snapshot = k.read_report(ACTORS["parent-lin"], report["id"])["snapshot"]
+    assert not snapshot["assessment_required"]
+    assert len(snapshot["focus_items"]) == 1
+    item = snapshot["focus_items"][0]
+    assert item["observed_errors"] == item["reviewed_attempts"] == 1
+    assert item["sources"][0]["attempt_id"] == a["id"]
+    assert item["sources"][0]["evidence_id"] == r["evidence_id"]
+    assert item["sources"][0]["stage"] == "homework"
+    assert "尚不足" in item["interpretation"]
+    assert "denominator" in snapshot["unknown_knowledge_ids"]
+
+
+def test_report_can_publish_with_no_quiz_or_observed_work(k):
+    now = datetime.now(timezone.utc)
+    report = k.report(ACTORS["teacher-east"], "lin", "empty", 0, (now-timedelta(days=15)).isoformat(), now.isoformat())
+    published = k.publish(ACTORS["teacher-east"], report["id"], "publish", 0)
+    assert published["snapshot"]["focus_items"] == []
+    assert len(published["snapshot"]["unknown_knowledge_ids"]) == len(k.nodes)
+
+
+def test_retraction_removes_parent_finding_sources(k):
+    a, r = recorded(k)
+    k.review(ACTORS["teacher-east"], a["id"], "withdraw", 2, False, False, "invalid evidence", r["id"], True)
+    now = datetime.now(timezone.utc)
+    report = k.report(ACTORS["teacher-east"], "lin", "new-report", 3, (now-timedelta(days=15)).isoformat(), now.isoformat())
+    assert report["snapshot"]["focus_items"] == []
+
+
+def test_observation_only_role_receives_summary_without_review_details(k):
+    recorded(k)
+    graph = k.graph(ACTORS["coach-east"], "lin")
+    assert all(n["evidence_sources"] == [] for n in graph["nodes"])
+    assert node(k)["evidence_sources"]

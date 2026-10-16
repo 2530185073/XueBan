@@ -31,3 +31,17 @@ def test_http_refuses_forged_fields_and_invalid_dates():
             body["reviewed"] = True
             assert (await client.post("/v1/students/lin/attempts", headers=h, json=body)).status_code == 422
     asyncio.run(run())
+
+
+def test_http_plan_defaults_to_zero_extra_work_and_limits_budget():
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(False)), base_url="http://test") as client:
+            h = {"X-Demo-Actor": "teacher-east"}
+            body = {"idempotency_key": "default", "expected_revision": 0}
+            response = await client.post("/v1/students/lin/plans", headers=h, json=body)
+            assert response.status_code == 201
+            assert response.json()["extra_minutes"] == 0
+            assert response.json()["tasks"] == []
+            response = await client.post("/v1/students/lin/plans", headers=h, json={**body, "minutes": 11})
+            assert response.status_code == 422
+    asyncio.run(run())

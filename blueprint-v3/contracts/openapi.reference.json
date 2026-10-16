@@ -1,9 +1,9 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "学伴个人学习智能体参考内核",
-    "description": "仅用于本机合成数据演示。无真实模型、OCR、持久化或生产认证。OpenAPI 是已实现参考子集，完整产品接口见研发规格。",
-    "version": "0.1.0-demo"
+    "title": "学伴托管自主学习参考内核",
+    "description": "托管场景：学校任务优先、额外练习默认零、日常作业证据形成图谱与家长报告。仅用于本机合成数据演示，无真实模型、OCR、持久化或生产认证。OpenAPI 是参考子集。",
+    "version": "0.2.0-demo"
   },
   "paths": {
     "/health": {
@@ -849,7 +849,7 @@
               "preview"
             ],
             "title": "Stage",
-            "default": "practice"
+            "default": "homework"
           },
           "assistance": {
             "type": "string",
@@ -1015,10 +1015,25 @@
           },
           "minutes": {
             "type": "integer",
-            "maximum": 45.0,
-            "minimum": 5.0,
+            "maximum": 10.0,
+            "minimum": 0.0,
             "title": "Minutes",
-            "default": 20
+            "default": 0
+          },
+          "school_tasks_complete": {
+            "type": "boolean",
+            "title": "School Tasks Complete",
+            "default": false
+          },
+          "child_willing": {
+            "type": "boolean",
+            "title": "Child Willing",
+            "default": false
+          },
+          "has_capacity": {
+            "type": "boolean",
+            "title": "Has Capacity",
+            "default": false
           }
         },
         "additionalProperties": false,

@@ -21,7 +21,7 @@
     "result": "correct",
     "assistance_level": "none",
     "independent_condition_verified": true,
-    "stage": "delayed_check",
+    "stage": "homework",
     "graph_version": "demo-math-v1",
     "rubric_version": "demo-rubric-v1"
   }

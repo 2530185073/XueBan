@@ -1,4 +1,6 @@
--- 学伴 v3 / PostgreSQL 16+ production-target foundation, 25 tables.
+-- 学伴 v3.1 / custody homework support / PostgreSQL 16+ target, 25 tables.
+-- tenant = custody operator; teacher = on-site homework support/review permission.
+-- No supplementary teaching program is implied by these technical role names.
 -- DRAFT CONTRACT: NOT a completed deployment. Requires real PostgreSQL migration,
 -- rollback/restore, concurrent-write, privilege and RLS integration tests before use.
 -- Static validation on 2026-10-16: pglast PostgreSQL grammar parser accepted 90
@@ -296,7 +298,7 @@ CREATE TABLE student_knowledge_state (
     student_id uuid NOT NULL,
     curriculum_version_id uuid NOT NULL,
     node_id uuid NOT NULL,
-    state text NOT NULL CHECK (state IN ('insufficient_evidence','awaiting_independent_check','needs_support','consolidating','stable_for_now','conflicting_evidence')),
+    state text NOT NULL CHECK (state IN ('insufficient_evidence','awaiting_independent_check','needs_diagnosis','needs_support','consolidating','stable_for_now','conflicting_evidence')),
     source_revision bigint NOT NULL CHECK (source_revision >= 0),
     policy_version text NOT NULL,
     last_evidence_id uuid,
@@ -397,8 +399,17 @@ CREATE TABLE learning_task (
     agent_run_id uuid,
     curriculum_version_id uuid,
     node_id uuid,
-    task_type text NOT NULL CHECK (task_type IN ('correction','targeted_practice','independent_check','delayed_review','preview','habit')),
-    status text NOT NULL DEFAULT 'proposed' CHECK (status IN ('proposed','approved','in_progress','done','cancelled','stale')),
+    task_type text NOT NULL CHECK (task_type IN ('school_homework','homework_question','correction','targeted_practice','independent_check','delayed_review','preview','habit')),
+    task_origin text NOT NULL DEFAULT 'optional' CHECK (task_origin IN ('school','optional')),
+    school_source_ref text,
+    school_tasks_complete boolean NOT NULL DEFAULT false,
+    child_willing boolean NOT NULL DEFAULT false,
+    has_capacity boolean NOT NULL DEFAULT false,
+    extra_minutes integer NOT NULL DEFAULT 0 CHECK (extra_minutes BETWEEN 0 AND 120),
+    carry_over_required boolean NOT NULL DEFAULT false,
+    -- Service verifies current origin/gates; whole-plan optional total is capped
+    -- transactionally. Per-row checks cannot prove willingness or available time.
+    status text NOT NULL DEFAULT 'proposed' CHECK (status IN ('proposed','approved','in_progress','paused','skipped','done','cancelled','stale')),
     estimated_minutes integer NOT NULL CHECK (estimated_minutes BETWEEN 1 AND 120),
     owner_user_id uuid NOT NULL,
     approved_by uuid,
@@ -412,7 +423,11 @@ CREATE TABLE learning_task (
     FOREIGN KEY (tenant_id,owner_user_id) REFERENCES app_user(tenant_id,id),
     FOREIGN KEY (tenant_id,approved_by) REFERENCES app_user(tenant_id,id),
     CHECK ((curriculum_version_id IS NULL) = (node_id IS NULL)),
-    CHECK (status NOT IN ('approved','in_progress','done') OR approved_by IS NOT NULL)
+    CHECK (status NOT IN ('approved','in_progress','done') OR approved_by IS NOT NULL),
+    CHECK (task_origin <> 'school' OR (school_source_ref IS NOT NULL AND length(btrim(school_source_ref)) > 0 AND extra_minutes = 0)),
+    CHECK (task_origin <> 'optional' OR (NOT carry_over_required AND due_at IS NULL)),
+    CHECK (task_origin <> 'optional' OR status NOT IN ('approved','in_progress','done') OR
+        (school_tasks_complete AND child_willing AND has_capacity AND extra_minutes >= estimated_minutes))
 );
 CREATE TABLE intervention (
     tenant_id uuid NOT NULL,
@@ -447,7 +462,16 @@ CREATE TABLE assessment (
     assessment_key uuid NOT NULL,
     version integer NOT NULL CHECK (version > 0),
     purpose text NOT NULL CHECK (purpose IN ('baseline','immediate_transfer','delayed_retention','fortnightly')),
-    status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','ready','active','submitted','reviewed','cancelled')),
+    status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','ready','active','paused','skipped','submitted','reviewed','cancelled')),
+    participation_optional boolean NOT NULL DEFAULT true CHECK (participation_optional),
+    school_tasks_complete boolean NOT NULL DEFAULT false,
+    child_willing boolean NOT NULL DEFAULT false,
+    has_capacity boolean NOT NULL DEFAULT false,
+    extra_minutes integer NOT NULL DEFAULT 0 CHECK (extra_minutes BETWEEN 0 AND 120),
+    estimated_minutes integer NOT NULL DEFAULT 0 CHECK (estimated_minutes BETWEEN 0 AND 120),
+    -- Shares the student's optional-work budget with learning_task; service must
+    -- reserve/check the combined total transactionally, never grant a second pool.
+    -- Half-month reports are independent of participation; no makeup-test debt.
     source_revision bigint NOT NULL CHECK (source_revision >= 0),
     policy_version text NOT NULL,
     planned_for timestamptz NOT NULL,
@@ -459,7 +483,9 @@ CREATE TABLE assessment (
     FOREIGN KEY (tenant_id,campus_id,student_id) REFERENCES student(tenant_id,campus_id,id),
     FOREIGN KEY (tenant_id,proctor_user_id) REFERENCES app_user(tenant_id,id),
     UNIQUE (tenant_id,campus_id,student_id,assessment_key,version),
-    CHECK (ended_at IS NULL OR (started_at IS NOT NULL AND ended_at >= started_at))
+    CHECK (ended_at IS NULL OR (started_at IS NOT NULL AND ended_at >= started_at)),
+    CHECK (status NOT IN ('active','submitted','reviewed') OR
+        (school_tasks_complete AND child_willing AND has_capacity AND estimated_minutes > 0 AND extra_minutes >= estimated_minutes))
 );
 CREATE TABLE assessment_item (
     tenant_id uuid NOT NULL,
@@ -657,7 +683,7 @@ BEGIN
     NEW.recorded_at := clock_timestamp();
     SELECT * INTO STRICT a FROM xueban.attempt WHERE tenant_id=NEW.tenant_id
       AND campus_id=NEW.campus_id AND student_id=NEW.student_id AND id=NEW.attempt_id;
-    IF NEW.independence_confirmed AND (a.assistance <> 'none' OR a.stage NOT IN ('practice','assessment')) THEN
+    IF NEW.independence_confirmed AND (a.assistance <> 'none' OR a.stage NOT IN ('homework','practice','assessment')) THEN
         RAISE EXCEPTION 'independence_incompatible_with_attempt' USING ERRCODE='23514';
     END IF;
     IF NEW.supersedes_id IS NOT NULL THEN
