@@ -1,0 +1,275 @@
+{
+  "schema_version": "agent-workboard.v1",
+  "product_version": "3.5",
+  "updated_at": "2026-10-16",
+  "execution_mode": "interactive_ai_agent_team",
+  "max_parallel_subagents_this_session": 3,
+  "status_semantics": {
+    "completed": "仅该子任务交付及检查通过；不代表关联P1任务完成",
+    "artifact_ready": "产物已交付，仍待集成或外部验证",
+    "in_progress": "已实际派发执行",
+    "not_started": "后续任务已拆分，尚未执行"
+  },
+  "release_gate_status": {
+    "C0": "not_passed",
+    "R1": "not_passed",
+    "R2": "not_passed"
+  },
+  "items": [
+    {
+      "id": "A01",
+      "title": "核验教材候选与版本",
+      "owner_role": "android_rollout_pm",
+      "dependency_ids": [],
+      "phase1_task_ids": [
+        "P1-01"
+      ],
+      "status": "completed",
+      "artifact_paths": [
+        "CURRICULUM_RESOURCES.md"
+      ],
+      "acceptance": "五个仓库固定提交、六册候选和版次/许可缺口可复查；不代表资源已可生产使用"
+    },
+    {
+      "id": "A02",
+      "title": "一期接口与状态候选",
+      "owner_role": "correction_architecture_review",
+      "dependency_ids": [],
+      "phase1_task_ids": [
+        "P1-01"
+      ],
+      "status": "artifact_ready",
+      "artifact_paths": [
+        "contracts/phase1/"
+      ],
+      "acceptance": "Schema/样例和拒绝反例通过，独立审查；冻结状态仍需客户端服务联调",
+      "evidence": "validate.py通过4 schemas/328 refs/32 operations/49 fixtures/19 negative checks；draft，非服务实现"
+    },
+    {
+      "id": "A03",
+      "title": "安卓本地相机与页面骨架",
+      "owner_role": "glory_phase1_review",
+      "dependency_ids": [],
+      "phase1_task_ids": [
+        "P1-03"
+      ],
+      "status": "artifact_ready",
+      "artifact_paths": [
+        "apps/android/"
+      ],
+      "acceptance": "真实CameraX实现，私有文件保存，未接服务诚实显示；编译和真机另验",
+      "evidence": "25aa9dbc0112737e3cebff1d7e8eeb0444801517；源码/XML/Wrapper检查通过，本机JDK与SDK缺失，CI另验"
+    },
+    {
+      "id": "A04",
+      "title": "安卓构建环境与CI",
+      "owner_role": "integration_agent",
+      "dependency_ids": [
+        "A03"
+      ],
+      "phase1_task_ids": [
+        "P1-03"
+      ],
+      "status": "in_progress",
+      "artifact_paths": [
+        ".github/workflows/android-checks.yml"
+      ],
+      "acceptance": "匹配JDK/SDK/Gradle构建并lint，保存开发APK；失败记录实际日志，不视为真机通过"
+    },
+    {
+      "id": "A05",
+      "title": "评测集设计与可信标签",
+      "owner_role": "evaluation_agent",
+      "dependency_ids": [],
+      "phase1_task_ids": [
+        "P1-01",
+        "P1-15"
+      ],
+      "status": "not_started",
+      "artifact_paths": [
+        "evals/correction/"
+      ],
+      "acceptance": "开发/校准/保留集分开，题目及拍摄变体分组去泄漏；标注由具备能力的内容审核者核实，阈值在保留集前冻结"
+    },
+    {
+      "id": "B01",
+      "title": "身份与持久化服务",
+      "owner_role": "backend_agent",
+      "dependency_ids": [
+        "A02"
+      ],
+      "phase1_task_ids": [
+        "P1-02",
+        "P1-12"
+      ],
+      "status": "not_started",
+      "artifact_paths": [
+        "services/backend/"
+      ],
+      "acceptance": "生产鉴权、迁移、学生授权、重启持久化与跨生负向测试；演示身份不能替代"
+    },
+    {
+      "id": "B02",
+      "title": "私有上传与任务账本",
+      "owner_role": "backend_agent",
+      "dependency_ids": [
+        "B01"
+      ],
+      "phase1_task_ids": [
+        "P1-04"
+      ],
+      "status": "not_started",
+      "artifact_paths": [
+        "services/backend/"
+      ],
+      "acceptance": "完整性确认、幂等、租约/重试/迟到响应、原图授权访问；重复上传不重复作答"
+    },
+    {
+      "id": "B03",
+      "title": "真实识别与核验路线",
+      "owner_role": "correction_engine_agent",
+      "dependency_ids": [
+        "A02",
+        "A05"
+      ],
+      "phase1_task_ids": [
+        "P1-05",
+        "P1-06"
+      ],
+      "status": "not_started",
+      "artifact_paths": [
+        "services/backend/adapters/",
+        "evals/correction/"
+      ],
+      "acceptance": "同开发样本比较路线，报告切题覆盖/错判/漏判/无法判断/成本时延；无密钥时不得称效果通过"
+    },
+    {
+      "id": "B04",
+      "title": "安卓身份上传联调",
+      "owner_role": "android_agent",
+      "dependency_ids": [
+        "A03",
+        "A04",
+        "B02"
+      ],
+      "phase1_task_ids": [
+        "P1-03",
+        "P1-04"
+      ],
+      "status": "not_started",
+      "artifact_paths": [
+        "apps/android/"
+      ],
+      "acceptance": "照片真实进服务，授权切换、重启、网络失败恢复；本地未提交不显示成功"
+    },
+    {
+      "id": "B05",
+      "title": "坐班核实工作台",
+      "owner_role": "staff_web_agent",
+      "dependency_ids": [
+        "A02",
+        "B01"
+      ],
+      "phase1_task_ids": [
+        "P1-09"
+      ],
+      "status": "not_started",
+      "artifact_paths": [
+        "apps/staff-web/"
+      ],
+      "acceptance": "原图/候选/帮助历史同屏，接单/修订/确认/无法判断/冲突；后端真实联调后验收"
+    },
+    {
+      "id": "C01",
+      "title": "提示订正与历史贯通",
+      "owner_role": "integration_agent",
+      "dependency_ids": [
+        "B03",
+        "B04",
+        "B05"
+      ],
+      "phase1_task_ids": [
+        "P1-07",
+        "P1-08",
+        "P1-11"
+      ],
+      "status": "not_started",
+      "artifact_paths": [
+        "apps/android/",
+        "apps/staff-web/",
+        "services/backend/"
+      ],
+      "acceptance": "按文件所有权拆分并行；同题新作答parent/root、提示失效、再检查、继续历史，完成C0"
+    },
+    {
+      "id": "C02",
+      "title": "申诉改判与更正事件",
+      "owner_role": "backend_agent",
+      "dependency_ids": [
+        "C01"
+      ],
+      "phase1_task_ids": [
+        "P1-10"
+      ],
+      "status": "not_started",
+      "artifact_paths": [
+        "services/backend/",
+        "apps/staff-web/"
+      ],
+      "acceptance": "改判追加不覆盖历史、旧Worker不覆盖新版本、依赖结果失效、事务Outbox可重放"
+    },
+    {
+      "id": "D01",
+      "title": "故障恢复及数据治理",
+      "owner_role": "release_evaluation_agent",
+      "dependency_ids": [
+        "C02"
+      ],
+      "phase1_task_ids": [
+        "P1-13",
+        "P1-14"
+      ],
+      "status": "not_started",
+      "artifact_paths": [
+        "infra/",
+        "docs/runbooks/",
+        "evals/correction/"
+      ],
+      "acceptance": "真机安装升级/杀进程、隔离撤权删除、恢复备份重应用删除、运行告警与回滚"
+    },
+    {
+      "id": "D02",
+      "title": "独立质量和负荷验收",
+      "owner_role": "evaluation_agent",
+      "dependency_ids": [
+        "A05",
+        "C02",
+        "D01"
+      ],
+      "phase1_task_ids": [
+        "P1-15"
+      ],
+      "status": "not_started",
+      "artifact_paths": [
+        "evals/correction/"
+      ],
+      "acceptance": "冻结保留集和阈值后评测，模型与人工结果分列，现场等待/负荷达标，R1证据"
+    },
+    {
+      "id": "E01",
+      "title": "现场试点与发布交接",
+      "owner_role": "integration_agent",
+      "dependency_ids": [
+        "D02"
+      ],
+      "phase1_task_ids": [
+        "P1-16"
+      ],
+      "status": "not_started",
+      "artifact_paths": [
+        "docs/runbooks/"
+      ],
+      "acceptance": "具备实际设备/授权/坐班负责人，真实出勤观察，16项验收与R2后发布，记录未覆盖范围"
+    }
+  ]
+}

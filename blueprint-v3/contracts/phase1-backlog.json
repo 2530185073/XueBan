@@ -1,9 +1,9 @@
 {
   "schema_version": "phase1-backlog.v1",
-  "product_version": "3.4",
+  "product_version": "3.5",
   "source_document": "../../PHASE1.md",
   "scope": "phase1_correction_app",
-  "status_note": "16 项均为一期必须交付的 P0；全部初始待开发。linked_product_story_ids 仅用于追溯全产品故事，不继承其后续模块依赖。",
+  "status_note": "16 项均为一期 P0。P1-01/P1-03 已启动契约候选及安卓源码工作，均未验收完成；其余任务待实施。Agent 子任务与生产验收分别记录。",
   "platform_decision": {
     "status": "confirmed_by_user",
     "target": "android_tablet_app",
@@ -35,13 +35,13 @@
       "title": "冻结一期设备、题型和验收口径",
       "owner_hint": "PO",
       "priority": "P0",
-      "status": "not_started",
+      "status": "in_progress",
       "dependency_ids": [],
       "linked_product_story_ids": [],
       "acceptance_success": "形成设备/系统/安装方式、内容支持清单、接口与数据规范、独立评测样本和发布指标冻结记录",
       "acceptance_failure": "未确认项标明负责人和阻塞范围；不得把网页或未测准确率记为 App 交付",
-      "planned_work_weeks": [
-        1
+      "delivery_waves": [
+        "A"
       ]
     },
     {
@@ -59,9 +59,8 @@
       ],
       "acceptance_success": "学生 App 与坐班工作台真实登录，服务端校验归属和监护授权，切换共享设备清理上一学生会话",
       "acceptance_failure": "改请求参数、旧会话和缓存不能跨学生读取或写入；未授权照片不能上传",
-      "planned_work_weeks": [
-        1,
-        2
+      "delivery_waves": [
+        "B"
       ]
     },
     {
@@ -69,7 +68,7 @@
       "title": "可安装 App 与相机采集",
       "owner_hint": "FE",
       "priority": "P0",
-      "status": "not_started",
+      "status": "in_progress",
       "dependency_ids": [
         "P1-01",
         "P1-02"
@@ -79,9 +78,9 @@
       ],
       "acceptance_success": "声明设备实际安装运行，完成权限、单页/多页拍摄、预览旋转裁切、原图与页面关系保存",
       "acceptance_failure": "权限拒绝、存储不足、模糊反光及漏拍有恢复路径；真实拍摄产物不能被固定图片替代",
-      "planned_work_weeks": [
-        1,
-        2
+      "delivery_waves": [
+        "A",
+        "B"
       ]
     },
     {
@@ -101,8 +100,8 @@
       ],
       "acceptance_success": "私有上传完整性确认，幂等提交与逐页任务状态可查；已接收和仅本地草稿明确区分",
       "acceptance_failure": "超时、重复点击、断网重试和局部失败不丢记录、不重复产生业务作答，不把漏题视为已检查",
-      "planned_work_weeks": [
-        2
+      "delivery_waves": [
+        "B"
       ]
     },
     {
@@ -119,9 +118,8 @@
       ],
       "acceptance_success": "接入真实识别，题干/作答/公式/区域对应原图；人工修订保留版本并使旧分析过期",
       "acceptance_failure": "漏切、错切、不完整题干保留待补拍或待核实；未知知识点和无既有题库 ID 不阻断识别",
-      "planned_work_weeks": [
-        1,
-        2
+      "delivery_waves": [
+        "B"
       ]
     },
     {
@@ -138,9 +136,8 @@
       ],
       "acceptance_success": "真实模型/规则形成候选结果与依据，覆盖正确题及等价解法，定位有过程题的第一可核实错误",
       "acceptance_failure": "缺过程不编错步；模型规则冲突和未支持题型不硬判；候选不冒充确认；覆盖率与误判分别报告",
-      "planned_work_weeks": [
-        1,
-        2
+      "delivery_waves": [
+        "B"
       ]
     },
     {
@@ -157,8 +154,8 @@
       ],
       "acceptance_success": "方向提示、必要关键步骤与坐班求助可操作，保留帮助层级；不依赖长期智能体或个人图谱",
       "acceptance_failure": "不默认给整页答案，不无限反问，不拒绝休息，不追加强制新题；旧判定撤销后不继续使用旧提示",
-      "planned_work_weeks": [
-        3
+      "delivery_waves": [
+        "C"
       ]
     },
     {
@@ -178,8 +175,8 @@
       ],
       "acceptance_success": "重新拍摄修改位置并确认原题，形成 parent/root 关联的新作答，再检查显示通过、仍错或待核实",
       "acceptance_failure": "点击完成不算通过；关联不能跨生跨题、循环或无源；重传去重，实际新订正保留；帮助后正确不标独立掌握",
-      "planned_work_weeks": [
-        3
+      "delivery_waves": [
+        "C"
       ]
     },
     {
@@ -198,9 +195,9 @@
       ],
       "acceptance_success": "查看原图、候选、提示历史，接单答疑、确认或保留未解决；记录权限、版本和处理时长",
       "acceptance_failure": "未接单不显示处理中；并发旧版本拒绝；无能力确认则待核实；候选辅助与正式确认状态分开",
-      "planned_work_weeks": [
-        2,
-        3
+      "delivery_waves": [
+        "B",
+        "C"
       ]
     },
     {
@@ -219,9 +216,9 @@
       ],
       "acceptance_success": "学生申请重查，老师新决定替代旧判断；历史保留，当前标记与提示失效；发布可重放更正事件",
       "acceptance_failure": "刷新或重放不能复活撤销结果；没有图谱或报告服务也可完成更正；下游未部署不阻塞源记录提交",
-      "planned_work_weeks": [
-        3,
-        4
+      "delivery_waves": [
+        "C",
+        "D"
       ]
     },
     {
@@ -239,8 +236,8 @@
       ],
       "acceptance_success": "本人可回看正确/错误/待处理作业、提示与再检查，按日期或科目查找并继续未解决事项",
       "acceptance_failure": "只采到部分作业不显示全作业正确率；无知识点映射仍可回看；未实现的图谱和报告不放空入口",
-      "planned_work_weeks": [
-        3
+      "delivery_waves": [
+        "C"
       ]
     },
     {
@@ -260,9 +257,8 @@
       ],
       "acceptance_success": "生产迁移及持久存储可运行，保存照片题区、作答、判定、帮助、订正与更正版本；事务和幂等保证一致",
       "acceptance_failure": "不依赖知识点非空、完整图谱或 student_agent 才可存原题；模型失败不能写确认成功；后续消费者可重放有效事件",
-      "planned_work_weeks": [
-        1,
-        2
+      "delivery_waves": [
+        "B"
       ]
     },
     {
@@ -283,8 +279,8 @@
       ],
       "acceptance_success": "后台终止、弱网、过期登录、App 更新、服务重启后恢复到准确状态；任务账本持久化，故障可定位",
       "acceptance_failure": "不丢服务器已确认数据、不串人、不假完成；纯本地未上传记录明确提示；离线不能假装完成云端判断",
-      "planned_work_weeks": [
-        4
+      "delivery_waves": [
+        "D"
       ]
     },
     {
@@ -306,8 +302,8 @@
       ],
       "acceptance_success": "验证 API/图片/Worker/设备缓存隔离，撤权及保留到期删除，备份恢复和删除清单重应用，日志最小化",
       "acceptance_failure": "越权访问、删除后可读或恢复后资料复活均阻断；真实账号和数据流程不可被演示身份替代",
-      "planned_work_weeks": [
-        4
+      "delivery_waves": [
+        "D"
       ]
     },
     {
@@ -331,13 +327,11 @@
       ],
       "acceptance_success": "冻结保留测试集，按题型/图像条件测误判漏判、覆盖、提示、再检查与时延；记录人工等待/容量；模型变更复验",
       "acceptance_failure": "不能在看到保留集结果后调分母或阈值；大量不判断不能冒充高准确率；严重误导或容量超限不通过",
-      "planned_work_weeks": [
-        1,
-        2,
-        3,
-        4,
-        5,
-        6
+      "delivery_waves": [
+        "A",
+        "B",
+        "D",
+        "E"
       ]
     },
     {
@@ -360,30 +354,38 @@
       ],
       "acceptance_success": "C0/R1/R2 证据齐全，连续真实使用并关闭阻断项，交付签名 App、部署迁移、配置模板、回滚、支持手册和设备矩阵",
       "acceptance_failure": "不把无 App 的接口演示当交付；不等待图谱、报告或两个半月周期；未达质量与稳定性门槛不得发布",
-      "planned_work_weeks": [
-        4,
-        5,
-        6
+      "delivery_waves": [
+        "D",
+        "E"
       ]
     }
   ],
   "implementation_document": "../../ANDROID_PHASE1.md",
-  "dependency_semantics": "dependency_ids 是完成验收所需依赖；样本、接口设计和评测基线可提前并行。P1-15 的前置评测从 P1-01 第一周开始。",
+  "dependency_semantics": "dependency_ids 是完成验收所需依赖；契约、相机样机、样本和评测设计可提前并行。P1-15 的前置工作从 A 波启动。",
   "schedule_assumptions": {
-    "status": "planning_estimate_not_commitment",
-    "trial_candidate_week": 4,
-    "conditional_delivery_weeks": [
-      5,
-      6
+    "status": "milestone_based_ai_team",
+    "execution_document": "../../AI_AGENT_EXECUTION.md",
+    "scope": "首发初中人教版已确认；数学单年级试验为建议，具体版本/题型/设备待冻结",
+    "wave_ids": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E"
     ],
-    "scope": "建议一个托管点、一款主力安卓平板、一个年级数学及明确题型；年级科目尚待现场冻结",
-    "team_roles": [
-      "android",
-      "backend",
-      "staff_web",
-      "ai_evaluation",
-      "qa"
-    ],
-    "field_observation": "建议至少10个实际出勤日；容量不足则缩小或延长"
+    "field_observation": "建议至少10个实际出勤日；不得用Agent并发替代真实观察"
+  },
+  "launch_decision": {
+    "stage": "junior_middle_school",
+    "publisher": "PEP",
+    "confirmed_by_user": true,
+    "team": "ai_agent_team",
+    "subject_validation_proposal": "mathematics",
+    "remaining_to_freeze": [
+      "school_system",
+      "grade_and_term",
+      "textbook_revision",
+      "supported_subjects_and_question_types"
+    ]
   }
 }

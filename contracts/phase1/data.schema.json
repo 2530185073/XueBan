@@ -1,0 +1,2244 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.xueban.invalid/phase1/data.schema.json",
+  "title": "Phase 1 persisted records and response resources",
+  "description": "draft-0.1; contract only, not an implemented service.",
+  "$defs": {
+    "Scope": {
+      "type": "object",
+      "properties": {
+        "tenant_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "campus_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "student_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        }
+      },
+      "required": [
+        "tenant_id",
+        "campus_id",
+        "student_id"
+      ],
+      "additionalProperties": false
+    },
+    "CurriculumContext": {
+      "type": "object",
+      "properties": {
+        "stage": {
+          "const": "junior_middle"
+        },
+        "publisher_code": {
+          "const": "PEP"
+        },
+        "grade": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "enum": [
+                7,
+                8,
+                9
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subject": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "volume": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "first",
+                "second",
+                "full_year"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "edition": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "stage",
+        "publisher_code",
+        "grade",
+        "subject",
+        "volume",
+        "edition"
+      ],
+      "additionalProperties": false
+    },
+    "Region": {
+      "type": "object",
+      "properties": {
+        "asset_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "x": {
+          "type": "number",
+          "minimum": 0
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "coordinate_space": {
+          "const": "original_pixels"
+        }
+      },
+      "required": [
+        "asset_id",
+        "x",
+        "y",
+        "width",
+        "height",
+        "coordinate_space"
+      ],
+      "additionalProperties": false
+    },
+    "Coverage": {
+      "type": "object",
+      "properties": {
+        "collection_scope": {
+          "type": "string",
+          "enum": [
+            "partial",
+            "declared_complete",
+            "unknown"
+          ]
+        },
+        "unrecognized_regions": {
+          "type": "array",
+          "items": {
+            "$ref": "data.schema.json#/$defs/Region"
+          }
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "collection_scope",
+        "unrecognized_regions",
+        "note"
+      ],
+      "additionalProperties": false
+    },
+    "AuthorizedStudent": {
+      "type": "object",
+      "properties": {
+        "student_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "campus_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        }
+      },
+      "required": [
+        "student_id",
+        "display_name",
+        "campus_id"
+      ],
+      "additionalProperties": false
+    },
+    "IdentityContext": {
+      "type": "object",
+      "properties": {
+        "actor_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "$ref": "states.schema.json#/$defs/Role"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "authorized_students": {
+          "type": "array",
+          "items": {
+            "$ref": "data.schema.json#/$defs/AuthorizedStudent"
+          }
+        }
+      },
+      "required": [
+        "actor_id",
+        "roles",
+        "authorized_students"
+      ],
+      "additionalProperties": false
+    },
+    "HomeworkSession": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "scope": {
+          "$ref": "data.schema.json#/$defs/Scope"
+        },
+        "curriculum": {
+          "$ref": "data.schema.json#/$defs/CurriculumContext"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "coverage": {
+          "$ref": "data.schema.json#/$defs/Coverage"
+        },
+        "asset_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+          },
+          "uniqueItems": true
+        },
+        "question_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+          },
+          "uniqueItems": true
+        },
+        "case_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+          },
+          "uniqueItems": true
+        },
+        "job_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+          },
+          "uniqueItems": true
+        },
+        "processing_blocked": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "scope",
+        "curriculum",
+        "title",
+        "created_at",
+        "occurred_at",
+        "coverage",
+        "asset_ids",
+        "question_ids",
+        "case_ids",
+        "job_ids",
+        "processing_blocked"
+      ],
+      "additionalProperties": false
+    },
+    "ImageAsset": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "homework_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "status": {
+          "$ref": "states.schema.json#/$defs/AssetStatus"
+        },
+        "page_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "byte_size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "mime_type": {
+          "type": "string",
+          "enum": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ]
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "source_asset_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_region": {
+          "anyOf": [
+            {
+              "$ref": "data.schema.json#/$defs/Region"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "homework_id",
+        "status",
+        "page_index",
+        "sha256",
+        "byte_size",
+        "mime_type",
+        "width",
+        "height",
+        "source_asset_id",
+        "source_region",
+        "created_at"
+      ],
+      "additionalProperties": false
+    },
+    "UploadTicket": {
+      "type": "object",
+      "properties": {
+        "asset": {
+          "$ref": "data.schema.json#/$defs/ImageAsset"
+        },
+        "put_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "required_headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "asset",
+        "put_url",
+        "expires_at",
+        "required_headers"
+      ],
+      "additionalProperties": false
+    },
+    "AssetAccess": {
+      "type": "object",
+      "properties": {
+        "asset_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "read_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "asset_id",
+        "read_url",
+        "expires_at"
+      ],
+      "additionalProperties": false
+    },
+    "CapturedQuestionRevision": {
+      "type": "object",
+      "properties": {
+        "question_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "homework_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "stem_text": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "regions": {
+          "type": "array",
+          "items": {
+            "$ref": "data.schema.json#/$defs/Region"
+          },
+          "minItems": 1
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "recognizer",
+            "staff_revision",
+            "staff_layout"
+          ]
+        },
+        "source_actor_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bank_question_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "knowledge_point_ids": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+              },
+              "uniqueItems": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lifecycle": {
+          "$ref": "states.schema.json#/$defs/RecordLifecycle"
+        },
+        "replacement_question_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "question_id",
+        "revision",
+        "homework_id",
+        "stem_text",
+        "regions",
+        "source",
+        "source_actor_id",
+        "bank_question_id",
+        "knowledge_point_ids",
+        "created_at",
+        "lifecycle",
+        "replacement_question_ids"
+      ],
+      "additionalProperties": false
+    },
+    "Attempt": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "case_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "question_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "captured_question_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "parent_attempt_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "root_attempt_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "asset_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "recognition_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "answer_text": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "answer_regions": {
+          "type": "array",
+          "items": {
+            "$ref": "data.schema.json#/$defs/Region"
+          }
+        },
+        "recognition_status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "ready",
+            "needs_revision",
+            "failed"
+          ]
+        },
+        "help_condition": {
+          "type": "string",
+          "enum": [
+            "unknown",
+            "none_reported",
+            "hint_used",
+            "staff_help",
+            "answer_shown"
+          ]
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "case_id",
+        "question_id",
+        "captured_question_revision",
+        "parent_attempt_id",
+        "root_attempt_id",
+        "asset_ids",
+        "recognition_revision",
+        "answer_text",
+        "answer_regions",
+        "recognition_status",
+        "help_condition",
+        "occurred_at",
+        "created_at"
+      ],
+      "additionalProperties": false
+    },
+    "InputVersions": {
+      "type": "object",
+      "properties": {
+        "question_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "question_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "attempt_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "attempt_recognition_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "case_revision_at_submission": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "仅记录受理时聚合版本；非计算输入。任务创建或提示展示导致聚合版本变化时不因此作废。Worker 另校验有效题目/答案版本及当前作答指针。"
+        },
+        "fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "question_id",
+        "question_revision",
+        "attempt_id",
+        "attempt_recognition_revision",
+        "case_revision_at_submission",
+        "fingerprint"
+      ],
+      "additionalProperties": false
+    },
+    "Basis": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "calculation",
+            "equivalence",
+            "reviewed_reference",
+            "model_hypothesis",
+            "staff_observation"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "source_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "regions": {
+          "type": "array",
+          "items": {
+            "$ref": "data.schema.json#/$defs/Region"
+          }
+        }
+      },
+      "required": [
+        "kind",
+        "summary",
+        "source_ref",
+        "regions"
+      ],
+      "additionalProperties": false
+    },
+    "Decision": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "case_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "check_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "input_versions": {
+          "$ref": "data.schema.json#/$defs/InputVersions"
+        },
+        "origin": {
+          "type": "string",
+          "enum": [
+            "model",
+            "rule",
+            "staff"
+          ]
+        },
+        "validity": {
+          "$ref": "states.schema.json#/$defs/DecisionValidity"
+        },
+        "verdict": {
+          "$ref": "states.schema.json#/$defs/Verdict"
+        },
+        "reason_code": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "unclear_image",
+                "incomplete_question",
+                "unsupported_type",
+                "recognition_conflict",
+                "verification_conflict",
+                "insufficient_process",
+                "needs_staff",
+                "other"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "basis": {
+          "type": "array",
+          "items": {
+            "$ref": "data.schema.json#/$defs/Basis"
+          },
+          "minItems": 1
+        },
+        "first_error_region": {
+          "anyOf": [
+            {
+              "$ref": "data.schema.json#/$defs/Region"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confirmation_source": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "staff_review"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confirmed_by": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confirmed_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "replaces_decision_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "invalidated_by_event_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "case_id",
+        "check_id",
+        "input_versions",
+        "origin",
+        "validity",
+        "verdict",
+        "reason_code",
+        "basis",
+        "first_error_region",
+        "confirmation_source",
+        "confirmed_by",
+        "confirmed_at",
+        "replaces_decision_id",
+        "invalidated_by_event_id",
+        "created_at"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "validity": {
+                "const": "confirmed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "origin": {
+                "const": "staff"
+              },
+              "confirmation_source": {
+                "const": "staff_review"
+              },
+              "confirmed_by": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+              },
+              "confirmed_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "verdict": {
+                "not": {
+                  "const": "unable_to_judge"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "origin": {
+                "enum": [
+                  "model",
+                  "rule"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "validity": {
+                "not": {
+                  "const": "confirmed"
+                }
+              },
+              "confirmation_source": {
+                "type": "null"
+              },
+              "confirmed_by": {
+                "type": "null"
+              },
+              "confirmed_at": {
+                "type": "null"
+              },
+              "check_id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "verdict": {
+                "const": "unable_to_judge"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "validity": {
+                "enum": [
+                  "needs_review",
+                  "stale",
+                  "retracted"
+                ]
+              },
+              "reason_code": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "TechnicalFailure": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "provider_timeout",
+            "provider_unavailable",
+            "storage_error",
+            "invalid_provider_output",
+            "worker_failure"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "additionalProperties": false
+    },
+    "ResultRef": {
+      "type": "object",
+      "properties": {
+        "resource_type": {
+          "type": "string",
+          "enum": [
+            "homework",
+            "attempt",
+            "check",
+            "hint",
+            "deletion"
+          ]
+        },
+        "resource_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        }
+      },
+      "required": [
+        "resource_type",
+        "resource_id"
+      ],
+      "additionalProperties": false
+    },
+    "Job": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "recognize_homework",
+            "recognize_attempt",
+            "check",
+            "hint",
+            "delete",
+            "repair_layout"
+          ]
+        },
+        "status": {
+          "$ref": "states.schema.json#/$defs/JobStatus"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "retry_after_seconds": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "data.schema.json#/$defs/TechnicalFailure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "data.schema.json#/$defs/ResultRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "kind",
+        "status",
+        "created_at",
+        "updated_at",
+        "retry_after_seconds",
+        "failure",
+        "result"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "succeeded"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "failure": {
+                "type": "null"
+              },
+              "result": {
+                "$ref": "data.schema.json#/$defs/ResultRef"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "failed",
+                  "retryable_failed"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "failure": {
+                "$ref": "data.schema.json#/$defs/TechnicalFailure"
+              },
+              "result": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "retryable_failed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "failure": {
+                "properties": {
+                  "retryable": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "queued",
+                  "running",
+                  "superseded",
+                  "cancelled"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "type": "null"
+              },
+              "failure": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Accepted": {
+      "type": "object",
+      "properties": {
+        "job": {
+          "$ref": "data.schema.json#/$defs/Job"
+        },
+        "created_resource": {
+          "anyOf": [
+            {
+              "$ref": "data.schema.json#/$defs/ResultRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "job",
+        "created_resource"
+      ],
+      "additionalProperties": false
+    },
+    "CheckRun": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "job_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "case_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "input_versions": {
+          "$ref": "data.schema.json#/$defs/InputVersions"
+        },
+        "model_version": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rule_version": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prompt_version": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "decision_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+          },
+          "uniqueItems": true
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "job_id",
+        "case_id",
+        "input_versions",
+        "model_version",
+        "rule_version",
+        "prompt_version",
+        "decision_ids",
+        "created_at"
+      ],
+      "additionalProperties": false
+    },
+    "Hint": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "case_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "attempt_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "source_decision_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "source_decision_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "level": {
+          "type": "string",
+          "enum": [
+            "direction",
+            "key_step",
+            "staff_handoff"
+          ]
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "exposes_answer": {
+          "type": "boolean"
+        },
+        "source_is_provisional": {
+          "type": "boolean"
+        },
+        "validity": {
+          "type": "string",
+          "enum": [
+            "active",
+            "stale",
+            "retracted"
+          ]
+        },
+        "first_shown_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "case_id",
+        "attempt_id",
+        "source_decision_id",
+        "source_decision_revision",
+        "level",
+        "content",
+        "exposes_answer",
+        "source_is_provisional",
+        "validity",
+        "first_shown_at",
+        "created_at"
+      ],
+      "additionalProperties": false
+    },
+    "HelpRequest": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "case_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "attempt_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "question",
+            "recognition",
+            "judgment",
+            "appeal"
+          ]
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1500
+        },
+        "status": {
+          "$ref": "states.schema.json#/$defs/HelpStatus"
+        },
+        "claimed_by": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "claimed_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "completed_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resolution_note": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1500
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "case_id",
+        "attempt_id",
+        "kind",
+        "note",
+        "status",
+        "claimed_by",
+        "created_at",
+        "claimed_at",
+        "completed_at",
+        "resolution_note"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "claimed",
+                  "resolved",
+                  "unresolved"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "claimed_by": {
+                "type": "string"
+              },
+              "claimed_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "resolved",
+                  "unresolved"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "completed_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "resolution_note": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Review": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "case_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "target_decision_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target_decision_revision": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "confirm",
+            "replace",
+            "retract",
+            "leave_unresolved",
+            "manual_initial"
+          ]
+        },
+        "new_decision_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "reviewer_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "case_id",
+        "target_decision_id",
+        "target_decision_revision",
+        "action",
+        "new_decision_id",
+        "reason",
+        "reviewer_id",
+        "created_at"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "manual_initial"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "target_decision_id": {
+                "type": "null"
+              },
+              "target_decision_revision": {
+                "type": "null"
+              },
+              "new_decision_id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "target_decision_id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+              },
+              "target_decision_revision": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "CorrectionCase": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "scope": {
+          "$ref": "data.schema.json#/$defs/Scope"
+        },
+        "homework_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "question_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "current_question_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "root_attempt_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "current_attempt_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "progress": {
+          "$ref": "states.schema.json#/$defs/CorrectionProgress"
+        },
+        "current_decision": {
+          "anyOf": [
+            {
+              "$ref": "data.schema.json#/$defs/Decision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attempt_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "check_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+          },
+          "uniqueItems": true
+        },
+        "hint_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+          },
+          "uniqueItems": true
+        },
+        "help_request_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+          },
+          "uniqueItems": true
+        },
+        "review_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+          },
+          "uniqueItems": true
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lifecycle": {
+          "$ref": "states.schema.json#/$defs/RecordLifecycle"
+        },
+        "replacement_case_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "scope",
+        "homework_id",
+        "question_id",
+        "current_question_revision",
+        "root_attempt_id",
+        "current_attempt_id",
+        "progress",
+        "current_decision",
+        "attempt_ids",
+        "check_ids",
+        "hint_ids",
+        "help_request_ids",
+        "review_ids",
+        "created_at",
+        "updated_at",
+        "lifecycle",
+        "replacement_case_ids"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "progress": {
+                "const": "verified_resolved"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "current_decision": {
+                "allOf": [
+                  {
+                    "$ref": "data.schema.json#/$defs/Decision"
+                  },
+                  {
+                    "properties": {
+                      "validity": {
+                        "const": "confirmed"
+                      },
+                      "verdict": {
+                        "const": "correct"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "DeletionTargets": {
+      "type": "object",
+      "properties": {
+        "original_assets": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "done",
+            "not_applicable"
+          ]
+        },
+        "derived_assets": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "done",
+            "not_applicable"
+          ]
+        },
+        "sensitive_records": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "done",
+            "not_applicable"
+          ]
+        },
+        "device_caches": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "done",
+            "not_applicable"
+          ]
+        },
+        "backup_tombstone": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "done",
+            "not_applicable"
+          ]
+        }
+      },
+      "required": [
+        "original_assets",
+        "derived_assets",
+        "sensitive_records",
+        "device_caches",
+        "backup_tombstone"
+      ],
+      "additionalProperties": false
+    },
+    "DeletionRequest": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "scope": {
+          "$ref": "data.schema.json#/$defs/Scope"
+        },
+        "status": {
+          "$ref": "states.schema.json#/$defs/DeletionStatus"
+        },
+        "targets": {
+          "$ref": "data.schema.json#/$defs/DeletionTargets"
+        },
+        "requested_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "completed_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "scope",
+        "status",
+        "targets",
+        "requested_at",
+        "completed_at"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "completed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "completed_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "targets": {
+                "properties": {
+                  "original_assets": {
+                    "enum": [
+                      "done",
+                      "not_applicable"
+                    ]
+                  },
+                  "derived_assets": {
+                    "enum": [
+                      "done",
+                      "not_applicable"
+                    ]
+                  },
+                  "sensitive_records": {
+                    "enum": [
+                      "done",
+                      "not_applicable"
+                    ]
+                  },
+                  "device_caches": {
+                    "enum": [
+                      "done",
+                      "not_applicable"
+                    ]
+                  },
+                  "backup_tombstone": {
+                    "enum": [
+                      "done",
+                      "not_applicable"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Problem": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "format": "uri"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "status": {
+          "type": "integer",
+          "enum": [
+            401,
+            403,
+            404,
+            409,
+            422,
+            503
+          ]
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "authorization",
+            "not_found",
+            "conflict",
+            "validation",
+            "service"
+          ]
+        },
+        "code": {
+          "type": "string",
+          "enum": [
+            "authentication_required",
+            "access_denied",
+            "not_found",
+            "revision_conflict",
+            "stale_input",
+            "idempotency_conflict",
+            "invalid_request",
+            "service_unavailable"
+          ]
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "current_revision": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "retry_after_seconds": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "title",
+        "status",
+        "category",
+        "code",
+        "detail",
+        "request_id",
+        "current_revision",
+        "retry_after_seconds"
+      ],
+      "additionalProperties": false
+    },
+    "HomeworkPage": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "data.schema.json#/$defs/HomeworkSession"
+          },
+          "maxItems": 100
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "additionalProperties": false
+    },
+    "HelpPage": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "data.schema.json#/$defs/HelpRequest"
+          },
+          "maxItems": 100
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "additionalProperties": false
+    },
+    "QuestionRead": {
+      "type": "object",
+      "properties": {
+        "record": {
+          "$ref": "data.schema.json#/$defs/CapturedQuestionRevision"
+        },
+        "current_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "currently_effective": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "record",
+        "current_revision",
+        "currently_effective"
+      ],
+      "additionalProperties": false,
+      "description": "历史快照与当前有效性并列。历史曾确认的判断不可因此继续用于新检查。"
+    },
+    "AttemptRead": {
+      "type": "object",
+      "properties": {
+        "record": {
+          "$ref": "data.schema.json#/$defs/Attempt"
+        },
+        "current_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "currently_effective": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "record",
+        "current_revision",
+        "currently_effective"
+      ],
+      "additionalProperties": false,
+      "description": "历史快照与当前有效性并列。历史曾确认的判断不可因此继续用于新检查。"
+    },
+    "DecisionRead": {
+      "type": "object",
+      "properties": {
+        "record": {
+          "$ref": "data.schema.json#/$defs/Decision"
+        },
+        "current_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "currently_effective": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "record",
+        "current_revision",
+        "currently_effective"
+      ],
+      "additionalProperties": false,
+      "description": "历史快照与当前有效性并列。历史曾确认的判断不可因此继续用于新检查。"
+    }
+  }
+}

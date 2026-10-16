@@ -1,0 +1,1156 @@
+{
+  "status": "synthetic_fixtures_not_runtime_results",
+  "notes": [
+    "No real student, image or provider result. Hashes and timestamps are placeholders.",
+    "Fixtures demonstrate independent scenarios, not one deletion-complete timeline.",
+    "Original and correction share a captured question ID but reference revisions 1 and 2."
+  ],
+  "entries": [
+    {
+      "name": "homework",
+      "schema": "data.schema.json#/$defs/HomeworkSession",
+      "value": {
+        "id": "homework_synthetic",
+        "revision": 3,
+        "scope": {
+          "tenant_id": "tenant_synthetic",
+          "campus_id": "campus_synthetic",
+          "student_id": "student_synthetic"
+        },
+        "curriculum": {
+          "stage": "junior_middle",
+          "publisher_code": "PEP",
+          "grade": null,
+          "subject": null,
+          "volume": null,
+          "edition": null
+        },
+        "title": "合成作业样例",
+        "created_at": "2026-10-16T08:00:00Z",
+        "occurred_at": "2026-10-16T08:00:00Z",
+        "coverage": {
+          "collection_scope": "partial",
+          "unrecognized_regions": [],
+          "note": "仅采集一个题区，不能计算整页正确率。"
+        },
+        "asset_ids": [
+          "asset_original",
+          "asset_correction"
+        ],
+        "question_ids": [
+          "question_synthetic"
+        ],
+        "case_ids": [
+          "case_synthetic"
+        ],
+        "job_ids": [
+          "job_check"
+        ],
+        "processing_blocked": false
+      }
+    },
+    {
+      "name": "asset",
+      "schema": "data.schema.json#/$defs/ImageAsset",
+      "value": {
+        "id": "asset_original",
+        "revision": 2,
+        "homework_id": "homework_synthetic",
+        "status": "uploaded",
+        "page_index": 0,
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "byte_size": 1200,
+        "mime_type": "image/jpeg",
+        "width": 1200,
+        "height": 1600,
+        "source_asset_id": null,
+        "source_region": null,
+        "created_at": "2026-10-16T08:00:00Z"
+      }
+    },
+    {
+      "name": "question_revision_1",
+      "schema": "data.schema.json#/$defs/CapturedQuestionRevision",
+      "value": {
+        "question_id": "question_synthetic",
+        "revision": 1,
+        "homework_id": "homework_synthetic",
+        "stem_text": "化简：3(x-2)。",
+        "regions": [
+          {
+            "asset_id": "asset_original",
+            "x": 20,
+            "y": 40,
+            "width": 500,
+            "height": 220,
+            "coordinate_space": "original_pixels"
+          }
+        ],
+        "source": "recognizer",
+        "source_actor_id": null,
+        "bank_question_id": null,
+        "knowledge_point_ids": null,
+        "created_at": "2026-10-16T08:00:00Z",
+        "lifecycle": "active",
+        "replacement_question_ids": []
+      }
+    },
+    {
+      "name": "question_revision_2",
+      "schema": "data.schema.json#/$defs/CapturedQuestionRevision",
+      "value": {
+        "question_id": "question_synthetic",
+        "revision": 2,
+        "homework_id": "homework_synthetic",
+        "stem_text": "化简：3(x − 2)。",
+        "regions": [
+          {
+            "asset_id": "asset_original",
+            "x": 20,
+            "y": 40,
+            "width": 500,
+            "height": 220,
+            "coordinate_space": "original_pixels"
+          }
+        ],
+        "source": "staff_revision",
+        "source_actor_id": "staff_synthetic",
+        "bank_question_id": null,
+        "knowledge_point_ids": null,
+        "created_at": "2026-10-16T08:00:00Z",
+        "lifecycle": "active",
+        "replacement_question_ids": []
+      }
+    },
+    {
+      "name": "original_attempt",
+      "schema": "data.schema.json#/$defs/Attempt",
+      "value": {
+        "id": "attempt_original",
+        "revision": 1,
+        "case_id": "case_synthetic",
+        "question_id": "question_synthetic",
+        "captured_question_revision": 1,
+        "parent_attempt_id": null,
+        "root_attempt_id": "attempt_original",
+        "asset_ids": [
+          "asset_original"
+        ],
+        "recognition_revision": 1,
+        "answer_text": "3x-2",
+        "answer_regions": [
+          {
+            "asset_id": "asset_original",
+            "x": 20,
+            "y": 40,
+            "width": 500,
+            "height": 220,
+            "coordinate_space": "original_pixels"
+          }
+        ],
+        "recognition_status": "ready",
+        "help_condition": "unknown",
+        "occurred_at": "2026-10-16T08:00:00Z",
+        "created_at": "2026-10-16T08:00:00Z"
+      }
+    },
+    {
+      "name": "correction_across_question_revision",
+      "schema": "data.schema.json#/$defs/Attempt",
+      "value": {
+        "id": "attempt_correction",
+        "revision": 1,
+        "case_id": "case_synthetic",
+        "question_id": "question_synthetic",
+        "captured_question_revision": 2,
+        "parent_attempt_id": "attempt_original",
+        "root_attempt_id": "attempt_original",
+        "asset_ids": [
+          "asset_correction"
+        ],
+        "recognition_revision": 1,
+        "answer_text": "3x-6",
+        "answer_regions": [
+          {
+            "asset_id": "asset_correction",
+            "x": 20,
+            "y": 40,
+            "width": 500,
+            "height": 220,
+            "coordinate_space": "original_pixels"
+          }
+        ],
+        "recognition_status": "ready",
+        "help_condition": "hint_used",
+        "occurred_at": "2026-10-16T08:00:00Z",
+        "created_at": "2026-10-16T08:00:00Z"
+      }
+    },
+    {
+      "name": "model_candidate",
+      "schema": "data.schema.json#/$defs/Decision",
+      "value": {
+        "id": "decision_candidate",
+        "revision": 1,
+        "case_id": "case_synthetic",
+        "check_id": "check_correction",
+        "input_versions": {
+          "question_id": "question_synthetic",
+          "question_revision": 2,
+          "attempt_id": "attempt_correction",
+          "attempt_recognition_revision": 1,
+          "case_revision_at_submission": 4,
+          "fingerprint": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "origin": "model",
+        "validity": "candidate",
+        "verdict": "correct",
+        "reason_code": null,
+        "basis": [
+          {
+            "kind": "calculation",
+            "summary": "分配律展开得到 3x-6；该依据是合成样例，不代表实际模型验证。",
+            "source_ref": "synthetic:distribution-rule",
+            "regions": [
+              {
+                "asset_id": "asset_correction",
+                "x": 20,
+                "y": 40,
+                "width": 500,
+                "height": 220,
+                "coordinate_space": "original_pixels"
+              }
+            ]
+          }
+        ],
+        "first_error_region": null,
+        "confirmation_source": null,
+        "confirmed_by": null,
+        "confirmed_at": null,
+        "replaces_decision_id": null,
+        "invalidated_by_event_id": null,
+        "created_at": "2026-10-16T08:00:00Z"
+      }
+    },
+    {
+      "name": "staff_confirmed",
+      "schema": "data.schema.json#/$defs/Decision",
+      "value": {
+        "id": "decision_reviewed",
+        "revision": 1,
+        "case_id": "case_synthetic",
+        "check_id": "check_correction",
+        "input_versions": {
+          "question_id": "question_synthetic",
+          "question_revision": 2,
+          "attempt_id": "attempt_correction",
+          "attempt_recognition_revision": 1,
+          "case_revision_at_submission": 4,
+          "fingerprint": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "origin": "staff",
+        "validity": "confirmed",
+        "verdict": "correct",
+        "reason_code": null,
+        "basis": [
+          {
+            "kind": "calculation",
+            "summary": "分配律展开得到 3x-6；该依据是合成样例，不代表实际模型验证。",
+            "source_ref": "synthetic:distribution-rule",
+            "regions": [
+              {
+                "asset_id": "asset_correction",
+                "x": 20,
+                "y": 40,
+                "width": 500,
+                "height": 220,
+                "coordinate_space": "original_pixels"
+              }
+            ]
+          }
+        ],
+        "first_error_region": null,
+        "confirmation_source": "staff_review",
+        "confirmed_by": "staff_synthetic",
+        "confirmed_at": "2026-10-16T08:00:00Z",
+        "replaces_decision_id": "decision_candidate",
+        "invalidated_by_event_id": null,
+        "created_at": "2026-10-16T08:00:00Z"
+      }
+    },
+    {
+      "name": "business_unable_to_judge",
+      "schema": "data.schema.json#/$defs/Decision",
+      "value": {
+        "id": "decision_unknown",
+        "revision": 1,
+        "case_id": "case_synthetic",
+        "check_id": "check_correction",
+        "input_versions": {
+          "question_id": "question_synthetic",
+          "question_revision": 2,
+          "attempt_id": "attempt_correction",
+          "attempt_recognition_revision": 1,
+          "case_revision_at_submission": 4,
+          "fingerprint": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "origin": "model",
+        "validity": "needs_review",
+        "verdict": "unable_to_judge",
+        "reason_code": "incomplete_question",
+        "basis": [
+          {
+            "kind": "model_hypothesis",
+            "summary": "题干条件缺失，无法形成判断。",
+            "source_ref": null,
+            "regions": [
+              {
+                "asset_id": "asset_correction",
+                "x": 20,
+                "y": 40,
+                "width": 500,
+                "height": 220,
+                "coordinate_space": "original_pixels"
+              }
+            ]
+          }
+        ],
+        "first_error_region": null,
+        "confirmation_source": null,
+        "confirmed_by": null,
+        "confirmed_at": null,
+        "replaces_decision_id": null,
+        "invalidated_by_event_id": null,
+        "created_at": "2026-10-16T08:00:00Z"
+      }
+    },
+    {
+      "name": "stale_old_decision",
+      "schema": "data.schema.json#/$defs/Decision",
+      "value": {
+        "id": "decision_old",
+        "revision": 2,
+        "case_id": "case_synthetic",
+        "check_id": "check_correction",
+        "input_versions": {
+          "question_id": "question_synthetic",
+          "question_revision": 1,
+          "attempt_id": "attempt_original",
+          "attempt_recognition_revision": 1,
+          "case_revision_at_submission": 1,
+          "fingerprint": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "origin": "model",
+        "validity": "stale",
+        "verdict": "incorrect",
+        "reason_code": null,
+        "basis": [
+          {
+            "kind": "calculation",
+            "summary": "分配律展开得到 3x-6；该依据是合成样例，不代表实际模型验证。",
+            "source_ref": "synthetic:distribution-rule",
+            "regions": [
+              {
+                "asset_id": "asset_correction",
+                "x": 20,
+                "y": 40,
+                "width": 500,
+                "height": 220,
+                "coordinate_space": "original_pixels"
+              }
+            ]
+          }
+        ],
+        "first_error_region": null,
+        "confirmation_source": null,
+        "confirmed_by": null,
+        "confirmed_at": null,
+        "replaces_decision_id": null,
+        "invalidated_by_event_id": "event_invalidated",
+        "created_at": "2026-10-16T08:00:00Z"
+      }
+    },
+    {
+      "name": "technical_failure",
+      "schema": "data.schema.json#/$defs/Job",
+      "value": {
+        "id": "job_failed",
+        "revision": 2,
+        "kind": "check",
+        "status": "retryable_failed",
+        "created_at": "2026-10-16T08:00:00Z",
+        "updated_at": "2026-10-16T08:00:00Z",
+        "retry_after_seconds": 10,
+        "failure": {
+          "code": "provider_timeout",
+          "message": "模型服务超时，尚无判断结果。",
+          "retryable": true
+        },
+        "result": null
+      }
+    },
+    {
+      "name": "successful_check_job",
+      "schema": "data.schema.json#/$defs/Job",
+      "value": {
+        "id": "job_check",
+        "revision": 2,
+        "kind": "check",
+        "status": "succeeded",
+        "created_at": "2026-10-16T08:00:00Z",
+        "updated_at": "2026-10-16T08:00:00Z",
+        "retry_after_seconds": null,
+        "failure": null,
+        "result": {
+          "resource_type": "check",
+          "resource_id": "check_correction"
+        }
+      }
+    },
+    {
+      "name": "resolved_case",
+      "schema": "data.schema.json#/$defs/CorrectionCase",
+      "value": {
+        "id": "case_synthetic",
+        "revision": 6,
+        "scope": {
+          "tenant_id": "tenant_synthetic",
+          "campus_id": "campus_synthetic",
+          "student_id": "student_synthetic"
+        },
+        "homework_id": "homework_synthetic",
+        "question_id": "question_synthetic",
+        "current_question_revision": 2,
+        "root_attempt_id": "attempt_original",
+        "current_attempt_id": "attempt_correction",
+        "progress": "verified_resolved",
+        "current_decision": {
+          "id": "decision_reviewed",
+          "revision": 1,
+          "case_id": "case_synthetic",
+          "check_id": "check_correction",
+          "input_versions": {
+            "question_id": "question_synthetic",
+            "question_revision": 2,
+            "attempt_id": "attempt_correction",
+            "attempt_recognition_revision": 1,
+            "case_revision_at_submission": 4,
+            "fingerprint": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "origin": "staff",
+          "validity": "confirmed",
+          "verdict": "correct",
+          "reason_code": null,
+          "basis": [
+            {
+              "kind": "calculation",
+              "summary": "分配律展开得到 3x-6；该依据是合成样例，不代表实际模型验证。",
+              "source_ref": "synthetic:distribution-rule",
+              "regions": [
+                {
+                  "asset_id": "asset_correction",
+                  "x": 20,
+                  "y": 40,
+                  "width": 500,
+                  "height": 220,
+                  "coordinate_space": "original_pixels"
+                }
+              ]
+            }
+          ],
+          "first_error_region": null,
+          "confirmation_source": "staff_review",
+          "confirmed_by": "staff_synthetic",
+          "confirmed_at": "2026-10-16T08:00:00Z",
+          "replaces_decision_id": "decision_candidate",
+          "invalidated_by_event_id": null,
+          "created_at": "2026-10-16T08:00:00Z"
+        },
+        "attempt_ids": [
+          "attempt_original",
+          "attempt_correction"
+        ],
+        "check_ids": [
+          "check_original",
+          "check_correction"
+        ],
+        "hint_ids": [
+          "hint_synthetic"
+        ],
+        "help_request_ids": [
+          "help_synthetic"
+        ],
+        "review_ids": [
+          "review_synthetic"
+        ],
+        "created_at": "2026-10-16T08:00:00Z",
+        "updated_at": "2026-10-16T08:00:00Z",
+        "lifecycle": "active",
+        "replacement_case_ids": []
+      }
+    },
+    {
+      "name": "shown_but_invalidated_hint",
+      "schema": "data.schema.json#/$defs/Hint",
+      "value": {
+        "id": "hint_synthetic",
+        "revision": 2,
+        "case_id": "case_synthetic",
+        "attempt_id": "attempt_original",
+        "source_decision_id": "decision_old",
+        "source_decision_revision": 1,
+        "level": "direction",
+        "content": "括号外面的 3 需要分别乘哪些项？",
+        "exposes_answer": false,
+        "source_is_provisional": true,
+        "validity": "stale",
+        "first_shown_at": "2026-10-16T08:00:00Z",
+        "created_at": "2026-10-16T08:00:00Z"
+      }
+    },
+    {
+      "name": "resolved_help",
+      "schema": "data.schema.json#/$defs/HelpRequest",
+      "value": {
+        "id": "help_synthetic",
+        "revision": 3,
+        "case_id": "case_synthetic",
+        "attempt_id": "attempt_correction",
+        "kind": "judgment",
+        "note": "请老师核实订正结果。",
+        "status": "resolved",
+        "claimed_by": "staff_synthetic",
+        "created_at": "2026-10-16T08:00:00Z",
+        "claimed_at": "2026-10-16T08:00:00Z",
+        "completed_at": "2026-10-16T08:00:00Z",
+        "resolution_note": "已核对订正图与题干，复核记录另存。"
+      }
+    },
+    {
+      "name": "staff_review",
+      "schema": "data.schema.json#/$defs/Review",
+      "value": {
+        "id": "review_synthetic",
+        "case_id": "case_synthetic",
+        "target_decision_id": "decision_candidate",
+        "target_decision_revision": 1,
+        "action": "confirm",
+        "new_decision_id": "decision_reviewed",
+        "reason": "核对题干与订正步骤后确认。",
+        "reviewer_id": "staff_synthetic",
+        "created_at": "2026-10-16T08:00:00Z"
+      }
+    },
+    {
+      "name": "deletion_waiting_for_device",
+      "schema": "data.schema.json#/$defs/DeletionRequest",
+      "value": {
+        "id": "deletion_synthetic",
+        "revision": 2,
+        "scope": {
+          "tenant_id": "tenant_synthetic",
+          "campus_id": "campus_synthetic",
+          "student_id": "student_synthetic"
+        },
+        "status": "waiting_devices",
+        "targets": {
+          "original_assets": "done",
+          "derived_assets": "done",
+          "sensitive_records": "done",
+          "device_caches": "pending",
+          "backup_tombstone": "done"
+        },
+        "requested_at": "2026-10-16T08:00:00Z",
+        "completed_at": null
+      }
+    },
+    {
+      "name": "revision_conflict",
+      "schema": "data.schema.json#/$defs/Problem",
+      "value": {
+        "type": "https://errors.xueban.invalid/revision-conflict",
+        "title": "版本已变化",
+        "status": 409,
+        "category": "conflict",
+        "code": "revision_conflict",
+        "detail": "请读取当前版本后重新确认操作。",
+        "request_id": "request_synthetic",
+        "current_revision": 6,
+        "retry_after_seconds": null
+      }
+    },
+    {
+      "name": "historical_question_with_current_effectiveness",
+      "schema": "data.schema.json#/$defs/QuestionRead",
+      "value": {
+        "record": {
+          "question_id": "question_synthetic",
+          "revision": 1,
+          "homework_id": "homework_synthetic",
+          "stem_text": "化简：3(x-2)。",
+          "regions": [
+            {
+              "asset_id": "asset_original",
+              "x": 20,
+              "y": 40,
+              "width": 500,
+              "height": 220,
+              "coordinate_space": "original_pixels"
+            }
+          ],
+          "source": "recognizer",
+          "source_actor_id": null,
+          "bank_question_id": null,
+          "knowledge_point_ids": null,
+          "created_at": "2026-10-16T08:00:00Z",
+          "lifecycle": "active",
+          "replacement_question_ids": []
+        },
+        "current_revision": 2,
+        "currently_effective": false
+      }
+    },
+    {
+      "name": "accepted_correction",
+      "schema": "data.schema.json#/$defs/Accepted",
+      "value": {
+        "job": {
+          "id": "job_queued",
+          "revision": 1,
+          "kind": "recognize_attempt",
+          "status": "queued",
+          "created_at": "2026-10-16T08:00:00Z",
+          "updated_at": "2026-10-16T08:00:00Z",
+          "retry_after_seconds": null,
+          "failure": null,
+          "result": null
+        },
+        "created_resource": {
+          "resource_type": "attempt",
+          "resource_id": "attempt_correction"
+        }
+      }
+    },
+    {
+      "name": "request_CreateHomework",
+      "schema": "requests.schema.json#/$defs/CreateHomework",
+      "value": {
+        "curriculum": {
+          "stage": "junior_middle",
+          "publisher_code": "PEP",
+          "grade": null,
+          "subject": null,
+          "volume": null,
+          "edition": null
+        },
+        "title": null,
+        "occurred_at": "2026-10-16T08:00:00Z",
+        "collection_scope": "partial"
+      }
+    },
+    {
+      "name": "request_CreateUpload",
+      "schema": "requests.schema.json#/$defs/CreateUpload",
+      "value": {
+        "expected_revision": 3,
+        "page_index": 0,
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "byte_size": 1200,
+        "mime_type": "image/jpeg",
+        "width": 1200,
+        "height": 1600
+      }
+    },
+    {
+      "name": "request_CompleteUpload",
+      "schema": "requests.schema.json#/$defs/CompleteUpload",
+      "value": {
+        "expected_revision": 1,
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "byte_size": 1200
+      }
+    },
+    {
+      "name": "request_StartRecognition",
+      "schema": "requests.schema.json#/$defs/StartRecognition",
+      "value": {
+        "expected_revision": 3,
+        "asset_ids": [
+          "asset_original"
+        ]
+      }
+    },
+    {
+      "name": "request_ReviseQuestion",
+      "schema": "requests.schema.json#/$defs/ReviseQuestion",
+      "value": {
+        "expected_revision": 1,
+        "stem_text": "化简：3(x − 2)。",
+        "regions": [
+          {
+            "asset_id": "asset_original",
+            "x": 20,
+            "y": 40,
+            "width": 500,
+            "height": 220,
+            "coordinate_space": "original_pixels"
+          }
+        ],
+        "reason": "修正识别符号；题目身份未变化。"
+      }
+    },
+    {
+      "name": "request_ReviseAnswer",
+      "schema": "requests.schema.json#/$defs/ReviseAnswer",
+      "value": {
+        "expected_revision": 1,
+        "answer_text": "3x-2",
+        "answer_regions": [
+          {
+            "asset_id": "asset_original",
+            "x": 20,
+            "y": 40,
+            "width": 500,
+            "height": 220,
+            "coordinate_space": "original_pixels"
+          }
+        ],
+        "reason": "核对原图修正 OCR。"
+      }
+    },
+    {
+      "name": "request_StartCheck",
+      "schema": "requests.schema.json#/$defs/StartCheck",
+      "value": {
+        "expected_revision": 4,
+        "attempt_id": "attempt_correction",
+        "question_revision": 2,
+        "attempt_recognition_revision": 1
+      }
+    },
+    {
+      "name": "request_RequestHint",
+      "schema": "requests.schema.json#/$defs/RequestHint",
+      "value": {
+        "expected_revision": 2,
+        "attempt_id": "attempt_original",
+        "source_decision_id": "decision_old",
+        "source_decision_revision": 1,
+        "level": "direction"
+      }
+    },
+    {
+      "name": "request_ShowHint",
+      "schema": "requests.schema.json#/$defs/ShowHint",
+      "value": {
+        "expected_revision": 1,
+        "shown_at": "2026-10-16T08:00:00Z"
+      }
+    },
+    {
+      "name": "request_CreateCorrection",
+      "schema": "requests.schema.json#/$defs/CreateCorrection",
+      "value": {
+        "expected_revision": 3,
+        "parent_attempt_id": "attempt_original",
+        "question_revision": 2,
+        "asset_ids": [
+          "asset_correction"
+        ],
+        "occurred_at": "2026-10-16T08:00:00Z",
+        "reported_help": "unknown"
+      }
+    },
+    {
+      "name": "request_CreateHelp",
+      "schema": "requests.schema.json#/$defs/CreateHelp",
+      "value": {
+        "expected_revision": 5,
+        "attempt_id": "attempt_correction",
+        "kind": "judgment",
+        "note": "请核实订正。"
+      }
+    },
+    {
+      "name": "request_ClaimHelp",
+      "schema": "requests.schema.json#/$defs/ClaimHelp",
+      "value": {
+        "expected_revision": 1
+      }
+    },
+    {
+      "name": "request_CompleteHelp",
+      "schema": "requests.schema.json#/$defs/CompleteHelp",
+      "value": {
+        "expected_revision": 2,
+        "outcome": "resolved",
+        "note": "现场帮助完成，题目结论见复核。"
+      }
+    },
+    {
+      "name": "request_SubmitReview",
+      "schema": "requests.schema.json#/$defs/SubmitReview",
+      "value": {
+        "expected_revision": 5,
+        "target_decision_id": "decision_candidate",
+        "target_decision_revision": 1,
+        "action": "confirm",
+        "verdict": "correct",
+        "reason": "已核对原图。",
+        "basis": [
+          {
+            "kind": "staff_observation",
+            "summary": "分配律展开得到 3x-6；该依据是合成样例，不代表实际模型验证。",
+            "source_ref": "synthetic:distribution-rule",
+            "regions": [
+              {
+                "asset_id": "asset_correction",
+                "x": 20,
+                "y": 40,
+                "width": 500,
+                "height": 220,
+                "coordinate_space": "original_pixels"
+              }
+            ]
+          }
+        ],
+        "attempt_id": "attempt_correction",
+        "question_revision": 2,
+        "attempt_recognition_revision": 1
+      }
+    },
+    {
+      "name": "request_SetProgress",
+      "schema": "requests.schema.json#/$defs/SetProgress",
+      "value": {
+        "expected_revision": 4,
+        "action": "pause"
+      }
+    },
+    {
+      "name": "request_RequestDeletion",
+      "schema": "requests.schema.json#/$defs/RequestDeletion",
+      "value": {
+        "reason": "合成授权撤回场景。",
+        "confirmation": "delete_authorized_student_data"
+      }
+    },
+    {
+      "name": "event_question.revised",
+      "schema": "events.schema.json#/$defs/Event",
+      "value": {
+        "event_id": "event_synthetic_0",
+        "event_type": "question.revised",
+        "schema_version": "phase1.event.v1",
+        "occurred_at": "2026-10-16T08:00:00Z",
+        "scope": {
+          "tenant_id": "tenant_synthetic",
+          "campus_id": "campus_synthetic",
+          "student_id": "student_synthetic"
+        },
+        "aggregate_type": "question",
+        "aggregate_id": "question_synthetic",
+        "aggregate_revision": 1,
+        "payload": {
+          "question_id": "question_synthetic",
+          "old_revision": 1,
+          "new_revision": 2
+        }
+      }
+    },
+    {
+      "name": "event_attempt.created",
+      "schema": "events.schema.json#/$defs/Event",
+      "value": {
+        "event_id": "event_synthetic_1",
+        "event_type": "attempt.created",
+        "schema_version": "phase1.event.v1",
+        "occurred_at": "2026-10-16T08:00:00Z",
+        "scope": {
+          "tenant_id": "tenant_synthetic",
+          "campus_id": "campus_synthetic",
+          "student_id": "student_synthetic"
+        },
+        "aggregate_type": "case",
+        "aggregate_id": "case_synthetic",
+        "aggregate_revision": 2,
+        "payload": {
+          "attempt_id": "attempt_correction",
+          "question_id": "question_synthetic",
+          "question_revision": 2,
+          "parent_attempt_id": "attempt_original",
+          "root_attempt_id": "attempt_original"
+        }
+      }
+    },
+    {
+      "name": "event_decision.created",
+      "schema": "events.schema.json#/$defs/Event",
+      "value": {
+        "event_id": "event_synthetic_2",
+        "event_type": "decision.created",
+        "schema_version": "phase1.event.v1",
+        "occurred_at": "2026-10-16T08:00:00Z",
+        "scope": {
+          "tenant_id": "tenant_synthetic",
+          "campus_id": "campus_synthetic",
+          "student_id": "student_synthetic"
+        },
+        "aggregate_type": "case",
+        "aggregate_id": "case_synthetic",
+        "aggregate_revision": 3,
+        "payload": {
+          "decision_id": "decision_reviewed",
+          "decision_revision": 1,
+          "check_id": "check_correction"
+        }
+      }
+    },
+    {
+      "name": "event_decision.invalidated",
+      "schema": "events.schema.json#/$defs/Event",
+      "value": {
+        "event_id": "event_invalidated",
+        "event_type": "decision.invalidated",
+        "schema_version": "phase1.event.v1",
+        "occurred_at": "2026-10-16T08:00:00Z",
+        "scope": {
+          "tenant_id": "tenant_synthetic",
+          "campus_id": "campus_synthetic",
+          "student_id": "student_synthetic"
+        },
+        "aggregate_type": "case",
+        "aggregate_id": "case_synthetic",
+        "aggregate_revision": 4,
+        "payload": {
+          "decision_id": "decision_old",
+          "previous_revision": 1,
+          "new_revision": 2,
+          "reason": "recognition_changed",
+          "replacement_decision_id": null
+        }
+      }
+    },
+    {
+      "name": "event_review.recorded",
+      "schema": "events.schema.json#/$defs/Event",
+      "value": {
+        "event_id": "event_synthetic_4",
+        "event_type": "review.recorded",
+        "schema_version": "phase1.event.v1",
+        "occurred_at": "2026-10-16T08:00:00Z",
+        "scope": {
+          "tenant_id": "tenant_synthetic",
+          "campus_id": "campus_synthetic",
+          "student_id": "student_synthetic"
+        },
+        "aggregate_type": "case",
+        "aggregate_id": "case_synthetic",
+        "aggregate_revision": 5,
+        "payload": {
+          "review_id": "review_synthetic",
+          "target_decision_id": "decision_candidate",
+          "new_decision_id": "decision_reviewed"
+        }
+      }
+    },
+    {
+      "name": "event_deletion.requested",
+      "schema": "events.schema.json#/$defs/Event",
+      "value": {
+        "event_id": "event_synthetic_5",
+        "event_type": "deletion.requested",
+        "schema_version": "phase1.event.v1",
+        "occurred_at": "2026-10-16T08:00:00Z",
+        "scope": {
+          "tenant_id": "tenant_synthetic",
+          "campus_id": "campus_synthetic",
+          "student_id": "student_synthetic"
+        },
+        "aggregate_type": "student",
+        "aggregate_id": "student_synthetic",
+        "aggregate_revision": 6,
+        "payload": {
+          "deletion_id": "deletion_synthetic"
+        }
+      }
+    },
+    {
+      "name": "event_deletion.completed",
+      "schema": "events.schema.json#/$defs/Event",
+      "value": {
+        "event_id": "event_synthetic_6",
+        "event_type": "deletion.completed",
+        "schema_version": "phase1.event.v1",
+        "occurred_at": "2026-10-16T08:00:00Z",
+        "scope": {
+          "tenant_id": "tenant_synthetic",
+          "campus_id": "campus_synthetic",
+          "student_id": "student_synthetic"
+        },
+        "aggregate_type": "student",
+        "aggregate_id": "student_synthetic",
+        "aggregate_revision": 7,
+        "payload": {
+          "deletion_id": "deletion_synthetic"
+        }
+      }
+    },
+    {
+      "name": "request_RenewUpload",
+      "schema": "requests.schema.json#/$defs/RenewUpload",
+      "value": {
+        "expected_revision": 1
+      }
+    },
+    {
+      "name": "request_RepairLayout",
+      "schema": "requests.schema.json#/$defs/RepairLayout",
+      "value": {
+        "expected_revision": 3,
+        "supersede_questions": [
+          {
+            "question_id": "question_synthetic",
+            "expected_revision": 2
+          }
+        ],
+        "replacement_regions": [
+          {
+            "regions": [
+              {
+                "asset_id": "asset_original",
+                "x": 20,
+                "y": 40,
+                "width": 500,
+                "height": 220,
+                "coordinate_space": "original_pixels"
+              }
+            ],
+            "stem_text": null
+          }
+        ],
+        "reason": "人工修正错切区域，重新识别；旧题记录保留。"
+      }
+    },
+    {
+      "name": "request_manual_initial_without_ai",
+      "schema": "requests.schema.json#/$defs/SubmitReview",
+      "value": {
+        "expected_revision": 5,
+        "target_decision_id": null,
+        "target_decision_revision": null,
+        "action": "manual_initial",
+        "verdict": "correct",
+        "reason": "模型调用失败，老师直接核对原图。",
+        "basis": [
+          {
+            "kind": "staff_observation",
+            "summary": "分配律展开得到 3x-6；该依据是合成样例，不代表实际模型验证。",
+            "source_ref": "synthetic:distribution-rule",
+            "regions": [
+              {
+                "asset_id": "asset_correction",
+                "x": 20,
+                "y": 40,
+                "width": 500,
+                "height": 220,
+                "coordinate_space": "original_pixels"
+              }
+            ]
+          }
+        ],
+        "attempt_id": "attempt_correction",
+        "question_revision": 2,
+        "attempt_recognition_revision": 1
+      }
+    },
+    {
+      "name": "manual_decision_without_ai",
+      "schema": "data.schema.json#/$defs/Decision",
+      "value": {
+        "id": "decision_manual",
+        "revision": 1,
+        "case_id": "case_synthetic",
+        "check_id": null,
+        "input_versions": {
+          "question_id": "question_synthetic",
+          "question_revision": 2,
+          "attempt_id": "attempt_correction",
+          "attempt_recognition_revision": 1,
+          "case_revision_at_submission": 4,
+          "fingerprint": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "origin": "staff",
+        "validity": "confirmed",
+        "verdict": "correct",
+        "reason_code": null,
+        "basis": [
+          {
+            "kind": "calculation",
+            "summary": "分配律展开得到 3x-6；该依据是合成样例，不代表实际模型验证。",
+            "source_ref": "synthetic:distribution-rule",
+            "regions": [
+              {
+                "asset_id": "asset_correction",
+                "x": 20,
+                "y": 40,
+                "width": 500,
+                "height": 220,
+                "coordinate_space": "original_pixels"
+              }
+            ]
+          }
+        ],
+        "first_error_region": null,
+        "confirmation_source": "staff_review",
+        "confirmed_by": "staff_synthetic",
+        "confirmed_at": "2026-10-16T08:00:00Z",
+        "replaces_decision_id": null,
+        "invalidated_by_event_id": null,
+        "created_at": "2026-10-16T08:00:00Z"
+      }
+    },
+    {
+      "name": "manual_review_without_ai",
+      "schema": "data.schema.json#/$defs/Review",
+      "value": {
+        "id": "review_manual",
+        "case_id": "case_synthetic",
+        "target_decision_id": null,
+        "target_decision_revision": null,
+        "action": "manual_initial",
+        "new_decision_id": "decision_manual",
+        "reason": "没有模型决定，直接核验原图。",
+        "reviewer_id": "staff_synthetic",
+        "created_at": "2026-10-16T08:00:00Z"
+      }
+    },
+    {
+      "name": "event_layout.revised",
+      "schema": "events.schema.json#/$defs/Event",
+      "value": {
+        "event_id": "event_layout",
+        "event_type": "layout.revised",
+        "schema_version": "phase1.event.v1",
+        "occurred_at": "2026-10-16T08:00:00Z",
+        "scope": {
+          "tenant_id": "tenant_synthetic",
+          "campus_id": "campus_synthetic",
+          "student_id": "student_synthetic"
+        },
+        "aggregate_type": "homework",
+        "aggregate_id": "homework_synthetic",
+        "aggregate_revision": 1,
+        "payload": {
+          "job_id": "job_layout",
+          "superseded_question_ids": [
+            "question_synthetic"
+          ],
+          "created_question_ids": [
+            "question_resegmented"
+          ]
+        }
+      }
+    }
+  ]
+}

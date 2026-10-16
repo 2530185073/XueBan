@@ -1,0 +1,710 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.xueban.invalid/phase1/requests.schema.json",
+  "title": "Phase 1 allowlisted client commands",
+  "description": "draft-0.1; contract only, not an implemented service.",
+  "$defs": {
+    "CreateHomework": {
+      "type": "object",
+      "properties": {
+        "curriculum": {
+          "$ref": "data.schema.json#/$defs/CurriculumContext"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "collection_scope": {
+          "type": "string",
+          "enum": [
+            "partial",
+            "declared_complete",
+            "unknown"
+          ]
+        }
+      },
+      "required": [
+        "curriculum",
+        "title",
+        "occurred_at",
+        "collection_scope"
+      ],
+      "additionalProperties": false
+    },
+    "CreateUpload": {
+      "type": "object",
+      "properties": {
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "page_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "byte_size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "mime_type": {
+          "type": "string",
+          "enum": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ]
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "expected_revision",
+        "page_index",
+        "sha256",
+        "byte_size",
+        "mime_type",
+        "width",
+        "height"
+      ],
+      "additionalProperties": false
+    },
+    "CompleteUpload": {
+      "type": "object",
+      "properties": {
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "byte_size": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "expected_revision",
+        "sha256",
+        "byte_size"
+      ],
+      "additionalProperties": false
+    },
+    "StartRecognition": {
+      "type": "object",
+      "properties": {
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "asset_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "expected_revision",
+        "asset_ids"
+      ],
+      "additionalProperties": false
+    },
+    "ReviseQuestion": {
+      "type": "object",
+      "properties": {
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "stem_text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16000
+        },
+        "regions": {
+          "type": "array",
+          "items": {
+            "$ref": "data.schema.json#/$defs/Region"
+          },
+          "minItems": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      },
+      "required": [
+        "expected_revision",
+        "stem_text",
+        "regions",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "ReviseAnswer": {
+      "type": "object",
+      "properties": {
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "answer_text": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "answer_regions": {
+          "type": "array",
+          "items": {
+            "$ref": "data.schema.json#/$defs/Region"
+          }
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      },
+      "required": [
+        "expected_revision",
+        "answer_text",
+        "answer_regions",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "StartCheck": {
+      "type": "object",
+      "properties": {
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "attempt_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "question_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "attempt_recognition_revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "expected_revision",
+        "attempt_id",
+        "question_revision",
+        "attempt_recognition_revision"
+      ],
+      "additionalProperties": false
+    },
+    "RequestHint": {
+      "type": "object",
+      "properties": {
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "attempt_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "source_decision_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "source_decision_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "level": {
+          "type": "string",
+          "enum": [
+            "direction",
+            "key_step",
+            "staff_handoff"
+          ]
+        }
+      },
+      "required": [
+        "expected_revision",
+        "attempt_id",
+        "source_decision_id",
+        "source_decision_revision",
+        "level"
+      ],
+      "additionalProperties": false
+    },
+    "ShowHint": {
+      "type": "object",
+      "properties": {
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "shown_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "expected_revision",
+        "shown_at"
+      ],
+      "additionalProperties": false
+    },
+    "CreateCorrection": {
+      "type": "object",
+      "properties": {
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "parent_attempt_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "question_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "asset_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "reported_help": {
+          "type": "string",
+          "enum": [
+            "unknown",
+            "none_reported",
+            "staff_help",
+            "answer_shown"
+          ]
+        }
+      },
+      "required": [
+        "expected_revision",
+        "parent_attempt_id",
+        "question_revision",
+        "asset_ids",
+        "occurred_at",
+        "reported_help"
+      ],
+      "additionalProperties": false
+    },
+    "CreateHelp": {
+      "type": "object",
+      "properties": {
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "attempt_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "question",
+            "recognition",
+            "judgment",
+            "appeal"
+          ]
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1500
+        }
+      },
+      "required": [
+        "expected_revision",
+        "attempt_id",
+        "kind",
+        "note"
+      ],
+      "additionalProperties": false
+    },
+    "ClaimHelp": {
+      "type": "object",
+      "properties": {
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "expected_revision"
+      ],
+      "additionalProperties": false
+    },
+    "CompleteHelp": {
+      "type": "object",
+      "properties": {
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "resolved",
+            "unresolved"
+          ]
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1500
+        }
+      },
+      "required": [
+        "expected_revision",
+        "outcome",
+        "note"
+      ],
+      "additionalProperties": false
+    },
+    "SubmitReview": {
+      "type": "object",
+      "properties": {
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "target_decision_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target_decision_revision": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "confirm",
+            "replace",
+            "retract",
+            "leave_unresolved",
+            "manual_initial"
+          ]
+        },
+        "verdict": {
+          "anyOf": [
+            {
+              "$ref": "states.schema.json#/$defs/Verdict"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "basis": {
+          "type": "array",
+          "items": {
+            "$ref": "data.schema.json#/$defs/Basis"
+          },
+          "minItems": 1
+        },
+        "attempt_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "question_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "attempt_recognition_revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "expected_revision",
+        "target_decision_id",
+        "target_decision_revision",
+        "action",
+        "verdict",
+        "reason",
+        "basis",
+        "attempt_id",
+        "question_revision",
+        "attempt_recognition_revision"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "enum": [
+                  "confirm",
+                  "replace",
+                  "manual_initial"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "verdict": {
+                "enum": [
+                  "correct",
+                  "incorrect",
+                  "partially_correct",
+                  "unanswered"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "enum": [
+                  "retract",
+                  "leave_unresolved"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "verdict": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "manual_initial"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "target_decision_id": {
+                "type": "null"
+              },
+              "target_decision_revision": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "target_decision_id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+              },
+              "target_decision_revision": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "SetProgress": {
+      "type": "object",
+      "properties": {
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "pause",
+            "resume"
+          ]
+        }
+      },
+      "required": [
+        "expected_revision",
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "RequestDeletion": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "confirmation": {
+          "const": "delete_authorized_student_data"
+        }
+      },
+      "required": [
+        "reason",
+        "confirmation"
+      ],
+      "additionalProperties": false
+    },
+    "RenewUpload": {
+      "type": "object",
+      "properties": {
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "expected_revision"
+      ],
+      "additionalProperties": false
+    },
+    "RepairLayout": {
+      "type": "object",
+      "properties": {
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "supersede_questions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "question_id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+              },
+              "expected_revision": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "question_id",
+              "expected_revision"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 0
+        },
+        "replacement_regions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "regions": {
+                "type": "array",
+                "items": {
+                  "$ref": "data.schema.json#/$defs/Region"
+                },
+                "minItems": 1
+              },
+              "stem_text": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 16000
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "regions",
+              "stem_text"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1500
+        }
+      },
+      "required": [
+        "expected_revision",
+        "supersede_questions",
+        "replacement_regions",
+        "reason"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

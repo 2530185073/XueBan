@@ -1,0 +1,2064 @@
+{
+  "openapi": "3.1.0",
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "info": {
+    "title": "XueBan Android correction phase 1 API",
+    "version": "0.1.0-draft",
+    "description": "Production contract draft; no implementation/server promised. Junior middle school / PEP textbook context. Real bearer identity required; no demo actor."
+  },
+  "x-status": "draft",
+  "security": [
+    {
+      "BearerAuth": []
+    }
+  ],
+  "paths": {
+    "/v1/me": {
+      "get": {
+        "operationId": "getIdentityContext",
+        "summary": "读取真实身份与已授权学生",
+        "description": "",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/IdentityContext"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/students/{student_id}/homeworks": {
+      "get": {
+        "operationId": "listHomeworks",
+        "summary": "作业历史，包含未处理作业",
+        "description": "",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/HomeworkPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 30
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "createHomework",
+        "summary": "创建本次采集作业",
+        "description": "student_id 必须属于服务端当前授权集合；归属及身份由服务端生成。",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "201": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/HomeworkSession"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "requests.schema.json#/$defs/CreateHomework"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/homeworks/{homework_id}": {
+      "get": {
+        "operationId": "getHomework",
+        "summary": "读取逐页采集、处理覆盖及结果引用",
+        "description": "",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/HomeworkSession"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "homework_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/homeworks/{homework_id}/uploads": {
+      "post": {
+        "operationId": "createUpload",
+        "summary": "创建私有上传票据",
+        "description": "expected_revision 比较作业；同作业可上传原图和订正图。票据由存储服务限制对象、大小、类型和有效期。",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "201": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/UploadTicket"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "homework_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "requests.schema.json#/$defs/CreateUpload"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/assets/{asset_id}/complete": {
+      "post": {
+        "operationId": "completeUpload",
+        "summary": "核验上传完整性",
+        "description": "expected_revision 比较图片；服务端读取存储元数据并验证，不信任客户端自报上传成功。",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/ImageAsset"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "asset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "requests.schema.json#/$defs/CompleteUpload"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/assets/{asset_id}/access": {
+      "get": {
+        "operationId": "getAssetAccess",
+        "summary": "鉴权后签发短期原图读取地址",
+        "description": "",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/AssetAccess"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "asset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/homeworks/{homework_id}/recognitions": {
+      "post": {
+        "operationId": "startRecognition",
+        "summary": "识别完整上传的页并创建原作答",
+        "description": "仅使用该作业已核验图片；expected_revision 比较作业，重复请求不重复切题/创建作答。",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "202": {
+            "description": "已受理，完成情况读取任务",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/Accepted"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "homework_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "requests.schema.json#/$defs/StartRecognition"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/jobs/{job_id}": {
+      "get": {
+        "operationId": "getJob",
+        "summary": "读取真实异步状态",
+        "description": "",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/Job"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/questions/{question_id}": {
+      "get": {
+        "operationId": "getQuestion",
+        "summary": "读取当前有效题目修订",
+        "description": "",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/QuestionRead"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "question_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "query",
+            "description": "题目历史 revision；省略取最新投影，历史快照须同时返回当前失效信息，不可用于新检查。",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v1/questions/{question_id}/revisions": {
+      "post": {
+        "operationId": "reviseQuestion",
+        "summary": "老师修正题干或题区",
+        "description": "expected_revision 比较题目；版本与失效事件同事务提交；拆分/合并不得冒充同一道题的文本修订。",
+        "x-allowed-roles": [
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "201": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/CapturedQuestionRevision"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "question_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "requests.schema.json#/$defs/ReviseQuestion"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/attempts/{attempt_id}": {
+      "get": {
+        "operationId": "getAttempt",
+        "summary": "读取作答与当前识别版本",
+        "description": "",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/AttemptRead"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "query",
+            "description": "作答历史 revision；省略取最新投影，历史快照须同时返回当前失效信息，不可用于新检查。",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v1/attempts/{attempt_id}/recognition-revisions": {
+      "post": {
+        "operationId": "reviseAnswer",
+        "summary": "老师修正该次答案识别",
+        "description": "expected_revision 比较作答；递增 recognition_revision，保留旧值，不创建新作答。",
+        "x-allowed-roles": [
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "201": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/Attempt"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "requests.schema.json#/$defs/ReviseAnswer"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/cases/{case_id}": {
+      "get": {
+        "operationId": "getCorrectionCase",
+        "summary": "读取订正进度及最新有效判断",
+        "description": "",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/CorrectionCase"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/cases/{case_id}/checks": {
+      "post": {
+        "operationId": "startCheck",
+        "summary": "创建初检或再检查",
+        "description": "expected_revision 比较纠错记录；检查引用当前有效题目/答案识别版本。作答原始题目 revision 可不同，但必须是同一采集题目。",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "202": {
+            "description": "已受理，完成情况读取任务",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/Accepted"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "requests.schema.json#/$defs/StartCheck"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/checks/{check_id}": {
+      "get": {
+        "operationId": "getCheck",
+        "summary": "读取检查版本及决定引用",
+        "description": "",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/CheckRun"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "check_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/decisions/{decision_id}": {
+      "get": {
+        "operationId": "getDecision",
+        "summary": "读取判断及有效性",
+        "description": "",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/DecisionRead"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "decision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "query",
+            "description": "判断历史 revision；省略取最新投影，历史快照须同时返回当前失效信息，不可用于新检查。",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ]
+      }
+    },
+    "/v1/cases/{case_id}/hints": {
+      "post": {
+        "operationId": "requestHint",
+        "summary": "请求当前题分层提示",
+        "description": "expected_revision 比较纠错记录；旧判断不可继续生成提示，候选来源须显式标记。",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "202": {
+            "description": "已受理，完成情况读取任务",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/Accepted"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "requests.schema.json#/$defs/RequestHint"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/hints/{hint_id}": {
+      "get": {
+        "operationId": "getHint",
+        "summary": "读取提示及来源有效性",
+        "description": "",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/Hint"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "hint_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/hints/{hint_id}/views": {
+      "post": {
+        "operationId": "recordHintView",
+        "summary": "记录实际展示而非只请求提示",
+        "description": "expected_revision 比较提示；服务端保存接收时间及客户端展示时间，并据实际内容更新帮助条件。",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/Hint"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "hint_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "requests.schema.json#/$defs/ShowHint"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/cases/{case_id}/attempts": {
+      "post": {
+        "operationId": "createCorrection",
+        "summary": "提交新的真实订正并排识别任务",
+        "description": "expected_revision 比较纠错记录；原图先完成上传核验；同生同采集题目，不要求父子题目 revision 相同。根作答由服务端计算。返回 created_resource 指向新作答，job 指向其识别任务。",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "202": {
+            "description": "已受理，完成情况读取任务",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/Accepted"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "requests.schema.json#/$defs/CreateCorrection"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/cases/{case_id}/help-requests": {
+      "post": {
+        "operationId": "requestHelp",
+        "summary": "求助或申请重查",
+        "description": "",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "201": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/HelpRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "requests.schema.json#/$defs/CreateHelp"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/help-requests": {
+      "get": {
+        "operationId": "listHelpRequests",
+        "summary": "读取被授权托管点待办队列",
+        "description": "",
+        "x-allowed-roles": [
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/HelpPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 30
+            }
+          }
+        ]
+      }
+    },
+    "/v1/help-requests/{help_id}/claim": {
+      "post": {
+        "operationId": "claimHelp",
+        "summary": "坐班老师接手",
+        "description": "expected_revision 比较求助；处理人从认证身份派生，不能由请求指定。",
+        "x-allowed-roles": [
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/HelpRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "help_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "requests.schema.json#/$defs/ClaimHelp"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/help-requests/{help_id}/complete": {
+      "post": {
+        "operationId": "completeHelp",
+        "summary": "记录现场帮助是否解决",
+        "description": "结束帮助不等于确认题目答对；判断必须走独立复核动作。",
+        "x-allowed-roles": [
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/HelpRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "help_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "requests.schema.json#/$defs/CompleteHelp"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/cases/{case_id}/reviews": {
+      "post": {
+        "operationId": "submitReview",
+        "summary": "老师确认、改判、撤销或留待核实",
+        "description": "expected_revision 比较纠错记录，同时核验 target_decision_revision。受权老师身份来自认证；新决定、失效、当前指针和 Outbox 同事务。confirm 不得变更原候选 verdict；变更使用 replace。 没有有效 AI 决定（含模型技术失败）时用 manual_initial，目标决定字段为空，明确引用实际题目/作答识别版本；由受权老师对原图核实，生成 origin=staff、check_id=null 的新决定。它不被计入模型成功。若已有有效决定必须走 confirm/replace；无把握仍保持待核实。",
+        "x-allowed-roles": [
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "201": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/Review"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "requests.schema.json#/$defs/SubmitReview"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/cases/{case_id}/progress": {
+      "post": {
+        "operationId": "setCorrectionProgress",
+        "summary": "暂停或恢复订正",
+        "description": "不接受已完成/已掌握状态；恢复后的状态由当前有效事实计算。",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/CorrectionCase"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "requests.schema.json#/$defs/SetProgress"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/students/{student_id}/deletion-requests": {
+      "post": {
+        "operationId": "requestStudentDeletion",
+        "summary": "提交受权学生数据删除",
+        "description": "治理权限及相应授权另核验；受理即封锁新增处理与在线读取，离线缓存未清理不可声称全部完成。",
+        "x-allowed-roles": [
+          "data_steward"
+        ],
+        "responses": {
+          "202": {
+            "description": "已受理，完成情况读取任务",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/DeletionRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "student_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "requests.schema.json#/$defs/RequestDeletion"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/deletion-requests/{deletion_id}": {
+      "get": {
+        "operationId": "getDeletionRequest",
+        "summary": "读取各数据介质删除执行状态",
+        "description": "",
+        "x-allowed-roles": [
+          "data_steward"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/DeletionRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "deletion_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/assets/{asset_id}": {
+      "get": {
+        "operationId": "getImageAsset",
+        "summary": "读取上传状态与当前版本",
+        "description": "用于恢复未完成上传；读取仍需核验所属学生，不能只凭对象 ID 访问。",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/ImageAsset"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "asset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/assets/{asset_id}/upload-ticket": {
+      "post": {
+        "operationId": "renewUploadTicket",
+        "summary": "为同一未完成图片续签上传票据",
+        "description": "expected_revision 比较同一图片。续签不创建图片、页或作答；每次新续签使用新幂等键，同次续签重试沿用旧键。旧票据失效后不可靠重建业务记录恢复。已完成/删除/已撤权图片拒绝续签。",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/UploadTicket"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "asset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "requests.schema.json#/$defs/RenewUpload"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/homeworks/{homework_id}/layout-revisions": {
+      "post": {
+        "operationId": "repairQuestionLayout",
+        "summary": "老师补题、拆分或合并错误切题",
+        "description": "expected_revision 比较作业，supersede_questions 逐项校验题目版本；空列表用于补漏题。受理事务使受影响旧题/纠错记录 superseded 并使依赖判断失效；Worker 按已授权原图区域创建新采集题目和原作答。新题保留旧题 replacement 关联，旧订正照片不删、不强行跨题重挂父链。完成任务 result 引用作业，失败可恢复重切且不得复活旧结论。",
+        "x-allowed-roles": [
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "202": {
+            "description": "已受理",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/Accepted"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "homework_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "requests.schema.json#/$defs/RepairLayout"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "由真实身份服务签发并在服务端验证的访问凭证。不得接受演示角色头或模型自报权限。"
+      }
+    },
+    "parameters": {
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._:-]+$"
+        },
+        "description": "重试沿用同键同载荷；同键不同载荷 409。"
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "身份失效；不得降级演示身份",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "data.schema.json#/$defs/Problem"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "未获该学生或动作授权",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "data.schema.json#/$defs/Problem"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "资源不存在或不可公开其存在",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "data.schema.json#/$defs/Problem"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "版本过期、依赖过期或幂等键载荷冲突",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "data.schema.json#/$defs/Problem"
+            }
+          }
+        }
+      },
+      "Invalid": {
+        "description": "请求结构或业务关联不合法",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "data.schema.json#/$defs/Problem"
+            }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "尚未受理；按同一幂等键重试",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "data.schema.json#/$defs/Problem"
+            }
+          }
+        }
+      }
+    }
+  }
+}

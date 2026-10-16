@@ -17,10 +17,16 @@ jobs:
         with:
           python-version: '3.14'
           cache: pip
-          cache-dependency-path: prototype/requirements.txt
+          cache-dependency-path: |
+            prototype/requirements.txt
+            contracts/phase1/requirements.txt
       - name: Install reference dependencies
         run: python -m pip install -r prototype/requirements.txt
       - name: Test reference rules and HTTP adapter
         run: python -m pytest prototype -q
       - name: Run synthetic learning flow
         run: python -m prototype.demo
+      - name: Install phase-one contract validation dependency
+        run: python -m pip install -r contracts/phase1/requirements.txt
+      - name: Validate draft phase-one contract and synthetic cases
+        run: python contracts/phase1/validate.py

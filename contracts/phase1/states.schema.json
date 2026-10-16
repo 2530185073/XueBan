@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.xueban.invalid/phase1/states.schema.json",
+  "title": "Phase 1 separate state dimensions",
+  "description": "draft-0.1; contract only, not an implemented service.",
+  "$defs": {
+    "JobStatus": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "running",
+        "succeeded",
+        "retryable_failed",
+        "failed",
+        "superseded",
+        "cancelled"
+      ]
+    },
+    "DecisionValidity": {
+      "type": "string",
+      "enum": [
+        "candidate",
+        "needs_review",
+        "confirmed",
+        "retracted",
+        "stale"
+      ]
+    },
+    "Verdict": {
+      "type": "string",
+      "enum": [
+        "correct",
+        "incorrect",
+        "partially_correct",
+        "unanswered",
+        "unable_to_judge"
+      ]
+    },
+    "CorrectionProgress": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "editing",
+        "rechecking",
+        "needs_correction",
+        "verified_resolved",
+        "paused"
+      ]
+    },
+    "HelpStatus": {
+      "type": "string",
+      "enum": [
+        "waiting",
+        "claimed",
+        "resolved",
+        "unresolved",
+        "cancelled"
+      ]
+    },
+    "AssetStatus": {
+      "type": "string",
+      "enum": [
+        "awaiting_upload",
+        "uploaded",
+        "rejected",
+        "deletion_pending",
+        "deleted"
+      ]
+    },
+    "DeletionStatus": {
+      "type": "string",
+      "enum": [
+        "accepted",
+        "running",
+        "waiting_devices",
+        "completed",
+        "failed"
+      ]
+    },
+    "Role": {
+      "type": "string",
+      "enum": [
+        "student",
+        "sitting_teacher",
+        "campus_admin",
+        "data_steward"
+      ]
+    },
+    "RecordLifecycle": {
+      "type": "string",
+      "enum": [
+        "active",
+        "superseded",
+        "deletion_pending"
+      ]
+    }
+  }
+}

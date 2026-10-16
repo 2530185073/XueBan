@@ -1,0 +1,627 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.xueban.invalid/phase1/events.schema.json",
+  "title": "Phase 1 transactional correction events",
+  "description": "draft-0.1; contract only, not an implemented service.",
+  "$defs": {
+    "question.revised": {
+      "type": "object",
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "event_type": {
+          "const": "question.revised"
+        },
+        "schema_version": {
+          "const": "phase1.event.v1"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "scope": {
+          "$ref": "data.schema.json#/$defs/Scope"
+        },
+        "aggregate_type": {
+          "const": "question"
+        },
+        "aggregate_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "aggregate_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "question_id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            },
+            "old_revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "new_revision": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "question_id",
+            "old_revision",
+            "new_revision"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "schema_version",
+        "occurred_at",
+        "scope",
+        "aggregate_type",
+        "aggregate_id",
+        "aggregate_revision",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "attempt.created": {
+      "type": "object",
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "event_type": {
+          "const": "attempt.created"
+        },
+        "schema_version": {
+          "const": "phase1.event.v1"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "scope": {
+          "$ref": "data.schema.json#/$defs/Scope"
+        },
+        "aggregate_type": {
+          "const": "case"
+        },
+        "aggregate_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "aggregate_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "attempt_id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            },
+            "question_id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            },
+            "question_revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "parent_attempt_id": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "root_attempt_id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          "required": [
+            "attempt_id",
+            "question_id",
+            "question_revision",
+            "parent_attempt_id",
+            "root_attempt_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "schema_version",
+        "occurred_at",
+        "scope",
+        "aggregate_type",
+        "aggregate_id",
+        "aggregate_revision",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "decision.created": {
+      "type": "object",
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "event_type": {
+          "const": "decision.created"
+        },
+        "schema_version": {
+          "const": "phase1.event.v1"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "scope": {
+          "$ref": "data.schema.json#/$defs/Scope"
+        },
+        "aggregate_type": {
+          "const": "case"
+        },
+        "aggregate_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "aggregate_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "decision_id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            },
+            "decision_revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "check_id": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "decision_id",
+            "decision_revision",
+            "check_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "schema_version",
+        "occurred_at",
+        "scope",
+        "aggregate_type",
+        "aggregate_id",
+        "aggregate_revision",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "decision.invalidated": {
+      "type": "object",
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "event_type": {
+          "const": "decision.invalidated"
+        },
+        "schema_version": {
+          "const": "phase1.event.v1"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "scope": {
+          "$ref": "data.schema.json#/$defs/Scope"
+        },
+        "aggregate_type": {
+          "const": "case"
+        },
+        "aggregate_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "aggregate_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "decision_id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            },
+            "previous_revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "new_revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "recognition_changed",
+                "staff_retracted",
+                "superseded"
+              ]
+            },
+            "replacement_decision_id": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "decision_id",
+            "previous_revision",
+            "new_revision",
+            "reason",
+            "replacement_decision_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "schema_version",
+        "occurred_at",
+        "scope",
+        "aggregate_type",
+        "aggregate_id",
+        "aggregate_revision",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "review.recorded": {
+      "type": "object",
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "event_type": {
+          "const": "review.recorded"
+        },
+        "schema_version": {
+          "const": "phase1.event.v1"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "scope": {
+          "$ref": "data.schema.json#/$defs/Scope"
+        },
+        "aggregate_type": {
+          "const": "case"
+        },
+        "aggregate_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "aggregate_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "review_id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            },
+            "target_decision_id": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "new_decision_id": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "review_id",
+            "target_decision_id",
+            "new_decision_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "schema_version",
+        "occurred_at",
+        "scope",
+        "aggregate_type",
+        "aggregate_id",
+        "aggregate_revision",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "deletion.requested": {
+      "type": "object",
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "event_type": {
+          "const": "deletion.requested"
+        },
+        "schema_version": {
+          "const": "phase1.event.v1"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "scope": {
+          "$ref": "data.schema.json#/$defs/Scope"
+        },
+        "aggregate_type": {
+          "const": "student"
+        },
+        "aggregate_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "aggregate_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "deletion_id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          "required": [
+            "deletion_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "schema_version",
+        "occurred_at",
+        "scope",
+        "aggregate_type",
+        "aggregate_id",
+        "aggregate_revision",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "deletion.completed": {
+      "type": "object",
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "event_type": {
+          "const": "deletion.completed"
+        },
+        "schema_version": {
+          "const": "phase1.event.v1"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "scope": {
+          "$ref": "data.schema.json#/$defs/Scope"
+        },
+        "aggregate_type": {
+          "const": "student"
+        },
+        "aggregate_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "aggregate_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "deletion_id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          "required": [
+            "deletion_id"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "schema_version",
+        "occurred_at",
+        "scope",
+        "aggregate_type",
+        "aggregate_id",
+        "aggregate_revision",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Event": {
+      "oneOf": [
+        {
+          "$ref": "events.schema.json#/$defs/question.revised"
+        },
+        {
+          "$ref": "events.schema.json#/$defs/attempt.created"
+        },
+        {
+          "$ref": "events.schema.json#/$defs/decision.created"
+        },
+        {
+          "$ref": "events.schema.json#/$defs/decision.invalidated"
+        },
+        {
+          "$ref": "events.schema.json#/$defs/review.recorded"
+        },
+        {
+          "$ref": "events.schema.json#/$defs/deletion.requested"
+        },
+        {
+          "$ref": "events.schema.json#/$defs/deletion.completed"
+        },
+        {
+          "$ref": "events.schema.json#/$defs/layout.revised"
+        }
+      ]
+    },
+    "layout.revised": {
+      "type": "object",
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "event_type": {
+          "const": "layout.revised"
+        },
+        "schema_version": {
+          "const": "phase1.event.v1"
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "scope": {
+          "$ref": "data.schema.json#/$defs/Scope"
+        },
+        "aggregate_type": {
+          "const": "homework"
+        },
+        "aggregate_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "aggregate_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "job_id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            },
+            "superseded_question_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+              },
+              "minItems": 0
+            },
+            "created_question_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+              },
+              "minItems": 1
+            }
+          },
+          "required": [
+            "job_id",
+            "superseded_question_ids",
+            "created_question_ids"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "schema_version",
+        "occurred_at",
+        "scope",
+        "aggregate_type",
+        "aggregate_id",
+        "aggregate_revision",
+        "payload"
+      ],
+      "additionalProperties": false
+    }
+  }
+}
