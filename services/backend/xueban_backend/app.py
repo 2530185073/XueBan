@@ -277,6 +277,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     install_agent(app, engine, cfg, database_session, current_actor)
     from .learning_reports import install_reports
     install_reports(app, engine, cfg, database_session, current_actor)
+    from .practice import install_practice
+    install_practice(app, engine, cfg, database_session, current_actor)
     from .ops import install_ops
     install_ops(app, engine, cfg)
     from .student_web import install_student_web

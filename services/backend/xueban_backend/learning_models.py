@@ -264,3 +264,82 @@ class ReportShareLink(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     view_count: Mapped[int] = mapped_column(Integer, nullable=False)
     last_viewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PracticeItem(Base):
+    """A reviewed, tenant-shared practice item tagged to one knowledge point; holds no student data."""
+    __tablename__ = "practice_items"
+    __table_args__ = (Index("ix_practice_items_knowledge", "tenant_id", "knowledge_id", "status"),)
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    knowledge_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    item_family_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    stem_text: Mapped[str] = mapped_column(Text, nullable=False)
+    answer_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    answer_values: Mapped[list] = mapped_column(JSON, nullable=False)
+    hint_text: Mapped[str | None] = mapped_column(Text)
+    solution_text: Mapped[str] = mapped_column(Text, nullable=False)
+    difficulty: Mapped[int] = mapped_column(Integer, nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    generation: Mapped[dict | None] = mapped_column(JSON)
+    created_by: Mapped[str | None] = mapped_column(String(64))
+    reviewed_by: Mapped[str | None] = mapped_column(String(64))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class OptionalWindow(Base):
+    """Staff observation for one Shanghai day: capacity, extra-minute budget, optional school-task confirmation."""
+    __tablename__ = "optional_windows"
+    __table_args__ = (student_fk(), Index("ix_optional_windows_day", "student_id", "local_date", unique=True))
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    student_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    local_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    capacity_observed: Mapped[bool] = mapped_column(nullable=False)
+    extra_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    school_tasks_confirmed: Mapped[bool | None] = mapped_column()
+    updated_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class PracticeSession(Base):
+    """One voluntary activity; leaving early is recorded as not taking part, never as debt."""
+    __tablename__ = "practice_sessions"
+    __table_args__ = (student_fk(), Index("ix_practice_sessions_student", "student_id", "started_at"))
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    student_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(16), nullable=False)
+    knowledge_ids: Mapped[list] = mapped_column(JSON, nullable=False)
+    source_case_id: Mapped[str | None] = mapped_column(String(64))
+    item_ids: Mapped[list] = mapped_column(JSON, nullable=False)
+    hints_used: Mapped[list] = mapped_column(JSON, nullable=False)
+    gate: Mapped[dict] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    exit_reason: Mapped[str | None] = mapped_column(String(32))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    budget_ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PracticeResponse(Base):
+    """A rule-graded voluntary answer; recorded separately and never counted toward knowledge state."""
+    __tablename__ = "practice_responses"
+    __table_args__ = (student_fk(), Index("ix_practice_responses_item", "session_id", "item_id", unique=True),
+                      Index("ix_practice_responses_student", "student_id", "knowledge_id"))
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    student_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    session_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    item_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    knowledge_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    answer_text: Mapped[str] = mapped_column(Text, nullable=False)
+    result: Mapped[str] = mapped_column(String(16), nullable=False)
+    hint_used: Mapped[bool] = mapped_column(nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
