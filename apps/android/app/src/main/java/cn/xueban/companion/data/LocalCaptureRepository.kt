@@ -34,11 +34,27 @@ class LocalCaptureRepository(context: Context) {
     }
     @Synchronized fun update(id: String, action: (JSONObject) -> Unit): LocalCapture = read(id).let { action(it); write(id, it) }
     private fun capture(id: String, value: JSONObject) = LocalCapture(id, File(directory(id), "upload.jpg"), value.optLong("captured_at"), value)
-    @Synchronized fun listCaptures(server: String, actor: String, student: String): List<LocalCapture> = root.listFiles().orEmpty()
-        .filter { it.isDirectory && (File(it, "record.json").exists() || File(it, "record.json.bak").exists()) }
-        .map { capture(it.name, read(it.name)) }
-        .filter { it.state.optString("server") == server && it.state.optString("actor_id") == actor && it.state.optString("student_id") == student && it.stage != "capturing" }
-        .sortedByDescending { it.capturedAt }
+    @Synchronized fun listCaptures(server: String, actor: String, student: String): List<LocalCapture> {
+        val records = root.listFiles().orEmpty()
+            .filter { it.isDirectory && (File(it, "record.json").exists() || File(it, "record.json.bak").exists()) }
+            .map { capture(it.name, read(it.name)) }
+            .filter { it.state.optString("server") == server && it.state.optString("actor_id") == actor && it.state.optString("student_id") == student && it.stage != "capturing" }
+            .sortedByDescending { it.capturedAt }.toMutableList()
+        // Reconcile old-version journals from locally known revisions, with no HTTP/model calls.
+        val snapshots = records.flatMap { record -> record.cases.map { record.state to it } }
+            .sortedByDescending { it.second.getJSONObject("case").getLong("revision") }
+        snapshots.forEach { (source, row) -> records.indices.forEach { index ->
+            mergeCaseSnapshot(records[index].state, source, row)?.let { records[index] = write(records[index].id, it) }
+        } }
+        return records
+    }
+
+    @Synchronized fun saveCaseSnapshot(sourceId: String, row: JSONObject) {
+        val source = read(sourceId)
+        listCaptures(source.getString("server"), source.getString("actor_id"), source.getString("student_id")).forEach { record ->
+            mergeCaseSnapshot(record.state, source, row, insertForSource = true)?.let { write(record.id, it) }
+        }
+    }
 
     fun beginCapture(server: String, actor: String, student: String, correction: JSONObject?): File {
         val id = UUID.randomUUID().toString()

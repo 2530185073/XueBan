@@ -16,10 +16,10 @@ import unicodedata
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
-from .ark import ArkClient, ArkSettings, Metadata, MODEL_ID, ProviderError
+from .ark import ArkClient, ArkSettings, Metadata, MODEL_ID, OutputDiagnostic, ProviderError
 
 
-PROMPT_VERSION = "photo-correction.v4"
+PROMPT_VERSION = "photo-correction.v6"
 ID_PATTERN = r"^[a-z][a-z0-9_-]{2,63}$"
 REASONS = ["unclear_image", "incomplete_question", "unsupported_type", "recognition_conflict",
            "verification_conflict", "insufficient_process", "needs_staff", "other"]
@@ -111,6 +111,12 @@ class PipelineResult:
     metadata: Metadata
     prompt_version: str = PROMPT_VERSION
     status: str = field(default="candidate", init=False)
+
+
+class _SemanticOutputError(ValueError):
+    def __init__(self, rule, path):
+        super().__init__("invalid_output")
+        self.diagnostic = OutputDiagnostic("candidate_semantics", rule, path)
 
 
 def _validate(schema, value, code="invalid_input"):
@@ -216,17 +222,21 @@ class CorrectionPipeline:
         return result
 
     @staticmethod
-    def _regions(regions, images):
-        for region in regions:
+    def _regions(regions, images, *, path=(), is_collection=True):
+        for index, region in enumerate(regions):
+            region_path = (*path, index) if is_collection else path
             image = images.get(region["asset_id"])
-            if image is None or region["x"] + region["width"] > image.width_px or region["y"] + region["height"] > image.height_px:
-                raise ValueError("invalid_region")
+            if image is None:
+                raise _SemanticOutputError("unknown_asset", (*region_path, "asset_id"))
+            if region["x"] + region["width"] > image.width_px or region["y"] + region["height"] > image.height_px:
+                raise _SemanticOutputError("region_bounds", region_path)
 
     @staticmethod
-    def _failed_output(result):
+    def _failed_output(result, error=None):
         attempts = result.metadata.attempts
+        diagnostic = error.diagnostic if isinstance(error, _SemanticOutputError) else OutputDiagnostic("candidate_semantics", "invalid_structure")
         if attempts:
-            attempts = (*attempts[:-1], replace(attempts[-1], code="invalid_output"))
+            attempts = (*attempts[:-1], replace(attempts[-1], code="invalid_output", diagnostic=diagnostic))
         raise ProviderError("invalid_output", attempts=attempts, latency_ms=result.metadata.latency_ms) from None
 
     def _call(self, role, images, instructions, schema, *, data=None, thinking=True):
@@ -256,7 +266,17 @@ class CorrectionPipeline:
     def recognize(self, *, images: tuple[PipelineImage, ...]) -> PipelineResult:
         images = self._images(images)
         result = self._call("recognition", images,
+            "输出格式：最外层必须直接包含 items 和 coverage 两个键，且只能有这两个键。"
+            "不添加 status、candidate、metadata、顶层 uncertainties，也不使用 data、result 或 response 包装。"
+            "coverage 只含 collection_scope、unrecognized_regions、note 三个键。"
+            "每个 items 元素只含 asset_id、label、stem_text、answer_text、answer_status、regions、answer_regions、uncertainties 八个键；"
+            "不添加 recognition_status 或 location_status，这些状态由服务端计算。"
+            '空结构示例：{"items":[],"coverage":{"collection_scope":"unknown","unrecognized_regions":[],"note":null}}。'
+            "这个示例只说明字段结构，不表示照片无题；必须把实际可辨认的题目逐项放进 items。"
+            "无法辨认的内容按 Schema 使用 null、空数组或 uncertainties，不另增字段。"
             "逐个可见小问、每一个独立填空拆为一项，label 必须包含完整题号和空位名称，在同图内唯一。"
+            "同一题号要求多个表达式分别求值时，每个求值目标也各拆为独立 item，不限于带填空线的题；"
+            "每项保留解题必需的共享条件，label 标明具体小问或求值目标，不将多个目标的作答合并到一项。"
             "题号只放 label，不混入 stem_text 或 answer_text。Question:、题目:、Student answer:、学生作答:"
             "等明确字段标签不是数学内容，应去掉标签但保留后面的全部题干或作答。"
             "不要删改数学符号、括号、指数、数字间隔；无法区分题号和数学内容时保留歧义，不自行删数。"
@@ -276,20 +296,23 @@ class CorrectionPipeline:
         data = deepcopy(result.data)
         try:
             seen = set()
-            self._regions(data["coverage"]["unrecognized_regions"], images)
-            for item in data["items"]:
+            self._regions(data["coverage"]["unrecognized_regions"], images, path=("coverage", "unrecognized_regions"))
+            for index, item in enumerate(data["items"]):
                 for field_name in ("stem_text", "answer_text"):
                     item[field_name] = _strip_field_label(item[field_name], field_name)
                 key = (item["asset_id"], item["label"])
-                if item["asset_id"] not in images or key in seen:
-                    raise ValueError()
+                if item["asset_id"] not in images:
+                    raise _SemanticOutputError("unknown_asset", ("items", index, "asset_id"))
+                if key in seen:
+                    raise _SemanticOutputError("duplicate_label", ("items", index, "label"))
                 seen.add(key)
-                self._regions(item["regions"] + item["answer_regions"], images)
-                if any(r["asset_id"] != item["asset_id"] for r in item["regions"] + item["answer_regions"]):
-                    raise ValueError()
+                for field_name in ("regions", "answer_regions"):
+                    self._regions(item[field_name], images, path=("items", index, field_name))
+                    if any(r["asset_id"] != item["asset_id"] for r in item[field_name]):
+                        raise _SemanticOutputError("asset_mismatch", ("items", index, field_name))
                 if ((item["answer_status"] == "present" and item["answer_text"] is None)
                         or (item["answer_status"] == "blank" and item["answer_text"] is not None)):
-                    raise ValueError()
+                    raise _SemanticOutputError("answer_status_conflict", ("items", index, "answer_text"))
                 item["location_status"] = "located" if item["regions"] else "unknown"
                 ready = bool(item["stem_text"] and item["regions"] and not item["uncertainties"] and item["answer_status"] != "unclear")
                 item["recognition_status"] = "ready" if ready else "needs_revision"
@@ -297,8 +320,8 @@ class CorrectionPipeline:
                 data["coverage"]["note"] = "未取得可核读题目，不能视为无错作业。"
             elif any(i["location_status"] == "unknown" for i in data["items"]) and not data["coverage"]["note"]:
                 data["coverage"]["note"] = "存在无法定位的题目候选，须核实位置后建立题目记录。"
-        except (ValueError, KeyError, TypeError):
-            self._failed_output(result)
+        except (ValueError, KeyError, TypeError) as error:
+            self._failed_output(result, error)
         return PipelineResult(data, result.metadata)
 
     def _context(self, images, question, attempt, input_versions):
@@ -369,14 +392,14 @@ class CorrectionPipeline:
         raw = result.data
         try:
             if raw["first_error_region"] is not None:
-                self._regions([raw["first_error_region"]], images)
+                self._regions([raw["first_error_region"]], images, path=("first_error_region",), is_collection=False)
                 if raw["first_error_region"]["asset_id"] not in attempt["asset_ids"]:
-                    raise ValueError()
+                    raise _SemanticOutputError("asset_mismatch", ("first_error_region", "asset_id"))
             if ((raw["readback"]["answer_status"] == "present" and raw["readback"]["answer_text"] is None)
                     or (raw["readback"]["answer_status"] == "blank" and raw["readback"]["answer_text"] is not None)):
-                raise ValueError()
-        except (ValueError, KeyError, TypeError):
-            self._failed_output(result)
+                raise _SemanticOutputError("answer_status_conflict", ("readback", "answer_text"))
+        except (ValueError, KeyError, TypeError) as error:
+            self._failed_output(result, error)
         uncertainties = list(raw["uncertainties"])
         conflict = not raw["recognition_consistent"] or any(
             normalize_field_for_comparison(raw["readback"][key], key) != normalize_field_for_comparison(observation[key], key)
@@ -448,11 +471,11 @@ class CorrectionPipeline:
             code, focus = result.data["guidance_code"], result.data["focus_region"]
             try:
                 if focus is not None:
-                    self._regions([focus], images)
+                    self._regions([focus], images, path=("focus_region",), is_collection=False)
                     if focus["asset_id"] not in attempt["asset_ids"]:
-                        raise ValueError()
-            except (ValueError, KeyError, TypeError):
-                self._failed_output(result)
+                        raise _SemanticOutputError("asset_mismatch", ("focus_region", "asset_id"))
+            except (ValueError, KeyError, TypeError) as error:
+                self._failed_output(result, error)
             if result.data["uncertainties"]:
                 code, focus = "staff", None
         handoff = code == "staff"

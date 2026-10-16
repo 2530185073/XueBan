@@ -1,0 +1,51 @@
+{
+  "synthetic_only": true,
+  "fixture": "evals/correction/fixtures/ark-smoke",
+  "prompt_version": "photo-correction.v6",
+  "model": "deepseek-v4-1-flash-260910",
+  "provider": "BytePlus ModelArk AP",
+  "jobs": [
+    {
+      "kind": "recognize_homework",
+      "status": "succeeded",
+      "poll_observed_seconds": 49.76
+    },
+    {
+      "kind": "check",
+      "status": "succeeded",
+      "poll_observed_seconds": 4.06
+    },
+    {
+      "kind": "hint",
+      "status": "succeeded",
+      "poll_observed_seconds": 2.03
+    },
+    {
+      "kind": "recognize_attempt",
+      "status": "succeeded",
+      "poll_observed_seconds": 4.06
+    },
+    {
+      "kind": "check",
+      "status": "succeeded",
+      "poll_observed_seconds": 4.07
+    }
+  ],
+  "observed_verdicts": [
+    "incorrect",
+    "correct"
+  ],
+  "validities": [
+    "candidate",
+    "candidate"
+  ],
+  "hint": "请检查括号内的每一项是否都参与了运算。",
+  "history_verified": true,
+  "passed": true,
+  "charge_status": "unknown",
+  "limits": [
+    "single self-authored printed question used during development",
+    "shared worker also processed handwritten page; timing includes queue",
+    "not handwriting accuracy or production acceptance"
+  ]
+}

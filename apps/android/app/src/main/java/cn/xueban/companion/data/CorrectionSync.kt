@@ -187,9 +187,9 @@ class CorrectionSync(private val repository: LocalCaptureRepository, private val
         return JSONObject().put("case", case).put("question", question.getJSONObject("record")).put("attempt", attempt.getJSONObject("record"))
     }
 
-    private suspend fun saveRow(id: String, row: JSONObject) = update(id) {
-        val rows = it.optJSONArray("cases")?.objects().orEmpty().filterNot { old -> old.getJSONObject("case").getString("id") == row.getJSONObject("case").getString("id") }
-        it.put("cases", JSONArray(rows + row))
+    private suspend fun saveRow(id: String, row: JSONObject) {
+        repository.saveCaseSnapshot(id, row)
+        changed()
     }
 
     private fun cacheRemoteImage(id: String, homework: JSONObject) {

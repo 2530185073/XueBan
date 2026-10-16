@@ -202,6 +202,7 @@ private fun QuestionDetail(model: CaptureViewModel, record: LocalCapture, row: J
             .filter { it.optString("asset_id") == displayPhoto.state.text("asset_id") }
         LocalPhoto(displayPhoto.file, Modifier.fillMaxWidth().heightIn(min = 240.dp, max = 450.dp), regions = regions,
             originalWidth = displayPhoto.state.optInt("width"), originalHeight = displayPhoto.state.optInt("height"))
+        if (regions.isNotEmpty()) Text("绿色框为 AI 推测区域，请结合原图核对。", style = MaterialTheme.typography.bodySmall)
     } else Text("本次作答图片未加载，请刷新记录或请老师核实。")
     Text("题目", style = MaterialTheme.typography.titleMedium)
     Text(question.text("stem_text") ?: "暂时没有读清题干，请对照照片。")

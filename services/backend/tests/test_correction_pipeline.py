@@ -209,6 +209,58 @@ def test_invalid_recognition_preserves_billable_attempt_and_fails_closed(change)
     assert failure.value.attempts[-1].code == "invalid_output"
     assert failure.value.attempts[-1].charge_status == "unknown"
     assert SECRET not in str(failure.value)
+    expected = {
+        "outside": ("candidate_semantics", "region_bounds", ("items", 0, "regions", 0)),
+        "foreign_asset": ("candidate_semantics", "unknown_asset", ("items", 0, "regions", 0, "asset_id")),
+        "duplicate_blank": ("candidate_semantics", "duplicate_label", ("items", 1, "label")),
+        "present_without_text": ("candidate_semantics", "answer_status_conflict", ("items", 0, "answer_text")),
+        "blank_with_text": ("candidate_semantics", "answer_status_conflict", ("items", 0, "answer_text")),
+        "confirmed": ("candidate_schema", "additionalProperties", ("items", 0)),
+        "declared_complete": ("candidate_schema", "enum", ("coverage", "collection_scope")),
+    }
+    diagnostic = failure.value.attempts[-1].diagnostic
+    assert (diagnostic.layer, diagnostic.rule, diagnostic.path) == expected[change]
+
+
+def test_independent_expression_targets_remain_separate_with_shared_conditions():
+    data = recognition()
+    first = data["items"][0]
+    first.update(label="6 求值目标一", stem_text="已知 a=2,b=3，求 a+b。", answer_text="6")
+    second = deepcopy(first)
+    second.update(label="6 求值目标二", stem_text="已知 a=2,b=3，求 a-b。", answer_text="-1")
+    data["items"].append(second)
+    requests = []
+    with pipeline([data], requests) as flow:
+        result = flow.recognize(images=(picture(),))
+    assert [i["answer_text"] for i in result.data["items"]] == ["6", "-1"]
+    assert all(i["stem_text"].startswith("已知 a=2,b=3") for i in result.data["items"])
+    system = requests[0]["messages"][0]["content"]
+    assert "每个求值目标也各拆为独立 item" in system
+    assert "不输出判题结论" in system
+    assert "候选 correct、incorrect" not in system
+    assert "unable_to_judge" not in system
+    assert all("verdict" not in i for i in result.data["items"])
+
+
+@pytest.mark.parametrize("extra_key", ["status", "candidate", "metadata", "data", "result", "uncertainties"])
+def test_recognition_top_level_extra_fields_are_rejected_without_silent_unwrapping(extra_key):
+    data = recognition()
+    data[extra_key] = {"text": "synthetic-private-extra-value"}
+    requests = []
+    with pipeline([data], requests) as flow, pytest.raises(ProviderError, match="^invalid_output$") as failure:
+        flow.recognize(images=(picture(),))
+    assert len(requests) == 1
+    diagnostic = failure.value.attempts[-1].diagnostic
+    assert (diagnostic.layer, diagnostic.rule, diagnostic.path) == ("candidate_schema", "additionalProperties", ())
+    assert "synthetic-private-extra-value" not in json.dumps(asdict(failure.value.attempts[-1]))
+    assert failure.value.attempts[-1].usage.total_tokens == 130
+    system = requests[0]["messages"][0]["content"]
+    assert "最外层必须直接包含 items 和 coverage 两个键" in system
+    assert "状态由服务端计算" in system
+    example = json.loads(system.split("空结构示例：", 1)[1].split("。", 1)[0])
+    from xueban_backend.providers.correction_pipeline import RECOGNITION_SCHEMA
+    Draft202012Validator(RECOGNITION_SCHEMA).validate(example)
+    assert set(example) == {"items", "coverage"}
 
 
 def test_check_is_candidate_and_can_be_converted_to_contract_decision():
@@ -248,7 +300,7 @@ def test_printed_visible_answers_are_readable_without_asserting_authentic_studen
     with pipeline([recognition()], requests) as flow:
         result = flow.recognize(images=(picture(),))
     assert result.data["items"][0]["recognition_status"] == "ready"
-    assert result.prompt_version == "photo-correction.v4"
+    assert result.prompt_version == "photo-correction.v6"
     prompt = requests[0]["messages"][0]["content"]
     assert "作答可以是印刷或手写" in prompt
     assert "影响分题绑定、题干/作答读取或位置真实性的具体歧义" in prompt
@@ -529,7 +581,11 @@ def test_trusted_task_policy_is_system_and_all_photo_candidate_data_is_user_json
     system, user = requests[0]["messages"]
     assert system["role"] == "system" and user["role"] == "user"
     assert "服务端可信任务指令" in system["content"]
-    assert "候选 correct、incorrect" in system["content"]
+    if role in {"check", "recheck"}:
+        assert "候选 correct、incorrect" in system["content"]
+    else:
+        assert "候选 correct、incorrect" not in system["content"]
+        assert "unable_to_judge" not in system["content"]
     assert "candidate 与 confirmed 不同" in system["content"]
     assert "与当前判断无关的信息省略，不写进 uncertainties" in system["content"]
     assert marker not in system["content"]

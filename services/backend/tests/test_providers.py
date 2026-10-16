@@ -200,13 +200,62 @@ def test_strict_output_rejects_invalid_json_and_schema_without_retry_or_body_lea
     assert PRIVATE_TEXT not in caplog.text
 
 
+@pytest.mark.parametrize("failure_kind,layer,rule,path", [
+    ("envelope_json", "envelope_json", "invalid_json", ()),
+    ("envelope_shape", "envelope_shape", "invalid_structure", ()),
+    ("candidate_json", "candidate_json", "invalid_json", ()),
+    ("schema_known_path", "candidate_schema", "enum", ("items", 1, "answer_status")),
+    ("schema_private_key", "candidate_schema", "type", ("*",)),
+    ("extra_private_key", "candidate_schema", "additionalProperties", ()),
+])
+def test_output_diagnostics_locate_failure_without_instance_or_schema_values(failure_kind, layer, rule, path, caplog):
+    schema = SCHEMA
+    response = httpx.Response(200, json=envelope())
+    if failure_kind == "envelope_json":
+        response = httpx.Response(200, content=(SECRET + PRIVATE_TEXT).encode())
+    elif failure_kind == "envelope_shape":
+        response = httpx.Response(200, json={"unexpected": PRIVATE_TEXT})
+    elif failure_kind == "candidate_json":
+        response = httpx.Response(200, json=envelope(SECRET + PRIVATE_TEXT))
+    elif failure_kind == "schema_known_path":
+        schema = {"type": "object", "properties": {"items": {"type": "array", "items": {
+            "type": "object", "properties": {"answer_status": {"enum": ["present", SECRET]}}}}}}
+        response = httpx.Response(200, json=envelope(json.dumps({"items": [
+            {"answer_status": "present"}, {"answer_status": PRIVATE_TEXT}]})))
+    elif failure_kind == "schema_private_key":
+        schema = {"type": "object", "properties": {SECRET: {"type": "integer", "description": PRIVATE_TEXT}}}
+        response = httpx.Response(200, json=envelope(json.dumps({SECRET: PRIVATE_TEXT})))
+    elif failure_kind == "extra_private_key":
+        response = httpx.Response(200, json=envelope(json.dumps({"observation": "ok", SECRET: PRIVATE_TEXT})))
+    requests = []
+    def reply(request):
+        requests.append(request)
+        return response
+    with ArkClient(settings(), transport=httpx.MockTransport(reply)) as client:
+        with pytest.raises(ProviderError, match="^invalid_output$") as failure:
+            generate(client, output_schema=schema)
+    assert len(requests) == 1
+    attempt = failure.value.attempts[-1]
+    assert attempt.diagnostic.layer == layer
+    assert attempt.diagnostic.rule == rule
+    assert attempt.diagnostic.path == path
+    persisted = json.dumps(asdict(attempt)) + str(failure.value) + caplog.text
+    assert SECRET not in persisted and PRIVATE_TEXT not in persisted
+    assert attempt.charge_status == "unknown"
+    if failure_kind not in {"envelope_json", "envelope_shape"}:
+        assert attempt.usage.total_tokens == 20
+
+
 @pytest.mark.parametrize("finish_reason", ["length", "content_filter", "tool_calls", None])
 def test_incomplete_or_filtered_output_never_becomes_candidate(finish_reason):
     body = envelope()
     body["choices"][0]["finish_reason"] = finish_reason
     with ArkClient(settings(), transport=httpx.MockTransport(lambda _: httpx.Response(200, json=body))) as client:
-        with pytest.raises(ProviderError, match="^incomplete_output$"):
+        with pytest.raises(ProviderError, match="^incomplete_output$") as failure:
             generate(client)
+    diagnostic = failure.value.attempts[-1].diagnostic
+    assert (diagnostic.layer, diagnostic.rule, diagnostic.path) == (
+        "envelope_shape", "incomplete_output", ("choices", 0, "finish_reason"))
 
 
 def test_retry_records_every_unknown_charge_and_clamps_retry_after():

@@ -101,10 +101,12 @@ v3.4 历史轮次确认 Android 平台，新增 ANDROID_PHASE1.md 并关联 16 �
 
 | 验证 | 实际结果 | 限制 |
 |---|---|---|
-| 后端完整回归 | SQLite + PostgreSQL：**480 passed、4 skipped、1 warning** | 4跳过均为SQLite不具备的PG锁场景，对应PG已执行；警告为Starlette/AnyIO弃用 |
-| Android 构建 | assembleDebug、testDebugUnitTest、lintDebug通过；**13 tests，0错误，14 lint警告** | Debug开发签名；尚无实体平板验收 |
-| 真实模型后端闭环 | `photo-correction.v4` 五任务全成功：原图识别→错误初判→方向提示→新图识别→正确初判，历史可读 | 自编印刷题，单次成功不代表真实手写准确率；仍为candidate |
+| 后端完整回归 | SQLite + PostgreSQL：**493 passed、4 skipped、1 warning** | 4跳过均为SQLite不具备的PG锁场景，对应PG已执行；警告为Starlette/AnyIO弃用 |
+| Android 构建 | assembleDebug、testDebugUnitTest、lintDebug通过；**16 tests，0错误，14 lint警告** | Debug开发签名；尚无实体平板验收 |
+| 真实模型后端闭环 | `photo-correction.v6` 五任务全成功：原图识别→错误初判→方向提示→新图识别→正确初判，历史可读 | 自编印刷题，单次成功不代表真实手写准确率；仍为candidate |
 | 本机安装与授权 | APK已安装到运行中的模拟器；真实配对与Keystore保存、普通系统选图、上传、逐题初判→提示→新订正→正确候选再检已操作；覆盖安装恢复失败草稿并复用资产 | 后续现场网络与相机质量单独验收 |
+
+用户授权手写整页已在普通安卓界面重试并返回15条候选：7条正确初判、6条读取不一致待核实、2条识别待核实。多空题仍有合并，不能视为完整逐空识别或手写准确率验收。
 
 成功样例和历次失败修复说明见 [实调记录](docs/evidence/mac-live-20261017/README.md)。此前PNG上传失败及v1/v2/v3过度拒判均保留在本机，未删除后挑选“最优结果”。v4修正任务指令与图片数据混杂、题目格式标签和旧新作答范围；不删除模型不确定性、不把候选自动确认为老师已审核。
 

@@ -20,9 +20,9 @@
 
 ## 构建与自动回归
 
-- Android 0.2.0：assembleDebug、testDebugUnitTest、lintDebug通过；13项测试，0 lint错误、14项警告。
-- APK SHA256：`c139d8d52c19a5ad65c0d41764b7e98e898addf604b475ef959207efdd18f7ae`。
-- 后端全量SQLite + PostgreSQL：480 passed、4 skipped；跳过只在SQLite版本的PG锁测试，对应PG均执行通过。
+- Android 0.2.0：assembleDebug、testDebugUnitTest、lintDebug通过；16项测试，0 lint错误、14项警告。
+- APK SHA256：`c9d3bab67b0bb901fd1e831111ccc9727dda8d4231dd22d378da0f74324c531f`。
+- 后端全量SQLite + PostgreSQL：493 passed、4 skipped；跳过只在SQLite版本的PG锁测试，对应PG均执行通过。
 - 机器启动：独立Python venv、PG17.11私有集群55432、API8000、持久Worker、ADB reverse；服务启动前验证未认证`/v1/me`返回401及request ID。
 
 当前限制包括实体平板相机、真实手写独立保留集、完整坐班UI、布局补题/拆合、学生删除和生产恢复。单个Worker处理任务，整页时延及校区并发尚需测试；不据单张图声称高准确率或已掌握。
@@ -32,3 +32,17 @@
 已在模拟器中经正常界面完成：配对→系统相册导入合成原图→上传→候选错误→打开方向提示→导入新订正图→再检候选正确。数据库核对同一case有2次Attempt，当前help_condition=hint_used。提示后的客户端422草稿在修复包覆盖安装后恢复，复用了原已上传资产；旧版本错误记录未删除。App强制关闭再打开后仍可恢复配对身份和作业历史。
 
 [提示页面截图](android-hint.png)仅含自编题与合成联调身份，不含真实学生资料。
+
+补充模拟器检查：相机权限、虚拟场景预览和本地拍照保存已实际操作；虚拟场景没有上传模型，不能替代实体平板摄像头验收。打开原作业的历史缓存曾仍显示旧判定，手动刷新能恢复；后续补丁把同身份/同作业/同case的最新快照同步到已有缓存，并拒绝旧revision倒写，覆盖安装时也能离线修复已有缓存。模型给出的区域框观察到偏移，界面现明确标注为AI推测区域，定位准确率未验收。
+
+提交 `d04a50a943161318a88dc7c6e32c5e2288b544eb` 的 [Reference checks](https://github.com/2530185073/XueBan/actions/runs/38940539216)、[Phase-one engineering checks](https://github.com/2530185073/XueBan/actions/runs/38940539727) 和 [Android development build](https://github.com/2530185073/XueBan/actions/runs/38940539446) 均通过；后端480 passed/4 skipped，联网APK artifact名为xueban-network-dev。该提交早于上述缓存补丁；后续补丁的云端结果以相应提交的Actions为准。
+
+## 最新 v6 验证与已知质量问题
+
+当前 `photo-correction.v6` 的自编题五任务闭环再次真实通过，原作答错误、提示、新作答正确与帮助记录均保留，见 [v6 匿名结果](synthetic-flow-v6.json)。期间Worker也在处理整页，报告耗时包含队列等待，不能当推理性能基准。v5同一闭环也通过；历史v4证据保留。
+
+用户授权的手写图经普通安卓界面复用原资产重试，在v6产出15个候选条目，其中13个执行检查：7个候选正确，6个因读取不一致进入待核实；另2个在识别阶段待核实，没有送检查。多空/多求值目标仍有合并，15条不能等同于覆盖全部答题点；不以调用成功推断准确率。匿名计数见 [手写整页结果](handwritten-flow.json)，原图与答案仅留本机私有目录。
+
+此前两次App识别失败均保留：首次无细分诊断，原因仍未知；第二次v5安全诊断为候选Schema顶层additionalProperties。v5已将判题指令限定到对应角色并补充安全诊断，v6进一步明确识别允许字段和合法结构。没有删除多余字段、自动解包或放宽校验冒充通过。临时私有响应捕获仅用于本次诊断，已关闭并恢复标准Worker。
+
+这说明真实联网、持久任务、失败恢复和完整单题订正链路已经可运行；整页分题、读回一致性、坐标定位与真实手写质量仍是下一轮必须解决的问题，不能据此进入正式学生试点。

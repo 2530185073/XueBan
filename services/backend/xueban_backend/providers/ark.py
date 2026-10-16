@@ -58,6 +58,40 @@ class Usage:
 
 
 @dataclass(frozen=True)
+class OutputDiagnostic:
+    """Stable codes and known field paths only, never validation messages/values."""
+
+    layer: str
+    rule: str
+    path: tuple[str | int, ...] = ()
+
+
+# Do not derive names from the response or schema: either may contain private text.
+_DIAGNOSTIC_FIELDS = frozenset({
+    "items", "coverage", "asset_id", "label", "stem_text", "answer_text",
+    "answer_status", "regions", "answer_regions", "uncertainties", "x", "y",
+    "width", "height", "coordinate_space", "collection_scope",
+    "unrecognized_regions", "note", "verdict", "reason_code", "readback",
+    "recognition_consistent", "basis_summary", "first_error_region",
+    "guidance_code", "focus_region", "choices", "finish_reason", "message", "content",
+})
+_DIAGNOSTIC_KEYWORDS = frozenset({
+    "type", "required", "additionalProperties", "enum", "const", "anyOf", "oneOf",
+    "allOf", "not", "minLength", "maxLength", "pattern", "format", "minItems",
+    "maxItems", "uniqueItems", "minimum", "maximum", "exclusiveMinimum",
+    "exclusiveMaximum", "multipleOf", "minProperties", "maxProperties",
+})
+
+
+def _schema_diagnostic(error: ValidationError) -> OutputDiagnostic:
+    path = tuple(part if (type(part) is int and 0 <= part < 1_000_000
+                          or isinstance(part, str) and part in _DIAGNOSTIC_FIELDS)
+                 else "*" for part in list(error.absolute_path)[:24])
+    rule = error.validator if error.validator in _DIAGNOSTIC_KEYWORDS else "validation"
+    return OutputDiagnostic("candidate_schema", rule, path)
+
+
+@dataclass(frozen=True)
 class Attempt:
     number: int
     status_code: int | None
@@ -68,6 +102,7 @@ class Attempt:
     usage: Usage | None = None
     # Usage is not a bill. Even a timeout/retry may have incurred a charge.
     charge_status: Literal["unknown"] = "unknown"
+    diagnostic: OutputDiagnostic | None = None
 
 
 @dataclass(frozen=True)
@@ -375,8 +410,11 @@ class ArkClient:
             model = None
             usage = None
             response_id = None
+            layer = "envelope_json"
+            diagnostic = None
             try:
                 envelope = _strict_json(raw.decode("utf-8"))
+                layer = "envelope_shape"
                 if not isinstance(envelope, dict):
                     raise ValueError()
                 model = _token(envelope.get("model"), cfg.api_key)
@@ -388,17 +426,24 @@ class ArkClient:
                 choice = choices[0]
                 if choice.get("finish_reason") != "stop":
                     code = "incomplete_output"
+                    diagnostic = OutputDiagnostic(layer, "incomplete_output", ("choices", 0, "finish_reason"))
                     raise ValueError()
                 message = choice["message"]
                 if message.get("tool_calls") or message.get("refusal") or not isinstance(message.get("content"), str):
                     raise ValueError()
+                layer = "candidate_json"
                 data = _strict_json(message["content"])
                 if not isinstance(data, dict):
                     raise ValueError()
+                layer = "candidate_schema"
                 validator.validate(data)
-            except (ValueError, TypeError, KeyError, AttributeError, RecursionError, ValidationError, Unresolvable):
+            except (ValueError, TypeError, KeyError, AttributeError, RecursionError, ValidationError, Unresolvable) as error:
                 code = "incomplete_output" if code == "incomplete_output" else "invalid_output"
-                attempts.append(Attempt(number, status, code, _elapsed(attempt_started), request_id, model, usage))
+                if isinstance(error, ValidationError):
+                    diagnostic = _schema_diagnostic(error)
+                elif diagnostic is None:
+                    diagnostic = OutputDiagnostic(layer, "invalid_json" if layer.endswith("_json") else "invalid_structure")
+                attempts.append(Attempt(number, status, code, _elapsed(attempt_started), request_id, model, usage, diagnostic=diagnostic))
                 raise ProviderError(code, attempts=tuple(attempts), latency_ms=_elapsed(started)) from None
             if time.monotonic() >= deadline:
                 attempts.append(Attempt(number, status, "deadline_exceeded", _elapsed(attempt_started), request_id, model, usage))

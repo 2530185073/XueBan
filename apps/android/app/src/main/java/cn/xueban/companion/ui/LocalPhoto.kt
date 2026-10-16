@@ -37,7 +37,7 @@ fun LocalPhoto(file: File, modifier: Modifier = Modifier, regions: List<JSONObje
         PhotoState.Loading -> Text("正在读取本机照片…", modifier)
         PhotoState.Unreadable -> Text("照片预览读取失败。原文件仍保留，可返回历史后重试或重新拍照。", modifier)
         is PhotoState.Ready -> Box(modifier) {
-            Image(current.bitmap, "作业照片；绿色框标示服务端识别的题区", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            Image(current.bitmap, "作业照片；绿色框为 AI 推测区域，请结合原图核对", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
             if (originalWidth > 0 && originalHeight > 0) Canvas(Modifier.matchParentSize()) {
                 val fit = minOf(size.width / current.bitmap.width, size.height / current.bitmap.height)
                 val width = current.bitmap.width * fit; val height = current.bitmap.height * fit

@@ -72,7 +72,7 @@ with CorrectionPipeline.from_env() as pipeline:
 
 自 `photo-correction.v3` 起，固定任务规则通过 `ArkClient.generate(instructions=...)` 放入 system；该参数仅接受服务端代码定义的规则，不能传入图片文字、学生输入或客户端策略。图片与候选快照只出现在 user JSON 的 `images/task_input`。候选 `correct/incorrect` 合法，禁止的是自行 `confirmed`。`uncertainties` 只容纳影响识别、题目对应或数学结论的实质歧义；印刷/合成属性或无法确认身份不是拒判理由。没有非必需步骤时仍可核验终答，明确要求的证明缺失则保留不确定。若模型仍违规返回无关 uncertainties，代码继续降级并保留原文，不通过后处理删除警告放行。旧版调用与审计保留，提示词改动的真实效果须重新实测。
 
-当前版本 `photo-correction.v4` 明确再检只读取 `attempt_asset_ids` 对应的当前作答，旧答案与新答案不同本身不是冲突。当前图自身的涂改、多个作答或错题对应歧义仍保留。识别字段只移除明确的 `Question:`／`Student answer:` 等字段前缀；`normalize_field_for_comparison(value, field_name)` 让 Worker 题干匹配和 readback 比较共用同一保守规则。它不删除数字题号、不做模糊匹配、不合并数字间隔、不消除指数、括号或负号；readback 原文保留供审计。
+自 `photo-correction.v4` 起，再检明确只读取 `attempt_asset_ids` 对应的当前作答，旧答案与新答案不同本身不是冲突。当前图自身的涂改、多个作答或错题对应歧义仍保留。识别字段只移除明确的 `Question:`／`Student answer:` 等字段前缀；`normalize_field_for_comparison(value, field_name)` 让 Worker 题干匹配和 readback 比较共用同一保守规则。它不删除数字题号、不做模糊匹配、不合并数字间隔、不消除指数、括号或负号；readback 原文保留供审计。
 
 `question` 至少含 `question_id/revision/stem_text/regions`，`label` 可选；`attempt` 至少含 `id/question_id/captured_question_revision/recognition_revision/answer_text/answer_regions/recognition_status/asset_ids`。`answer_status` 可显式为 `present/blank/unclear`；省略时非空文字按 present、null 按 unclear，不能把未识别当空白。`input_versions` 使用完整契约字段。来源内容版本必须一致；仅 `case_revision_at_submission` 改变不会使提示失效。Worker 仍须在调用前授权并在落库／展示前再次校验当前版本、作答指针和来源有效性；此组件不能查询数据库完成这些检查。
 
@@ -87,6 +87,12 @@ with CorrectionPipeline.from_env() as pipeline:
 技术故障通过 `ProviderError` 抛出，不伪装成无法判断或空识别；截断、429、超时、结构不合法和后处理发现的越界均保留可得调用记录／用量。代码不会生成 confirmed、掌握度、图谱更新或订正完成状态。
 
 流水线离线验证：`python -m pytest services/backend/tests/test_correction_pipeline.py services/backend/tests/test_providers.py -q`。全部为合成图片与 MockTransport，覆盖逐空拆项、看不清、漏定位、负号／上标／字母歧义、版本与新作答绑定、提示泄露防护、越界和技术失败。它们证明协议与代码约束，不证明照片识别、定位或数学判断的真实质量。真实调用与授权学生样本评测由集成流程另行执行。
+
+`photo-correction.v5` 将判题结论要求限定为 check/recheck；recognition 只读题与作答，同题号多个独立求值目标也须分项并保留共享条件。拆分仍是模型候选，`coverage=partial/unknown` 不表示整页已无遗漏。
+
+`photo-correction.v6` 进一步明确识别输出的顶层只能是 `items` 与 `coverage`，提供合法空结构示例，并区分模型字段与服务端计算的状态字段。不得添加状态/元数据或包装层；服务端仍拒绝所有契约外字段，不以删字段、自动解包或修补 JSON 代替校验。JSON mode 无法保证 Schema 遵循，这些提示改善仍需整页实测验证。
+
+输出失败在 `attempts[].diagnostic` 保存层级（外层 JSON/响应结构、候选 JSON/Schema/业务语义）、规则码和已知字段路径；数组只记录索引，未知字段替换为 `*`。不保存校验错误原文、实例值、Schema 值或响应正文。Worker 现有调用账本会保留这些诊断与 usage/请求 ID，外部失败码和候选/人工确认边界不变。部署前未记录诊断的旧失败不能凭后来一次成功重放倒推出原因；诊断也不等于自动重试授权。
 
 ## 同平台知识资料向量
 

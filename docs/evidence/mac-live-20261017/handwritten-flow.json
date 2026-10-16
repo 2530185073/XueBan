@@ -1,0 +1,32 @@
+{
+  "user_authorized_photo": true,
+  "raw_image_or_answers_in_repository": false,
+  "prompt_version": "photo-correction.v6",
+  "model": "deepseek-v4-1-flash-260910",
+  "provider": "BytePlus ModelArk AP",
+  "device": "API35 ARM Pixel Tablet emulator",
+  "path": "normal Android UI, existing failed homework, explicit retry",
+  "asset_count_after_retries": 1,
+  "recognition_jobs": {
+    "failed_retained": 2,
+    "succeeded": 1
+  },
+  "recognition_candidate_items": 15,
+  "coverage": "partial",
+  "check_jobs": {
+    "succeeded": 13
+  },
+  "results": {
+    "correct_candidate": 7,
+    "recognition_conflict_needs_review": 6,
+    "recognition_needs_revision_without_check": 2
+  },
+  "limits": [
+    "independent blanks and value targets still merged into some items",
+    "15 candidate items do not prove coverage of every answer point",
+    "no formal human gold or held-out accuracy evaluation",
+    "first failed output root cause unknown; second failed at top-level additionalProperties",
+    "UI and model-region accuracy need physical tablet and field acceptance"
+  ],
+  "diagnostic_capture": "private temporary runtime only; disabled after validation"
+}
