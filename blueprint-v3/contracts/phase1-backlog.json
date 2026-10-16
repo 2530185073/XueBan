@@ -43,7 +43,7 @@
       "delivery_waves": [
         "A"
       ],
-      "implementation_note": "接口与数据规范已由 contracts/phase1 校验并在 CI 执行；设备型号、最低系统版本、安装渠道与冻结评测样本需现场确定。"
+      "implementation_note": "工程口径（平台、账号、接口与数据结构、迁移、纠错与学习规则、模型服务、评测口径）已冻结并记录于 docs/PHASE1_FREEZE.md；设备型号、最低系统、安装与签名、首发题型、独立保留集与发布阈值、坐班容量列明负责人与阻塞范围，待现场确认。"
     },
     {
       "id": "P1-02",
@@ -373,7 +373,7 @@
         "D",
         "E"
       ],
-      "implementation_note": "技术交付件（部署、迁移、配置模板、回滚与运维手册）已具备；C0/R1/R2 证据与连续真实使用需现场试点。"
+      "implementation_note": "交接包已具备：部署/迁移/配置模板/回滚/备份恢复/运维（docs/runbooks）、坐班操作手册、支持手册、设备矩阵模板、试点流程与 C0/R1/R2 证据清单、交接清单（docs/HANDOVER.md）。签名密钥、C0/R1/R2 现场证据与连续真实使用需现场试点。"
     }
   ],
   "implementation_document": "../../ANDROID_PHASE1.md",
