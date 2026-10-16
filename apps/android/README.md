@@ -46,7 +46,7 @@ sh scripts/check-environment.sh
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-首次 Gradle 调用会下载锁定的发行包与 Maven 依赖；上面的步骤供已有开发环境执行，本轮没有自行安装全局工具。远程 CI 构建应单独记录运行结果，**初稿交付时远程 CI 待验证**。编译 / lint 通过也不等于 CameraX 在目标平板上通过验收。
+首次 Gradle 调用会下载锁定的发行包与 Maven 依赖；上面的步骤供已有开发环境执行，本轮没有自行安装全局工具。远程 [CI 构建](https://github.com/2530185073/XueBan/actions/runs/38907770161) 已通过，源码提交为 `25aa9dbc0112737e3cebff1d7e8eeb0444801517`，执行 assembleDebug / lintDebug 并产出 `xueban-local-capture-dev` 开发 APK。完整运行记录及当前状态见 [验证记录](../../VALIDATION.md)。编译 / lint 通过也不等于 CameraX 在目标平板上通过验收。
 
 真机需逐项验证并记录机型 / 系统：授权、拒绝与系统设置撤权；没有后置相机；连续拍照；横竖屏与旋转时拍照；存储不足；返回及杀进程后历史原图仍可打开；图片方向；删除；禁止联网时依旧采集；release 模式无法进入采集；所有后续页面始终不伪装检查成功。预览只为采集人工检查，尚无模糊、反光和完整性自动检测。
 

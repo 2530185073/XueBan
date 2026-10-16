@@ -58,7 +58,7 @@
         "apps/android/"
       ],
       "acceptance": "真实CameraX实现，私有文件保存，未接服务诚实显示；编译和真机另验",
-      "evidence": "25aa9dbc0112737e3cebff1d7e8eeb0444801517；源码/XML/Wrapper检查通过，本机JDK与SDK缺失，CI另验"
+      "evidence": "25aa9dbc0112737e3cebff1d7e8eeb0444801517：源码/XML/Wrapper检查及CI编译/lint通过；尚未真机验收，不具备真实纠错"
     },
     {
       "id": "A04",
@@ -70,11 +70,12 @@
       "phase1_task_ids": [
         "P1-03"
       ],
-      "status": "in_progress",
+      "status": "completed",
       "artifact_paths": [
         ".github/workflows/android-checks.yml"
       ],
-      "acceptance": "匹配JDK/SDK/Gradle构建并lint，保存开发APK；失败记录实际日志，不视为真机通过"
+      "acceptance": "匹配JDK/SDK/Gradle构建并lint，保存开发APK；失败记录实际日志，不视为真机通过",
+      "evidence": "https://github.com/2530185073/XueBan/actions/runs/38907770161：success，已生成开发APK，尚未真机验收"
     },
     {
       "id": "A05",

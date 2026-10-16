@@ -23,7 +23,7 @@
 | `blueprint-v3/contracts/backlog.json` | 原 40 条全产品用户故事 | 保持追溯 ID；后续依赖不继承到一期任务 |
 | `blueprint-v3/contracts/openapi.reference.json` | 已实现参考接口快照 | 仅用于参考服务；完整生产接口按 06 文件冻结 |
 | `blueprint-v3/contracts/*example.json` | 纯合成契约样例 | 作为开发和演示资料，不作为真实学习效果证据 |
-| `apps/android/` | 安卓本地采集工程源码 | 按内部 README 配置工具链并验证；当前无 APK 结果 |
+| `apps/android/` | 安卓本地采集工程源码 | 按内部 README 配置工具链并验证；开发 APK 已通过 CI 构建，真机尚未验收 |
 | `contracts/phase1/` | 一期 OpenAPI、状态与事件候选 | 验证与交叉审查后冻结，不是已实现服务 |
 | `prototype/` | 内存领域内核、HTTP 适配器、演示与测试 | 运行并理解规则，再实现生产服务 |
 | `.github/workflows/reference-checks.yml` | 参考代码持续集成 | 安装依赖、执行测试、运行演示 |

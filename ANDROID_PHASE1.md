@@ -188,6 +188,6 @@ prototype/                 保留现有参考内核，标清非生产
 
 ## 10 当前开工产出与剩余条件
 
-首批实际派发了 GitHub 教材核验、纠错契约和安卓采集工程三个子任务，结果由主 Agent 集成复核。详见 [执行计划](AI_AGENT_EXECUTION.md) 和 [验证记录](VALIDATION.md)。本机缺少可用 JDK 与 Android SDK，源码检查不代表已经构建 APK。
+首批实际派发了 GitHub 教材核验、纠错契约和安卓采集工程三个子任务，结果由主 Agent 集成复核。详见 [执行计划](AI_AGENT_EXECUTION.md) 和 [验证记录](VALIDATION.md)。本机缺少可用 JDK 与 Android SDK；[远程 CI](https://github.com/2530185073/XueBan/actions/runs/38907770161) 已成功构建开发采集 APK 并通过 lint，仍未进行真机或完整纠错验收。
 
 下一关口是一张真实照片贯通真实身份、持久化、识别、候选检查与坐班核实，再进入提示和订正闭环。具体机型、教材版本、首发题型、模型服务与真实样本需落实；在此之前可完成代码、接口和合成验证，不能编造模型效果或真机结果。

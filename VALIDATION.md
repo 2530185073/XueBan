@@ -44,9 +44,9 @@ v3.4 历史轮次确认 Android 平台，新增 ANDROID_PHASE1.md 并关联 16 �
 
 安卓 Agent 已交付并停止写入；根代理审查相机、私有文件、权限、历史和空状态实现。XML 解析、Wrapper jar 校验和可执行权限通过。本机真实运行环境检查失败：缺可用 JDK、Android SDK 35、Build Tools 35.0.0、adb；本地 Gradle 构建因无 JDK 失败，没有本机 APK 或真机结果。
 
-新增 GitHub Android CI，固定 JDK 17、SDK 35 与 Wrapper 8.11.1，执行 assembleDebug 和 lintDebug，成功时保存仅本地采集的开发 APK。远程结果待本轮集成验证，不能据工作流文件存在认定通过。
+新增 GitHub Android CI，固定 JDK 17、SDK 35 与 Wrapper 8.11.1，执行 assembleDebug 和 lintDebug，成功时保存仅本地采集的开发 APK。远程 [Android 构建](https://github.com/2530185073/XueBan/actions/runs/38907770161) 已成功：提交 `25aa9dbc0112737e3cebff1d7e8eeb0444801517` 的 assembleDebug 与 lintDebug 通过，生成 `xueban-local-capture-dev` APK artifact（ID 12049081685，压缩产物约 10.9 MB）。这是无联网/模型的开发采集包，未验证真机、正式签名或完整纠错。当前网络下载产物遇连接重置，未取得本地 APK；可从该运行的 Artifacts 获取。
 
-一期契约实际运行 `python3 contracts/phase1/validate.py` 通过：4 份 JSON Schema、328 个本地引用、32 个 API 操作、49 组合成样例、19 个拒绝检查。独立审查发现并修复漏题/重切入口、无模型结果的人工核实、同图片过期票据续签、业务 CAS 与内容失效版本混淆四项。尚未进行完整 OpenAPI 元 Schema 工具校验，Schema 通过不证明数据库事务与权限已经实现。源文档本地链接和代码围栏、13 份 JSON 可解析、一期与 Agent 任务依赖检查通过。P1-01/P1-03 的状态为 in_progress，其余一期生产验收未完成；Agent 子任务进度不等于 C0/R1/R2 放行。
+一期契约实际运行 `python3 contracts/phase1/validate.py` 通过：4 份 JSON Schema、328 个本地引用、32 个 API 操作、49 组合成样例、19 个拒绝检查。独立审查发现、修复并复验确认漏题/重切入口、无模型结果的人工核实、同图片过期票据续签、业务 CAS 与内容失效版本混淆四项。尚未进行完整 OpenAPI 元 Schema 工具校验，Schema 通过不证明数据库事务与权限已经实现。提交 `77bc4f57c506ea1540954c213d7d895db81893f7` 的 [Reference checks](https://github.com/2530185073/XueBan/actions/runs/38908366012) 也已通过：44 项参考测试、合成演示和上述契约验证均成功，原 76 条依赖弃用提示仍在。源文档本地链接和代码围栏、13 份 JSON 可解析、一期与 Agent 任务依赖检查通过。P1-01/P1-03 的状态为 in_progress，其余一期生产验收未完成；Agent 子任务进度不等于 C0/R1/R2 放行。
 
 ## 当前工程边界
 
