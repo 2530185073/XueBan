@@ -1,3 +1,5 @@
 export type * from './types'
 export { StudentError, safeError } from './errors'
-export { createStudentClient, StudentClient, remoteDraftId, effectiveDecision, decisionLabel } from './student'
+export { createStudentClient, StudentClient, remoteDraftId, effectiveDecision, decisionLabel, canAppeal, openHelp } from './student'
+export { bucketOfCase, bucketOfRow, countBuckets, firstUnresolved, orderActiveCases, unresolved } from './cases'
+export { LOCAL_TTL_MS } from './store'

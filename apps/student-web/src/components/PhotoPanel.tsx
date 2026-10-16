@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react'
 import { Expand, ImageOff, LoaderCircle, X } from 'lucide-react'
 import type { CaseDetail, DraftView, HomeworkDetail } from '../core/types'
 import type { Workspace } from '../useStudentWorkspace'
+import { useObjectUrl } from './useObjectUrl'
 
 export function PhotoPanel({ workspace, row, draft, detail }: { workspace: Workspace; row?: CaseDetail; draft: DraftView | null; detail: HomeworkDetail | null }) {
   const [blob, setBlob] = useState<Blob | null>(null)
-  const [url, setUrl] = useState<string | null>(null)
+  const url = useObjectUrl(workspace.client, blob)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [expanded, setExpanded] = useState(false)
@@ -19,7 +20,6 @@ export function PhotoPanel({ workspace, row, draft, detail }: { workspace: Works
     void workspace.client.assetBlob(assetId).then(value => { if (live) setBlob(value) }).catch(() => { if (live) setError('这次作答的照片暂时没能打开，请刷新后再看。') }).finally(() => { if (live) setLoading(false) })
     return () => { live = false }
   }, [assetId, draft?.id, workspace.client, workspace.studentId])
-  useEffect(() => { if (!blob) { setUrl(null); return }; const value = URL.createObjectURL(blob); setUrl(value); return () => URL.revokeObjectURL(value) }, [blob])
   useEffect(() => { if (!expanded) return; const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setExpanded(false) }; window.addEventListener('keydown', close); return () => window.removeEventListener('keydown', close) }, [expanded])
   const regions = row ? [...row.question.regions, ...row.attempt.answer_regions].filter(region => region.asset_id === assetId) : []
   const picture = url ? <div className="photo-image-wrap"><img src={url} alt={row ? '这次作答对应的作业照片' : '准备检查的作业照片'} onLoad={event => setSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} />{size.width > 0 && regions.length > 0 && <svg className="photo-regions" viewBox={`0 0 ${size.width} ${size.height}`} aria-hidden="true">{regions.map((region, index) => <rect key={index} x={region.x} y={region.y} width={region.width} height={region.height} rx="4" />)}</svg>}</div> : null

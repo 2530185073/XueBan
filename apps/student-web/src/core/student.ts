@@ -1,15 +1,26 @@
-import type { Account, AdminRequestOptions, AuthSession, Accepted, AssetAccess, AttemptRead, CaseDetail, CheckRun, CorrectionCase, CreateCorrection, CreateHelp, DraftView, HelpRequest, Hint, HomeworkDetail, HomeworkPage, HomeworkSession, IdentityContext, ImageAsset, InputVersions, Job, JournalEntry, NormalizedPhoto, QuestionRead, RequestHint, StoredDraft, UploadTicket } from './types'
+import type { Account, AdminRequestOptions, AuthSession, Accepted, AssetAccess, AttemptRead, CaseDetail, CaseRecord, CheckRun, CorrectionCase, CreateCorrection, CreateHelp, DecisionRead, DraftView, HelpRequest, Hint, HomeworkDetail, HomeworkPage, HomeworkSession, HomeworkSummary, IdentityContext, ImageAsset, InputVersions, Job, JournalEntry, NormalizedPhoto, QuestionRead, RequestHint, Review, StoredDraft, UploadTicket } from './types'
 import { StudentApi } from './api'
 import { StudentError, safeError } from './errors'
-import { DraftStore } from './store'
+import { DraftStore, type PurgeReport } from './store'
 import { normalizePhoto } from './photo'
 import { valid } from './validation'
+import { bucketOfCase, countBuckets, firstUnresolved, isRetired, orderActiveCases, retiredCases } from './cases'
+import { ObjectUrls } from './objectUrls'
 
 export const remoteDraftId = (id: string) => `remote_${id}`
 const encoded = encodeURIComponent
 const active = (job: Job) => ['queued', 'running', 'retryable_failed'].includes(job.status)
 const matches = (v: InputVersions, row: CaseDetail) => v.question_id === row.case.question_id && v.question_revision === row.case.current_question_revision && v.attempt_id === row.case.current_attempt_id && v.attempt_recognition_revision === row.attempt.recognition_revision
-export function effectiveDecision(row: CaseDetail) { const d = row.case.current_decision; return d && !['stale', 'retracted'].includes(d.validity) && matches(d.input_versions, row) ? d : null }
+export function effectiveDecision(row: CaseDetail) { const d = row.case.current_decision; return !isRetired(row.case) && d && !['stale', 'retracted'].includes(d.validity) && matches(d.input_versions, row) ? d : null }
+/** Requests a student may raise on the current answer; an appeal needs a result to question. */
+export function canAppeal(row: CaseDetail) { const d = effectiveDecision(row); return d != null && ['candidate', 'needs_review', 'confirmed'].includes(d.validity) || !isRetired(row.case) && row.case.progress === 'verified_resolved' }
+export const openHelp = (help: HelpRequest) => help.status === 'waiting' || help.status === 'claimed'
+async function mapLimit<T, R>(items: T[], limit: number, task: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length); let next = 0
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => { while (next < items.length) { const index = next++; out[index] = await task(items[index]) } }))
+  return out
+}
+const unique = (ids: (string | null | undefined)[]) => [...new Set(ids.filter((id): id is string => !!id))]
 export function decisionLabel(row: CaseDetail): string {
   const d = effectiveDecision(row)
   if (row.attempt.recognition_status !== 'ready') return '识别待核实 · 请重拍或请老师看'
@@ -39,6 +50,8 @@ export class StudentClient {
   private sleep: (ms: number) => Promise<void>
   private runs = new Map<string, Promise<DraftView>>()
   private images = new Map<string, Promise<Blob>>()
+  private urls = new ObjectUrls()
+  private housekeeping: Promise<PurgeReport | null>
   constructor(options: ClientOptions = {}) {
     this.origin = options.origin ?? location.origin
     const url = new URL(this.origin)
@@ -46,7 +59,12 @@ export class StudentClient {
     this.storage = options.storage ?? sessionStorage; this.store = options.store ?? new DraftStore()
     this.normalize = options.normalize ?? normalizePhoto; this.sleep = options.sleep ?? (ms => new Promise(resolve => setTimeout(resolve, ms)))
     this.api = new StudentApi(this.origin, () => this.token(), () => this.disconnect(), options.transport)
+    this.housekeeping = this.store.purgeExpired().catch(() => null)
   }
+  /** blob: URLs for photos of the signed-in student; all are revoked on sign-out or account loss. */
+  objectUrl(blob: Blob) { return this.urls.create(blob) }
+  releaseObjectUrl(url: string) { this.urls.release(url) }
+  private dropMedia() { this.images.clear(); this.urls.releaseAll() }
   get account() { return this.currentAccount }
   get identity() { return this.currentIdentity }
   get selectedStudentId() { return this.student }
@@ -56,20 +74,45 @@ export class StudentClient {
   private load<T>(name: string): T | null { try { return JSON.parse(this.storage.getItem(this.storageKey(name)) ?? 'null') as T | null } catch { return null } }
   private persist(name: string, value: unknown) { try { this.storage.setItem(this.storageKey(name), JSON.stringify(value)) } catch { throw new StudentError('session_storage_unavailable', 0, '无法保存本次会话，请允许浏览器会话存储后重试。') } }
   private token() { if (this.session && Date.parse(this.session.expires_at) <= Date.now()) this.disconnect(); return this.session?.access_token ?? null }
-  private clearSession(clearPending = true) { this.epoch++; this.session = null; this.currentAccount = null; this.currentIdentity = null; this.student = null; this.images.clear(); if (clearPending) this.pendingAuth.clear(); this.storage.removeItem(this.storageKey('session')); this.storage.removeItem(this.storageKey('selected')); this.storage.removeItem(this.storageKey('pair')); this.changed() }
+  private clearSession(clearPending = true) { this.epoch++; this.session = null; this.currentAccount = null; this.currentIdentity = null; this.student = null; this.dropMedia(); if (clearPending) this.pendingAuth.clear(); this.storage.removeItem(this.storageKey('session')); this.storage.removeItem(this.storageKey('selected')); this.storage.removeItem(this.storageKey('pair')); this.storage.removeItem(this.storageKey('scope')); this.changed() }
   disconnect() { this.clearSession() }
-  selectStudent(id: string) { if (!this.currentAccount || this.currentAccount.student_id !== id || !this.currentIdentity?.authorized_students.some(s => s.student_id === id)) throw new StudentError('access_denied', 403); if (id !== this.student) { this.epoch++; this.student = id; this.images.clear(); this.changed() } }
+  // Identifiers only (already used as IndexedDB scope keys), so a later account
+  // failure during restore can still find the device data it must remove.
+  private scopeHint(): { actor: string | null; student: string | null } {
+    const stored = this.load<{ actor?: unknown; student?: unknown }>('scope')
+    return { actor: this.currentIdentity?.actor_id ?? (typeof stored?.actor === 'string' ? stored.actor : null), student: this.student ?? this.currentAccount?.student_id ?? (typeof stored?.student === 'string' ? stored.student : null) }
+  }
+  private matchesScope(scope: string, hint: { actor: string | null; student: string | null }) {
+    try { const [origin, actor, student] = JSON.parse(scope) as unknown[]; return origin === this.origin && student === hint.student && (!hint.actor || actor === hint.actor) } catch { return false }
+  }
+  /**
+   * 403 access_denied, or a server-side 401 while the local token is still
+   * valid (session revoked, account disabled or deleted), means this account
+   * can no longer use the device data. Remove that scope's drafts, photos and
+   * journal; a plain local expiry keeps them for the next sign-in.
+   */
+  private async identityRequest<T>(path: string, shape: string): Promise<T> {
+    const hint = this.scopeHint(), live = !!this.session && Date.parse(this.session.expires_at) > Date.now()
+    try { return await this.api.request<T>(path, shape) }
+    catch (error) {
+      if (!(error instanceof StudentError) || !(error.status === 403 && error.code === 'access_denied' || error.status === 401 && error.code === 'authentication_required' && live)) throw error
+      if (hint.student) await this.store.purgeScopes(scope => this.matchesScope(scope, hint)).catch(() => null)
+      this.dropMedia(); this.disconnect()
+      throw new StudentError('account_unavailable', error.status, error.status === 403 ? '这个账号目前不能查看作业，本机保存的草稿、照片和未确认的提交已清除。请联系老师确认账号。' : '登录已失效或账号已停用，本机保存的草稿和照片已清除。请重新登录。')
+    }
+  }
+  selectStudent(id: string) { if (!this.currentAccount || this.currentAccount.student_id !== id || !this.currentIdentity?.authorized_students.some(s => s.student_id === id)) throw new StudentError('access_denied', 403); if (id !== this.student) { this.epoch++; this.student = id; this.dropMedia(); this.changed() } }
   private check(ctx: Context) { if (this.epoch !== ctx.epoch || !this.session || this.student !== ctx.student) throw new StudentError('session_changed', 401) }
   private async read<T>(ctx: Context, path: string, shape: string) { this.check(ctx); const value = await this.api.request<T>(path, shape); this.check(ctx); return value }
   private async verifyIdentity(): Promise<IdentityContext> {
     const epoch = this.epoch
     let identity: IdentityContext
-    try { identity = await this.api.request<IdentityContext>('/v1/me', 'IdentityContext') }
-    catch (error) { if (epoch === this.epoch) { this.epoch++; this.currentIdentity = null; this.student = null; this.images.clear(); this.changed() } throw error }
+    try { identity = await this.identityRequest<IdentityContext>('/v1/me', 'IdentityContext') }
+    catch (error) { if (epoch === this.epoch) { this.epoch++; this.currentIdentity = null; this.student = null; this.dropMedia(); this.changed() } throw error }
     if (epoch !== this.epoch) throw new StudentError('session_changed', 401)
     if (this.currentIdentity && this.currentIdentity.actor_id !== identity.actor_id) { this.disconnect(); throw new StudentError('session_changed', 401) }
     if (this.student && !identity.authorized_students.some(s => s.student_id === this.student)) {
-      this.epoch++; this.currentIdentity = null; this.student = null; this.images.clear(); this.changed()
+      this.epoch++; this.currentIdentity = null; this.student = null; this.dropMedia(); this.changed()
       throw new StudentError('access_denied', 403)
     }
     const changed = JSON.stringify(identity) !== JSON.stringify(this.currentIdentity)
@@ -80,7 +123,7 @@ export class StudentClient {
   }
   private async readyAccount(): Promise<IdentityContext | null> {
     const epoch = this.epoch
-    const account = await this.api.request<Account>('/v1/auth/account', 'Account')
+    const account = await this.identityRequest<Account>('/v1/auth/account', 'Account')
     if (epoch !== this.epoch) throw new StudentError('session_changed', 401)
     this.currentAccount = account
     if (account.must_change_password) { this.currentIdentity = null; this.student = null; this.changed(); return null }
@@ -98,7 +141,7 @@ export class StudentClient {
     if (!session || session.kind !== 'account' || typeof session.access_token !== 'string' || !session.access_token || !Number.isFinite(Date.parse(session.expires_at)) || Date.parse(session.expires_at) <= Date.now()) { this.disconnect(); return null }
     this.session = session
     try { return await this.readyAccount() }
-    catch (error) { this.currentAccount = null; this.currentIdentity = null; this.student = null; this.images.clear(); this.changed(); throw error }
+    catch (error) { this.currentAccount = null; this.currentIdentity = null; this.student = null; this.dropMedia(); this.changed(); throw error }
   }
   private async authWrite<T>(path: string, payload: unknown, shape: string, publicRequest = false): Promise<T> {
     const body = JSON.stringify(payload), previous = this.pendingAuth.get(path)
@@ -127,7 +170,7 @@ export class StudentClient {
     const epoch = this.epoch
     const result = await this.authWrite<AuthSession>('/v1/auth/change-password', { current_password: currentPassword, new_password: newPassword }, 'AuthSession')
     if (epoch !== this.epoch) throw new StudentError('session_changed', 401)
-    this.epoch++; this.currentIdentity = null; this.student = null; this.images.clear(); this.acceptSession(result)
+    this.epoch++; this.currentIdentity = null; this.student = null; this.dropMedia(); this.acceptSession(result)
     return this.readyAccount()
   }
   async logout(): Promise<void> {
@@ -150,13 +193,28 @@ export class StudentClient {
     if (this.currentAccount?.must_change_password) throw new StudentError('password_change_required', 403)
     if (!this.student) throw new StudentError('access_denied', 403)
     const wanted = this.student, identity = await this.verifyIdentity()
-    if (!wanted || this.student !== wanted || !identity.authorized_students.some(s => s.student_id === wanted)) { this.student = null; this.images.clear(); this.changed(); throw new StudentError('access_denied', 403) }
-    return { student: wanted, epoch: this.epoch, scope: JSON.stringify([this.origin, identity.actor_id, wanted]) }
+    if (!wanted || this.student !== wanted || !identity.authorized_students.some(s => s.student_id === wanted)) { this.student = null; this.dropMedia(); this.changed(); throw new StudentError('access_denied', 403) }
+    await this.housekeeping
+    const hint = JSON.stringify({ actor: identity.actor_id, student: wanted })
+    if (this.storage.getItem(this.storageKey('scope')) !== hint) try { this.storage.setItem(this.storageKey('scope'), hint) } catch { /* Only an optimization for later cleanup. */ }
+    const ctx = { student: wanted, epoch: this.epoch, scope: JSON.stringify([this.origin, identity.actor_id, wanted]) }
+    this.check(ctx); return ctx
+  }
+  /** One-time message about unconfirmed submissions that expired on this device. */
+  async takeDeviceNotice(): Promise<string | null> {
+    const ctx = await this.authorize(), notice = await this.store.takeNotice(ctx.scope); this.check(ctx)
+    return notice ? `本机有 ${notice.expiredPending} 条超过 7 天仍未确认结果的提交已清除。服务器上已保存的作业不受影响；如发现缺少照片，请重新拍照提交。` : null
+  }
+  /** Removes this student's drafts, photos and journal from this device only. */
+  async clearLocalData(): Promise<PurgeReport> {
+    const ctx = await this.authorize()
+    const report = await this.store.purgeScopes(scope => scope === ctx.scope)
+    this.check(ctx); this.dropMedia(); this.changed(); return report
   }
   private async write<T>(ctx: Context, id: string, path: string, payload: unknown, shape: string, requestShape: string): Promise<T> {
     this.check(ctx)
     if (!valid(requestShape, payload, true)) throw new StudentError('invalid_request', 422)
-    const op = await this.store.reserve({ scope: ctx.scope, id, path, key: crypto.randomUUID(), body: JSON.stringify(payload), shape })
+    const op = await this.store.reserve({ scope: ctx.scope, id, path, key: crypto.randomUUID(), body: JSON.stringify(payload), shape, updatedAt: new Date().toISOString() })
     this.check(ctx)
     if (op.path !== path || op.shape !== shape) throw new StudentError('journal_conflict', 409)
     return this.replay<T>(ctx, op)
@@ -180,21 +238,68 @@ export class StudentClient {
   async getDraft(id: string) { const ctx = await this.authorize(); const d = await this.store.draft(ctx.scope, id); this.check(ctx); return this.view(d) }
   private async save(ctx: Context, d: StoredDraft) { this.check(ctx); d.updatedAt = new Date().toISOString(); await this.store.saveDraft(d); this.check(ctx); this.changed() }
   async createDraft(file: Blob, title = '学校作业') { const ctx = await this.authorize(); const photo = await this.normalize(file); this.check(ctx); const now = new Date().toISOString(); const d: StoredDraft = { id: crypto.randomUUID(), title: title.trim().slice(0, 120) || '学校作业', stage: 'local', createdAt: now, updatedAt: now, homeworkId: null, error: null, scope: ctx.scope, photo, detail: null, generation: 0, ticketGeneration: 0, checkJobs: {} }; await this.save(ctx, d); return this.view(d) }
-  private async caseDetail(ctx: Context, id: string): Promise<CaseDetail> {
+  private async caseRecordRead(ctx: Context, id: string, homeworkId?: string): Promise<CorrectionCase> {
     const c = await this.read<CorrectionCase>(ctx, `/v1/cases/${encoded(id)}`, 'CorrectionCase')
-    if (c.scope.student_id !== ctx.student || c.lifecycle !== 'active') throw new StudentError('access_denied', 403)
+    if (c.scope.student_id !== ctx.student || homeworkId && c.homework_id !== homeworkId) throw new StudentError('access_denied', 403)
+    return c
+  }
+  private async rowFor(ctx: Context, c: CorrectionCase): Promise<CaseDetail> {
+    if (c.lifecycle === 'superseded') throw new StudentError('case_superseded', 409, '老师已重新切分此题，请刷新后在新的题目上继续。')
+    if (isRetired(c)) throw new StudentError('case_unavailable', 404, '这道题的记录正在按要求删除，暂时不能查看。')
     const q = await this.read<QuestionRead>(ctx, `/v1/questions/${encoded(c.question_id)}`, 'QuestionRead')
     const a = await this.read<AttemptRead>(ctx, `/v1/attempts/${encoded(c.current_attempt_id)}`, 'AttemptRead')
     if (!q.currently_effective || !a.currently_effective || q.record.revision !== c.current_question_revision || a.record.case_id !== c.id || a.record.question_id !== c.question_id) throw new StudentError('stale_detail', 409)
     return { case: c, question: q.record, attempt: a.record }
   }
+  private async caseDetail(ctx: Context, id: string): Promise<CaseDetail> { return this.rowFor(ctx, await this.caseRecordRead(ctx, id)) }
+  /** All case records of a homework, following layout-repair replacements that the homework list may not name yet. */
+  private async caseRecords(ctx: Context, homework: HomeworkSession) {
+    const records = new Map<string, CorrectionCase>(), queue = [...homework.case_ids]
+    for (let index = 0; index < queue.length && index < 300; index++) {
+      if (records.has(queue[index])) continue
+      const c = await this.caseRecordRead(ctx, queue[index], homework.id); records.set(c.id, c)
+      if (c.lifecycle === 'superseded') for (const next of c.replacement_case_ids) if (!queue.includes(next)) queue.push(next)
+    }
+    return records
+  }
   private async detail(ctx: Context, id: string): Promise<HomeworkDetail> {
     const homework = await this.read<HomeworkSession>(ctx, `/v1/homeworks/${encoded(id)}`, 'HomeworkSession')
     if (homework.scope.student_id !== ctx.student) throw new StudentError('access_denied', 403)
-    const cases: CaseDetail[] = [], jobs: Job[] = []
-    for (const id of homework.case_ids) cases.push(await this.caseDetail(ctx, id))
+    const records = await this.caseRecords(ctx, homework), cases: CaseDetail[] = [], jobs: Job[] = []
+    for (const caseId of orderActiveCases(homework.case_ids, records)) cases.push(await this.rowFor(ctx, records.get(caseId)!))
     for (const id of homework.job_ids) jobs.push(await this.read<Job>(ctx, `/v1/jobs/${encoded(id)}`, 'Job'))
-    return { homework, cases, jobs }
+    return { homework, cases, jobs, retired: retiredCases(records) }
+  }
+  /** Read-only counts for the history list; never a whole-homework accuracy. */
+  async homeworkSummary(homework: HomeworkSession): Promise<HomeworkSummary> { return this.summaryFor(await this.authorize(), homework) }
+  /** Summaries for a history page under one authorization; one failing homework does not stop the rest. */
+  async homeworkSummaries(homeworks: HomeworkSession[], each: (id: string, summary: HomeworkSummary | null) => void): Promise<void> {
+    const ctx = await this.authorize()
+    await mapLimit(homeworks, 2, async homework => {
+      let summary: HomeworkSummary | null = null
+      try { summary = await this.summaryFor(ctx, homework) } catch (e) { if (e instanceof StudentError && e.code === 'session_changed') throw e }
+      this.check(ctx); each(homework.id, summary)
+    })
+  }
+  private async summaryFor(ctx: Context, homework: HomeworkSession): Promise<HomeworkSummary> {
+    if (homework.scope.student_id !== ctx.student) throw new StudentError('access_denied', 403)
+    const records = await this.caseRecords(ctx, homework), active = orderActiveCases(homework.case_ids, records).map(id => records.get(id)!)
+    return { homeworkId: homework.id, revision: homework.revision, counts: countBuckets(active.map(bucketOfCase)), firstUnresolvedCaseId: firstUnresolved(active, bucketOfCase)?.id ?? null, retired: records.size - active.length }
+  }
+  /** Every attempt, check decision, shown hint, help request and review of one case. */
+  async caseRecord(caseId: string): Promise<CaseRecord> {
+    const ctx = await this.authorize(), c = await this.caseRecordRead(ctx, caseId)
+    if (c.lifecycle === 'deletion_pending') throw new StudentError('case_unavailable', 404, '这道题的记录正在按要求删除，暂时不能查看。')
+    const get = <T>(kind: string, shape: string) => (id: string) => this.read<T>(ctx, `/v1/${kind}/${encoded(id)}`, shape)
+    const [attempts, checks, hints, help, reviews] = await Promise.all([
+      mapLimit(c.attempt_ids, 3, get<AttemptRead>('attempts', 'AttemptRead')), mapLimit(c.check_ids, 3, get<CheckRun>('checks', 'CheckRun')),
+      mapLimit(c.hint_ids, 3, get<Hint>('hints', 'Hint')), mapLimit(c.help_request_ids, 3, get<HelpRequest>('help-requests', 'HelpRequest')), mapLimit(c.review_ids, 3, get<Review>('reviews', 'Review')),
+    ])
+    const decisionIds = unique([...checks.flatMap(check => check.decision_ids), ...reviews.flatMap(r => [r.target_decision_id, r.new_decision_id]), c.current_decision?.id])
+    const decisions = await mapLimit(decisionIds, 3, get<DecisionRead>('decisions', 'DecisionRead'))
+    if ([...attempts.map(a => a.record), ...checks, ...hints, ...help, ...reviews, ...decisions.map(d => d.record)].some(item => item.case_id !== c.id)) throw new StudentError('invalid_response', 502)
+    this.check(ctx)
+    return { case: c, attempts, checks, decisions, hints, help, reviews }
   }
   async history(cursor?: string): Promise<HomeworkPage> { const ctx = await this.authorize(); const params = new URLSearchParams({ limit: '30' }); if (cursor) params.set('cursor', cursor); return this.read(ctx, `/v1/students/${encoded(ctx.student)}/homeworks?${params}`, 'HomeworkPage') }
   async openHomework(id: string): Promise<HomeworkDetail> {
@@ -329,10 +434,11 @@ export class StudentClient {
       }
       if (d.recognitionJobId) { d.stage = 'recognizing'; await this.save(ctx, d); this.jobSucceeded(await this.awaitJob(ctx, d.recognitionJobId)) }
       d.detail = await this.detail(ctx, d.homeworkId); d.stage = 'checking'; await this.save(ctx, d)
-      const ids = d.correction ? [d.correction.caseId] : d.detail.homework.case_ids
+      const ids = d.correction ? [d.correction.caseId] : d.detail.cases.map(row => row.case.id)
       const failures: Job[] = []
       for (const caseId of ids) {
-        const row = await this.caseDetail(ctx, caseId)
+        let row: CaseDetail
+        try { row = await this.caseDetail(ctx, caseId) } catch (e) { if (!d.correction && e instanceof StudentError && ['case_superseded', 'case_unavailable'].includes(e.code)) continue; throw e }
         if (effectiveDecision(row) || row.attempt.recognition_status !== 'ready') continue
         let job: Job | undefined
         for (const checkId of [...row.case.check_ids].reverse()) {
@@ -375,10 +481,30 @@ export class StudentClient {
     await this.caseDetail(ctx, hint.case_id)
     return this.write(ctx, `hint-view:${hintId}`, `/v1/hints/${encoded(hintId)}/views`, { expected_revision: hint.revision, shown_at: new Date().toISOString() }, 'Hint', 'ShowHint')
   }
+  /**
+   * One journaled request per answer and kind; an appeal is per result, so a
+   * new teacher decision can be appealed again. An unknown earlier write is
+   * replayed with its original note before any duplicate check.
+   */
   async requestHelp(caseId: string, kind: CreateHelp['kind'], note: string): Promise<HelpRequest> {
     const ctx = await this.authorize(), row = await this.caseDetail(ctx, caseId)
     const content = note.trim(); if (!content) throw new StudentError('help_note_required', 422, '请简单说明哪里需要老师帮助。')
-    return this.write(ctx, `help:${caseId}:${row.attempt.id}:${kind}`, `/v1/cases/${encoded(caseId)}/help-requests`, { expected_revision: row.case.revision, attempt_id: row.attempt.id, kind, note: content }, 'HelpRequest', 'CreateHelp')
+    if ([...content].length > 500) throw new StudentError('help_note_too_long', 422, '说明请控制在 500 字以内。')
+    const decision = effectiveDecision(row)
+    if (kind === 'appeal' && !canAppeal(row)) throw new StudentError('appeal_unavailable', 409, '这道题还没有可以申请重查的结果，请先等待检查完成。')
+    const id = kind === 'appeal' ? `help:${caseId}:${row.attempt.id}:appeal:${decision?.id ?? 'resolved'}:${decision?.revision ?? 0}` : `help:${caseId}:${row.attempt.id}:${kind}`
+    let previous = await this.store.operation(ctx.scope, id); this.check(ctx)
+    if (previous?.response !== undefined) {
+      // A finished earlier request does not block asking again once the teacher closed it.
+      const earlier = previous.response as HelpRequest, latest = row.case.help_request_ids.includes(earlier.id) ? await this.read<HelpRequest>(ctx, `/v1/help-requests/${encoded(earlier.id)}`, 'HelpRequest') : null
+      if (latest && openHelp(latest)) return latest
+      await this.store.removeOperation(ctx.scope, id); previous = undefined
+    }
+    if (!previous) {
+      const existing = await mapLimit(row.case.help_request_ids, 3, helpId => this.read<HelpRequest>(ctx, `/v1/help-requests/${encoded(helpId)}`, 'HelpRequest'))
+      if (existing.some(h => h.kind === kind && h.attempt_id === row.attempt.id && openHelp(h))) throw new StudentError('help_already_open', 409, kind === 'appeal' ? '已经申请过老师重查，请等老师处理。' : '这道题已经请过老师，请等老师处理。')
+    }
+    return this.write(ctx, id, `/v1/cases/${encoded(caseId)}/help-requests`, { expected_revision: row.case.revision, attempt_id: row.attempt.id, kind, note: content }, 'HelpRequest', 'CreateHelp')
   }
 }
 export const createStudentClient = (options: ClientOptions = {}) => new StudentClient(options)

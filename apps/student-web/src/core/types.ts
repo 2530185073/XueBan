@@ -1,9 +1,16 @@
-import type { Attempt, CapturedQuestionRevision, CorrectionCase, HomeworkSession, Job } from '../../../staff-web/src/api/contracts.generated'
+import type { Attempt, AttemptRead, CapturedQuestionRevision, CheckRun, CorrectionCase, DecisionRead, HelpRequest, Hint, HomeworkSession, Job, RecordLifecycle, Review } from '../../../staff-web/src/api/contracts.generated'
 export type * from '../../../staff-web/src/api/contracts.generated'
 
 export type DraftStage = 'local' | 'creating' | 'uploading' | 'recognizing' | 'checking' | 'complete' | 'failed' | 'waiting'
 export interface CaseDetail { case: CorrectionCase; question: CapturedQuestionRevision; attempt: Attempt }
-export interface HomeworkDetail { homework: HomeworkSession; cases: CaseDetail[]; jobs: Job[]; draftId?: string }
+/** A case the staff retired (layout repair or deletion); never listed as current work. */
+export interface RetiredCase { id: string; lifecycle: Exclude<RecordLifecycle, 'active'>; replacementCaseIds: string[] }
+export interface HomeworkDetail { homework: HomeworkSession; cases: CaseDetail[]; jobs: Job[]; draftId?: string; retired?: RetiredCase[] }
+/** Every server record reachable from one case, read-only, for the version timeline. */
+export interface CaseRecord { case: CorrectionCase; attempts: AttemptRead[]; checks: CheckRun[]; decisions: DecisionRead[]; hints: Hint[]; help: HelpRequest[]; reviews: Review[] }
+export type CaseBucket = 'needs_correction' | 'pending_review' | 'candidate_correct' | 'confirmed_correct'
+export interface CaseCounts { total: number; needs_correction: number; pending_review: number; candidate_correct: number; confirmed_correct: number }
+export interface HomeworkSummary { homeworkId: string; revision: number; counts: CaseCounts; firstUnresolvedCaseId: string | null; retired: number }
 export interface SafeError { code: string; message: string }
 export interface DraftSummary {
   id: string; title: string; stage: DraftStage; createdAt: string; updatedAt: string
@@ -17,7 +24,7 @@ export interface StoredDraft extends DraftSummary {
   assetId?: string; recognitionJobId?: string; ticketGeneration: number; checkJobs: Record<string, string>
   correction?: { caseId: string; parentAttemptId: string; reportedHelp: 'unknown' | 'none_reported' | 'staff_help' | 'answer_shown' }
 }
-export interface JournalEntry { scope: string; id: string; key: string; path: string; body: string; shape: string; response?: unknown }
+export interface JournalEntry { scope: string; id: string; key: string; path: string; body: string; shape: string; response?: unknown; updatedAt?: string }
 
 export interface Account { username: string; must_change_password: boolean; student_id: string | null }
 export interface AuthSession { access_token: string; expires_at: string; must_change_password: boolean }
