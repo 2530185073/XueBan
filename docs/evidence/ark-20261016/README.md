@@ -18,6 +18,8 @@
 
 完整安全元数据见 [五角色报告](chat-smoke.json) 和 [向量报告](embedding-smoke.json)：每次请求的模型、request ID、usage和耗时均保留；未保留密钥、完整向量或内部推理。报告在加入最终超时/检查点加固之前执行，加固经模拟回归验证，没有为凑测试重复收费调用。
 
+最终实现提交 `708024f4eec2e5e52618fd5f0f34337188934acb` 的 [远程工程检查](https://github.com/2530185073/XueBan/actions/runs/38925483360) 通过：后端SQLite+PostgreSQL17合计236通过、2项仅SQLite跳过；离线评测30项、坐班12项及构建通过。两项并发场景已由PG实例实际执行；CI不读取真实密钥、不调用付费模型。[参考检查](https://github.com/2530185073/XueBan/actions/runs/38925483619) 同样通过。
+
 ## 解释边界
 
 - 所有模型输出仍是 `candidate`，没有写入学生“已改对”“已掌握”或任何生产作业状态。

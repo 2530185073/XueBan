@@ -167,7 +167,8 @@
         "docs/evidence/ark-20261016/"
       ],
       "acceptance": "同开发样本比较路线，报告切题覆盖/错判/漏判/无法判断/成本时延；无密钥时不得称效果通过",
-      "evidence": "指定DeepSeek五角色、图片与结构化候选适配器，及独立2048维向量适配器；真实合成5+2请求成功。公开纠错端点、切题坐标、数据库任务和真实作业评测仍未完成。"
+      "evidence": "指定DeepSeek五角色、图片与结构化候选适配器，及独立2048维向量适配器；真实合成5+2请求成功。公开纠错端点、切题坐标、数据库任务和真实作业评测仍未完成。",
+      "ci_evidence": "708024f4eec2e5e52618fd5f0f34337188934acb: https://github.com/2530185073/XueBan/actions/runs/38925483360 success; backend SQLite+PG17 236 passed/2 SQLite-only skips; providers use MockTransport, no paid CI calls."
     },
     {
       "id": "B04",
