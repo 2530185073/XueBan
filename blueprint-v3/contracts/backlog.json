@@ -708,7 +708,7 @@
       ]
     }
   ],
-  "product_version": "3.3",
+  "product_version": "3.4",
   "dependency_semantics": "dependency_ids 仅表示研发集成先后，不是学生必做任务顺序。US-27/33 可依赖小测相关能力的研发，但半月汇总和报告不以参加或完成小测为运行前提。",
   "service_policy": {
     "setting": "托管班，辅助自主完成学校课程与作业，不增负",
