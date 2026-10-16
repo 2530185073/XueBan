@@ -86,6 +86,30 @@ python3 evals/correction/evaluate.py \
 - `cost.amount=null` 表示未知，不能填写 0；0 仅表示确实免费。`known_cost_subtotal_by_currency` 只是已知费用小计，CNY/USD 不折算、不相加。估算费用与账单实扣不能混写在同次 run，采用哪种依据应保留在运行记录中；本目录未实现供应商计费核对。
 - 每个切片显示与其相交的完整请求账本。一个整页请求可同时属于多个题型切片，因此**各切片时延/费用不能相加**；总体费用看 `all`。当前不推算无法归属的逐题成本。
 
+## 模型与提示词回归
+
+改模型、提示词或流水线代码前后，用同一份冻结 manifest 各跑一次，再比较两份报告：
+
+```sh
+# 1. 生产 check/recheck 角色重放（付费调用，必须 --live；输入与输出都放仓库外私有目录）
+services/backend/.venv/bin/python services/backend/scripts/correction_eval_run.py \
+  /private/eval/manifest.json /private/eval/pipeline-inputs.json \
+  --split calibration --run-id cand-20261017 --env-file /private/ark.env --live \
+  --output /private/eval/runs/cand-20261017.json
+
+# 2. 计分（固定分母、切片、p50/p95）
+python3 evals/correction/evaluate.py /private/eval/manifest.json \
+  /private/eval/runs/cand-20261017.json --output /private/eval/reports/cand.json
+
+# 3. 与基线比较；退化或超过上限时退出码 1，不可比时 2
+python3 evals/correction/compare.py /private/eval/reports/base.json /private/eval/reports/cand.json
+```
+
+- `schemas/pipeline-inputs.schema.json` 定义每题的私有输入：原图相对路径与 SHA-256、题干、作答、题区。运行器逐图校验摘要，未授权样本一张都不发送；缺输入的题记为 `no_output`，仍留在分母里。
+- `request_config_sha256` 覆盖模型 ID、提示版本、全部角色提示词、判题 Schema 和流水线源码摘要。只改提示词也会换散列，两次运行不会被误认为同一配置。
+- `compare.py` 只接受同一 `dataset_version`、同一 split、同一 manifest 摘要的两份报告。每个比率附 95% Wilson 区间；分母低于 `min_slice_denominator` 的切片只报告、不拦截，`all` 切片始终拦截。
+- `gates.json` 当前为 `provisional`：错判放行（`wrong_false_correct_rate`、订正仍错被放行）零容忍，其余是工程默认值。真实发布门槛须由产品与学科负责人在授权真实标注数据上冻结后改为 `frozen`；比较结果的 `release_approval` 始终是 `not_assessed`。
+
 ## 当前交付边界
 
-已提供可执行计分、输入防错、固定分母、合成演示与约束测试。尚未实现真实供应商适配器、题框匹配、识别文本/公式准确率评测、人工标注平台、统计置信区间、真实端到端时延、生产权限/留存/计费核对。框架不会自动访问数据或证明授权成立。后续真实评测至少需要官方 API 权限、独立授权样本、冻结分组/版本、独立学科标签和实际请求账本。
+已提供可执行计分、输入防错、固定分母、合成演示与约束测试，以及生产判题角色的重放运行器和回归比较。尚未实现识别阶段（切题）评测、题框匹配、识别文本/公式准确率评测、人工标注平台、真实端到端时延、生产权限/留存/计费核对。框架不会自动访问数据或证明授权成立。后续真实评测至少需要官方 API 权限、独立授权样本、冻结分组/版本、独立学科标签和实际请求账本。

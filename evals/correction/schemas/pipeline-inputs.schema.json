@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xueban.invalid/evals/correction/pipeline-inputs.schema.json",
+  "description": "Private per-sample inputs replayed through the production check/recheck roles. Image paths are relative to this file and must stay in an authorized private location.",
+  "type": "object",
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "dataset_id": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$"},
+    "dataset_version": {"type": "string", "minLength": 1},
+    "synthetic_only": {"type": "boolean"},
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "sample_id": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$"},
+          "images": {
+            "type": "array", "minItems": 1, "maxItems": 4,
+            "items": {
+              "type": "object",
+              "properties": {
+                "asset_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{2,63}$"},
+                "path": {"type": "string", "minLength": 1},
+                "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+              },
+              "required": ["asset_id", "path", "sha256"],
+              "additionalProperties": false
+            }
+          },
+          "question": {
+            "type": "object",
+            "properties": {
+              "label": {"type": ["string", "null"], "maxLength": 120},
+              "stem_text": {"type": ["string", "null"], "maxLength": 16000},
+              "regions": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/region"}}
+            },
+            "required": ["label", "stem_text", "regions"],
+            "additionalProperties": false
+          },
+          "attempt": {
+            "type": "object",
+            "properties": {
+              "answer_text": {"type": ["string", "null"], "maxLength": 16000},
+              "answer_status": {"enum": ["present", "blank", "unclear"]},
+              "answer_regions": {"type": "array", "items": {"$ref": "#/$defs/region"}},
+              "asset_ids": {"type": "array", "minItems": 1, "uniqueItems": true,
+                            "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{2,63}$"}},
+              "recognition_status": {"enum": ["ready", "needs_revision"]}
+            },
+            "required": ["answer_text", "answer_status", "answer_regions", "asset_ids", "recognition_status"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["sample_id", "images", "question", "attempt"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["schema_version", "dataset_id", "dataset_version", "synthetic_only", "cases"],
+  "additionalProperties": false,
+  "$defs": {
+    "region": {
+      "type": "object",
+      "properties": {
+        "asset_id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{2,63}$"},
+        "coordinate_space": {"const": "original_pixels"},
+        "x": {"type": "integer", "minimum": 0},
+        "y": {"type": "integer", "minimum": 0},
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1}
+      },
+      "required": ["asset_id", "coordinate_space", "x", "y", "width", "height"],
+      "additionalProperties": false
+    }
+  }
+}
