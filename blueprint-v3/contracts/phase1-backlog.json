@@ -2,17 +2,25 @@
   "schema_version": "phase1-backlog.v1",
   "product_version": "3.5",
   "source_document": "../../PHASE1.md",
-  "scope": "phase1_correction_app",
-  "status_note": "16项均为一期P0。engineering_complete 表示工程实现、自动化测试（SQLite+PostgreSQL 全量回归、C0 系统行为用例）与 CI 已通过，仍待真实设备、冻结评测样本或现场试点验收；不代表一期生产验收通过。C0/R1/R2 门槛均未通过。",
+  "scope": "phase1_complete_web",
+  "status_note": "一期由16项核心P1任务和7项网页模块W1任务共同组成，R2要求全部验收。status是当前范围的工程状态，acceptance_status单独记录真实验收；本次所有任务与C0/R1/R2均为pending验收。本次仅更新范围、路线与任务，不新增运行功能。历史14/16 engineering_complete仅指旧Android纠错范围，保留原VALIDATION证据，不等同于完整网页进度。",
   "platform_decision": {
     "status": "confirmed_by_user",
-    "target": "android_tablet_app",
-    "decided_at": "2026-10-16",
+    "target": "complete_web_first",
+    "decided_at": "2026-10-17",
+    "role_surfaces": [
+      "student_web",
+      "staff_web",
+      "administrator_web",
+      "parent_report_web"
+    ],
+    "next_delivery": "app_migration_after_complete_web_delivery",
     "remaining_to_freeze": [
       "device_models",
-      "minimum_android_version",
-      "installation_channel",
-      "signing_key_ownership"
+      "supported_operating_systems",
+      "supported_browsers_and_versions",
+      "camera_and_upload_behavior",
+      "web_deployment_environment"
     ]
   },
   "release_gate_ids": [
@@ -20,30 +28,23 @@
     "R1",
     "R2"
   ],
-  "excluded_modules": [
-    "personal_knowledge_graph",
-    "long_term_agent_memory",
-    "parent_reports",
-    "campus_learning_analysis",
-    "optional_practice",
-    "preview_module",
-    "optional_quizzes"
-  ],
+  "excluded_modules": [],
   "items": [
     {
       "id": "P1-01",
-      "title": "冻结一期设备、题型和验收口径",
+      "title": "冻结完整网页范围、浏览器设备、题型与验收口径",
       "owner_hint": "PO",
       "priority": "P0",
       "status": "in_progress",
+      "acceptance_status": "pending",
       "dependency_ids": [],
       "linked_product_story_ids": [],
-      "acceptance_success": "形成设备/系统/安装方式、内容支持清单、接口与数据规范、独立评测样本和发布指标冻结记录",
-      "acceptance_failure": "未确认项标明负责人和阻塞范围；不得把网页或未测准确率记为 App 交付",
+      "acceptance_success": "形成四角色网页业务、设备/系统/浏览器及部署方式、内容支持清单、接口数据规范、独立评测样本和分阶段发布指标的冻结记录",
+      "acceptance_failure": "未确认项有负责人和阻塞范围；未验证范围不开放或明确待核实；网页可运行不等于C0/R1/R2通过，App验收单独保留",
       "delivery_waves": [
         "A"
       ],
-      "implementation_note": "工程口径（平台、账号、接口与数据结构、迁移、纠错与学习规则、模型服务、评测口径）已冻结并记录于 docs/PHASE1_FREEZE.md；设备型号、最低系统、安装与签名、首发题型、独立保留集与发布阈值、坐班容量列明负责人与阻塞范围，待现场确认。"
+      "implementation_note": "账号、接口、数据迁移、纠错与学习规则、模型服务等既有工程口径保留。2026-10-17按用户决定将一期改为功能完整网页，参见docs/WEB_ROADMAP.md与docs/PHASE1_FREEZE.md；浏览器设备矩阵、首发题型、保留集、发布阈值、教研范围与坐班容量仍需负责人确认。"
     },
     {
       "id": "P1-02",
@@ -51,6 +52,7 @@
       "owner_hint": "BE",
       "priority": "P0",
       "status": "engineering_complete",
+      "acceptance_status": "pending",
       "dependency_ids": [
         "P1-01"
       ],
@@ -58,19 +60,20 @@
         "US-01",
         "US-02"
       ],
-      "acceptance_success": "学生 App 与坐班工作台真实登录，服务端校验归属和监护授权，切换共享设备清理上一学生会话",
+      "acceptance_success": "学生和老师在网页真实登录，服务端校验归属及授权；共享浏览器切换学生后不能访问前一学生会话和缓存",
       "acceptance_failure": "改请求参数、旧会话和缓存不能跨学生读取或写入；未授权照片不能上传",
       "delivery_waves": [
         "B"
       ],
-      "implementation_note": "学生/坐班/校区账号、口令策略、会话吊销与学生授权已实现；学生端在账号失效或切换时清除本机数据。监护书面同意流程待现场落实。"
+      "implementation_note": "学生/坐班/校区账号、口令策略、会话吊销与学生授权已实现；学生端在账号失效或切换时清除本机数据。监护书面同意流程待现场落实。 网页管理端开户/重置与档案入口的剩余工作另见W1-01，不能由API存在推定网页已交付。"
     },
     {
       "id": "P1-03",
-      "title": "可安装 App 与相机采集",
+      "title": "网页相机、单页/多页采集与图像处理",
       "owner_hint": "FE",
       "priority": "P0",
-      "status": "engineering_complete",
+      "status": "in_progress",
+      "acceptance_status": "pending",
       "dependency_ids": [
         "P1-01",
         "P1-02"
@@ -78,13 +81,13 @@
       "linked_product_story_ids": [
         "US-03"
       ],
-      "acceptance_success": "声明设备实际安装运行，完成权限、单页/多页拍摄、预览旋转裁切、原图与页面关系保存",
-      "acceptance_failure": "权限拒绝、存储不足、模糊反光及漏拍有恢复路径；真实拍摄产物不能被固定图片替代",
+      "acceptance_success": "声明平板浏览器真实拍照或系统选图，单页/多页预览、排序删除、旋转与必要裁切可用；页数大小限制明确，原图和页序关系保存",
+      "acceptance_failure": "权限拒绝、文件超限、模糊反光、漏拍、草稿保存失败均有清晰恢复路径；真实拍摄不被固定图片替代；重复点击不重复提交",
       "delivery_waves": [
         "A",
         "B"
       ],
-      "implementation_note": "Android 0.3.0：账号登录、相机与系统选图、多页（≤4 页/8 MiB）排序删除、90° 旋转与矩形裁切、原图与页面关系本机保存、提交前确认页数；权限拒绝/永久拒绝、存储不足、模糊过暗反光提醒均有恢复路径；60 项 JVM 测试、lint 与 debug/release 构建在 CI 通过。声明设备实际安装运行与真实拍摄待真机验收。"
+      "implementation_note": "学生网页已有账号与单页拍照/上传入口，多页选择、页序、旋转裁切及设备兼容尚待收口，按完整网页范围重列in_progress。历史Android工程保留用于后续移植：Android 0.3.0：账号登录、相机与系统选图、多页（≤4 页/8 MiB）排序删除、90° 旋转与矩形裁切、原图与页面关系本机保存、提交前确认页数；权限拒绝/永久拒绝、存储不足、模糊过暗反光提醒均有恢复路径；60 项 JVM 测试、lint 与 debug/release 构建在 CI 通过。声明设备实际安装运行与真实拍摄待真机验收。 这些Android构建记录不作为当前网页验收证据。"
     },
     {
       "id": "P1-04",
@@ -92,6 +95,7 @@
       "owner_hint": "BE",
       "priority": "P0",
       "status": "engineering_complete",
+      "acceptance_status": "pending",
       "dependency_ids": [
         "P1-03",
         "P1-12"
@@ -106,7 +110,7 @@
       "delivery_waves": [
         "B"
       ],
-      "implementation_note": "私有上传票据、SHA-256 完整性校验、幂等提交与逐页任务账本已实现并有 PG 并发测试；学生端区分本地草稿与已接收。"
+      "implementation_note": "私有上传票据、SHA-256 完整性校验、幂等提交与逐页任务账本已实现并有 PG 并发测试；学生端区分本地草稿与已接收。 网页多页入口和浏览器恢复分别由P1-03、P1-13收口；本项既有后端工程状态不代替浏览器联合验收。"
     },
     {
       "id": "P1-05",
@@ -114,6 +118,7 @@
       "owner_hint": "AI",
       "priority": "P0",
       "status": "engineering_complete",
+      "acceptance_status": "pending",
       "dependency_ids": [
         "P1-04"
       ],
@@ -133,6 +138,7 @@
       "owner_hint": "AI",
       "priority": "P0",
       "status": "engineering_complete",
+      "acceptance_status": "pending",
       "dependency_ids": [
         "P1-05"
       ],
@@ -152,6 +158,7 @@
       "owner_hint": "AI",
       "priority": "P0",
       "status": "engineering_complete",
+      "acceptance_status": "pending",
       "dependency_ids": [
         "P1-06"
       ],
@@ -171,6 +178,7 @@
       "owner_hint": "BE",
       "priority": "P0",
       "status": "engineering_complete",
+      "acceptance_status": "pending",
       "dependency_ids": [
         "P1-06",
         "P1-07",
@@ -193,6 +201,7 @@
       "owner_hint": "FE",
       "priority": "P0",
       "status": "engineering_complete",
+      "acceptance_status": "pending",
       "dependency_ids": [
         "P1-02",
         "P1-06"
@@ -215,6 +224,7 @@
       "owner_hint": "BE",
       "priority": "P0",
       "status": "engineering_complete",
+      "acceptance_status": "pending",
       "dependency_ids": [
         "P1-08",
         "P1-09",
@@ -233,10 +243,11 @@
     },
     {
       "id": "P1-11",
-      "title": "每生作业历史与继续订正",
+      "title": "网页作业历史、逐页回看与继续订正",
       "owner_hint": "FE",
       "priority": "P0",
-      "status": "engineering_complete",
+      "status": "in_progress",
+      "acceptance_status": "pending",
       "dependency_ids": [
         "P1-08",
         "P1-10"
@@ -244,12 +255,12 @@
       "linked_product_story_ids": [
         "US-24"
       ],
-      "acceptance_success": "本人可回看正确/错误/待处理作业、提示与再检查，按日期或科目查找并继续未解决事项",
-      "acceptance_failure": "只采到部分作业不显示全作业正确率；无知识点映射仍可回看；未实现的图谱和报告不放空入口",
+      "acceptance_success": "本人在网页按日期/科目/状态查找作业，逐页回看原图、正确/错误/待处理结果、提示和订正时间线，并继续未解决事项",
+      "acceptance_failure": "多页不能只展示首图；只采到部分作业不显示全作业正确率；无知识点映射仍可回看；失效分析不能显示为当前结论",
       "delivery_waves": [
         "C"
       ],
-      "implementation_note": "学生端历史按日期/科目/状态筛选，版本时间线可继续未解决事项。"
+      "implementation_note": "学生端历史按日期/科目/状态筛选，版本时间线可继续未解决事项。 当前学生网页照片展示仍需补齐多页切换与完整历史对应，按完整网页范围重列in_progress；与P1-03及P1-13联合收口。"
     },
     {
       "id": "P1-12",
@@ -257,6 +268,7 @@
       "owner_hint": "BE",
       "priority": "P0",
       "status": "engineering_complete",
+      "acceptance_status": "pending",
       "dependency_ids": [
         "P1-01",
         "P1-02"
@@ -275,10 +287,11 @@
     },
     {
       "id": "P1-13",
-      "title": "设备生命周期与故障恢复",
+      "title": "浏览器生命周期与故障恢复",
       "owner_hint": "FE",
       "priority": "P0",
-      "status": "engineering_complete",
+      "status": "in_progress",
+      "acceptance_status": "pending",
       "dependency_ids": [
         "P1-03",
         "P1-04",
@@ -289,12 +302,12 @@
         "US-36",
         "US-39"
       ],
-      "acceptance_success": "后台终止、弱网、过期登录、App 更新、服务重启后恢复到准确状态；任务账本持久化，故障可定位",
-      "acceptance_failure": "不丢服务器已确认数据、不串人、不假完成；纯本地未上传记录明确提示；离线不能假装完成云端判断",
+      "acceptance_success": "刷新、关闭重开、切换后台、弱网、过期登录、网页升级和服务重启后，按服务端任务及作答版本恢复准确状态；未上传草稿和已接收数据明确区分",
+      "acceptance_failure": "服务器已确认记录不丢、不串人、不假完成；浏览器不能续传时明确要求重新选择或继续上传；缓存受限或被清除时给出草稿状态和补救路径，离线不伪造云端结果",
       "delivery_waves": [
         "D"
       ],
-      "implementation_note": "服务端租约回收、Worker 重启恢复、健康/就绪探针与部署烟测已完成；Android 上传、识别与检查统一由 WorkManager 从版本化持久账本续跑，过期/撤销登录回到登录页且保留本机未上传作业，0.2.0 账本迁移保留原幂等键，均有 JVM 测试。后台终止、弱网与覆盖安装升级待真机验收。"
+      "implementation_note": "服务端租约回收、Worker重启恢复、健康/就绪探针与部署烟测已有实现；网页持久草稿/幂等提交恢复、关闭重开与缓存清理需收口，教师端未确认写入的刷新恢复也需核验。按完整网页范围重列in_progress。历史Android记录保留用于后续独立验收：服务端租约回收、Worker 重启恢复、健康/就绪探针与部署烟测已完成；Android 上传、识别与检查统一由 WorkManager 从版本化持久账本续跑，过期/撤销登录回到登录页且保留本机未上传作业，0.2.0 账本迁移保留原幂等键，均有 JVM 测试。后台终止、弱网与覆盖安装升级待真机验收。"
     },
     {
       "id": "P1-14",
@@ -302,6 +315,7 @@
       "owner_hint": "TL",
       "priority": "P0",
       "status": "engineering_complete",
+      "acceptance_status": "pending",
       "dependency_ids": [
         "P1-02",
         "P1-12",
@@ -313,19 +327,20 @@
         "US-02",
         "US-37"
       ],
-      "acceptance_success": "验证 API/图片/Worker/设备缓存隔离，撤权及保留到期删除，备份恢复和删除清单重应用，日志最小化",
+      "acceptance_success": "验证API/图片/Worker及受管网页缓存隔离，撤权和保留到期删除，备份恢复业务与学习关联并重新应用删除清单，日志最小化",
       "acceptance_failure": "越权访问、删除后可读或恢复后资料复活均阻断；真实账号和数据流程不可被演示身份替代",
       "delivery_waves": [
         "D"
       ],
-      "implementation_note": "跨学生隔离、撤权、学生数据导出与删除执行（含下游学习数据清除）、备份/恢复脚本与重放删除清单已实现；生产环境恢复演练待执行。"
+      "implementation_note": "跨学生隔离、撤权、学生数据导出与删除执行（含下游学习数据清除）、备份/恢复脚本与重放删除清单已实现；生产环境恢复演练待执行。 真实网页缓存清理、连续删除请求、恢复后的作业/订正/学习派生关系与生产演练仍须验收。"
     },
     {
       "id": "P1-15",
-      "title": "纠错评测、性能与模型版本回归",
+      "title": "原图端到端纠错评测、性能与模型版本回归",
       "owner_hint": "QA",
       "priority": "P0",
-      "status": "engineering_complete",
+      "status": "in_progress",
+      "acceptance_status": "pending",
       "dependency_ids": [
         "P1-06",
         "P1-07",
@@ -339,22 +354,23 @@
         "US-05",
         "US-38"
       ],
-      "acceptance_success": "冻结保留测试集，按题型/图像条件测误判漏判、覆盖、提示、再检查与时延；记录人工等待/容量；模型变更复验",
-      "acceptance_failure": "不能在看到保留集结果后调分母或阈值；大量不判断不能冒充高准确率；严重误导或容量超限不通过",
+      "acceptance_success": "保留集从原始照片运行识别、切题、题答对应、检查、提示和订正再检；每个上线切片报告漏题/误伤/误放行、可判断覆盖、错步/提示与时延，设置绝对阈值、样本量和置信要求，另报人工容量与真实用量",
+      "acceptance_failure": "失败、漏题、未判断不得删出分母；样本不足不得标通过；看保留集后不得调整阈值；回归不变差不能代替绝对质量达标；严重误导或容量超限不通过",
       "delivery_waves": [
         "A",
         "B",
         "D",
         "E"
       ],
-      "implementation_note": "评测重放运行器、Wilson 区间回归比较门槛与线上服务指标接口已实现；冻结保留测试集与真实样本评测待执行。"
+      "implementation_note": "已有判题重放运行器、Wilson区间与相对回归比较、服务指标接口，继续保留用于判断层定位；原始照片识别切题/题框匹配的完整评测、分切片绝对发布门槛与真实时延成本仍需实现或补齐，故按当前范围重列in_progress。冻结保留集及真实样本验收仍待执行。"
     },
     {
       "id": "P1-16",
-      "title": "一期试点、正式发布与技术交接",
+      "title": "网页受控试点、发布准备与技术交接",
       "owner_hint": "TL",
       "priority": "P0",
       "status": "not_started",
+      "acceptance_status": "pending",
       "dependency_ids": [
         "P1-11",
         "P1-13",
@@ -367,21 +383,21 @@
         "US-39",
         "US-40"
       ],
-      "acceptance_success": "C0/R1/R2 证据齐全，连续真实使用并关闭阻断项，交付签名 App、部署迁移、配置模板、回滚、支持手册和设备矩阵",
-      "acceptance_failure": "不把无 App 的接口演示当交付；不等待图谱、报告或两个半月周期；未达质量与稳定性门槛不得发布",
+      "acceptance_success": "C0/R1核心试点证据齐全，连续真实使用并关闭阻断项；交付网页/服务构建部署、迁移、配置模板、回滚、备份恢复、支持手册和浏览器矩阵，为W1-07及R2提供试点与交接证据",
+      "acceptance_failure": "接口演示不能替代真实网页使用；未达质量或稳定性门槛不得发布；完整网页R2仍需W1-01—W1-07全部验收，不能以核心16项齐全提前宣称完整交付",
       "delivery_waves": [
         "D",
         "E"
       ],
-      "implementation_note": "交接包已具备：部署/迁移/配置模板/回滚/备份恢复/运维（docs/runbooks）、坐班操作手册、支持手册、设备矩阵模板、试点流程与 C0/R1/R2 证据清单、交接清单（docs/HANDOVER.md）。签名密钥、C0/R1/R2 现场证据与连续真实使用需现场试点。"
+      "implementation_note": "原部署/迁移/配置模板/回滚/备份恢复/运维手册、坐班/支持手册与试点清单已有基础。当前交接范围改为网页，真实浏览器矩阵、C0/R1证据及连续使用尚未完成。App签名安装单列后续。本项提供核心试点和技术交接，R2由核心与web_module_items联合判定，不反向依赖W1-07。"
     }
   ],
-  "implementation_document": "../../ANDROID_PHASE1.md",
-  "dependency_semantics": "dependency_ids 是完成验收所需依赖；契约、相机样机、样本和评测设计可提前并行。P1-15 的前置工作从 A 波启动。",
+  "implementation_document": "../../docs/WEB_ROADMAP.md",
+  "dependency_semantics": "dependency_ids表示本项最终验收所需依赖，开发、样本、契约和浏览器原型可以提前并行。保留16个P1核心ID和原依赖以便追溯；核心项不依赖W1。W1-07依赖核心试点交接P1-16与其他网页模块，完整R2在两组全部验收后判定，避免P1-16与W1-07循环等待。",
   "schedule_assumptions": {
     "status": "milestone_based_ai_team",
-    "execution_document": "../../AI_AGENT_EXECUTION.md",
-    "scope": "首发初中人教版已确认；数学单年级试验为建议，具体版本/题型/设备待冻结",
+    "execution_document": "../../docs/WEB_ROADMAP.md",
+    "scope": "先完整网页、后App移植；首发初中人教版已确认，数学单年级试验为建议；具体版本/题型/设备/浏览器待冻结",
     "wave_ids": [
       "A",
       "B",
@@ -389,7 +405,9 @@
       "D",
       "E"
     ],
-    "field_observation": "建议至少10个实际出勤日；不得用Agent并发替代真实观察"
+    "field_observation": "建议至少10个实际出勤日，观察与完整模块开发可以并行；不得用Agent并发替代真实现场证据，不要求等待App或两个完整半月周期后才开始受控试点。",
+    "historical_execution_document": "../../AI_AGENT_EXECUTION.md",
+    "wave_note": "既有P1 delivery_waves与A—E编号保留作历史追溯，当前工作包与先后关系按docs/WEB_ROADMAP.md和P1/W1依赖执行。"
   },
   "launch_decision": {
     "stage": "junior_middle_school",
@@ -405,8 +423,252 @@
     ]
   },
   "status_semantics": {
-    "engineering_complete": "工程实现与自动化验证完成，待真实设备/样本/现场验收",
-    "in_progress": "已在执行，工程或外部条件尚未完成",
-    "not_started": "尚未执行"
+    "engineering_complete": "备注所列工程实现与自动化已有证据；仍需本次网页适用性、真实样本/内容审核/现场验收，不代表发布通过",
+    "in_progress": "当前完整网页范围仍有实现或收口工作，含由旧Android纠错范围调整后重新打开的任务",
+    "not_started": "尚未执行该项工作；已有相关工程或清单不代替该项执行"
+  },
+  "included_modules": [
+    "photo_correction_and_recheck",
+    "student_history_and_appeals",
+    "staff_review_and_help",
+    "student_accounts_and_textbook_profiles",
+    "staff_accounts_and_password_reset",
+    "campus_permissions_and_data_management",
+    "campus_learning_analysis",
+    "service_runtime_metrics",
+    "personal_knowledge_graph",
+    "long_term_agent_memory",
+    "student_preferences_and_goals",
+    "daily_parent_feedback",
+    "parent_reports",
+    "parent_report_web",
+    "reviewed_question_bank",
+    "optional_practice",
+    "preview_module",
+    "optional_quizzes",
+    "web_recovery_and_production_handover"
+  ],
+  "deferred_app_scope": {
+    "target": "android_tablet_app",
+    "status": "deferred",
+    "implementation_document": "../../ANDROID_PHASE1.md",
+    "historical_implementation_note": "保留Android 0.3.0账号、多页拍摄与图像处理、WorkManager续跑等已有工程及原构建记录；不视为网页已实现或App真机已验收。",
+    "items": [
+      "native_camera_and_vendor_permissions",
+      "native_offline_cache_and_background_upload",
+      "process_termination_and_local_ledger_migration",
+      "native_notifications",
+      "app_page_migration",
+      "release_signing_and_key_ownership",
+      "installation_distribution_and_upgrade",
+      "native_device_acceptance"
+    ],
+    "release_gate_note": "上述原生能力和App安装包独立后续验收，不作为当前C0/R1/R2网页发布前提；后续App复用账号、后端、数据和业务规则。"
+  },
+  "release_gate_requirements": [
+    {
+      "id": "C0",
+      "acceptance_status": "pending",
+      "scope": "声明设备与浏览器上的真实纠错流程完整；覆盖真实照片识别、检查、提示、订正再检、老师核实与更正。"
+    },
+    {
+      "id": "R1",
+      "acceptance_status": "pending",
+      "scope": "C0之后，在声明网页支持范围内通过浏览器体验、真实质量、数据权限、运行恢复和现场容量验收，允许受控试点；不等同于完整网页交付。"
+    },
+    {
+      "id": "R2",
+      "acceptance_status": "pending",
+      "scope": "完整网页版交付；四角色联合验收、全部网页模块、连续真实使用和技术交接齐全。",
+      "required_gate_ids": [
+        "C0",
+        "R1"
+      ],
+      "required_core_item_ids": [
+        "P1-01",
+        "P1-02",
+        "P1-03",
+        "P1-04",
+        "P1-05",
+        "P1-06",
+        "P1-07",
+        "P1-08",
+        "P1-09",
+        "P1-10",
+        "P1-11",
+        "P1-12",
+        "P1-13",
+        "P1-14",
+        "P1-15",
+        "P1-16"
+      ],
+      "required_web_module_ids": [
+        "W1-01",
+        "W1-02",
+        "W1-03",
+        "W1-04",
+        "W1-05",
+        "W1-06",
+        "W1-07"
+      ],
+      "required_acceptance_status": "accepted",
+      "app_delivery_required": false
+    }
+  ],
+  "web_module_items": [
+    {
+      "id": "W1-01",
+      "title": "学员与教材档案、账号和校区管理",
+      "owner_hint": "FE+BE+PO",
+      "priority": "P0",
+      "status": "in_progress",
+      "acceptance_status": "pending",
+      "dependency_ids": [
+        "P1-02",
+        "P1-12"
+      ],
+      "release_gate_ids": [
+        "R2"
+      ],
+      "implementation_note": "长期学员账号、授权、学习档案和服务指标已有后端及部分网页入口；老师开户/重置仍依赖管理员API，管理员网页、校区权限与已授权学情/运行指标需统一收口。只整理已有定义的校区事实与运行指标，不新增预测分析。",
+      "acceptance_success": "管理员在网页创建学员/老师、重置密码、维护校区权限和教材/当前课次档案；授权人员可查看对应校区学情与服务指标，修改保留责任人和记录，换设备或改密码保持student_id及历史",
+      "acceptance_failure": "跨校区/跨学生参数、旧会话和缓存不能越权；重复开户或重置有明确结果；教材、课次或授权未知时不猜测；日常必需管理操作不能只留API入口"
+    },
+    {
+      "id": "W1-02",
+      "title": "知识图谱与证据映射",
+      "owner_hint": "BE+FE+学科负责人",
+      "priority": "P0",
+      "status": "engineering_complete",
+      "acceptance_status": "pending",
+      "dependency_ids": [
+        "P1-10",
+        "P1-12",
+        "W1-01"
+      ],
+      "release_gate_ids": [
+        "R2"
+      ],
+      "implementation_note": "学习投影、老师确认映射、四档知识状态和双网页入口已有工程与自动化验证，参见docs/LEARNING_LAYER.md；pilot_seed_unreviewed课程图谱仍需针对声明范围教研审核，真实映射工时、证据失效传播和浏览器流程尚待验收。",
+      "acceptance_success": "声明教材/单元图谱经审核；老师在网页确认映射，学生可查看有来源的状态、有效证据及未知项；知识状态可解释并从有效版本重算",
+      "acceptance_failure": "未确认映射、模型候选和撤销证据不能支撑正式学情；缺映射保持未知而不阻断作业；订正或提示后正确不算独立掌握；投影落后显示待更新，不展示过期结论"
+    },
+    {
+      "id": "W1-03",
+      "title": "长期 AI、偏好与目标",
+      "owner_hint": "BE+FE+AI",
+      "priority": "P0",
+      "status": "engineering_complete",
+      "acceptance_status": "pending",
+      "dependency_ids": [
+        "W1-01",
+        "W1-02"
+      ],
+      "release_gate_ids": [
+        "R2"
+      ],
+      "implementation_note": "有来源/有效期的记忆、老师审核模型提议、学生偏好目标、当前题提醒与学情摘要已有实现和自动化；真实记忆有用性、网页改动/撤销后的展示及跨设备连续性待联合验收。",
+      "acceptance_success": "学生在网页查看有依据的长期提醒并管理自己的偏好/目标；老师审核或修订记忆与摘要，事实引用可追溯，换设备仍为同一学员档案",
+      "acceptance_failure": "模型提议未审核不成为事实；证据撤销后依赖记忆和摘要失效；不得引用不存在证据、跨生记忆或把短时停留推断为能力；未知事实保持未知"
+    },
+    {
+      "id": "W1-04",
+      "title": "每日反馈、半月报告与家长网页",
+      "owner_hint": "FE+BE+现场负责人",
+      "priority": "P0",
+      "status": "in_progress",
+      "acceptance_status": "pending",
+      "dependency_ids": [
+        "P1-10",
+        "W1-01",
+        "W1-02",
+        "W1-03"
+      ],
+      "release_gate_ids": [
+        "R2"
+      ],
+      "implementation_note": "每日/半月草稿、老师编辑发布、更正版本、限期可撤销分享链接和家长网页已有工程；当前网页将published显示为已发送，人工发送确认缺少持久业务记录，需要区分发布、复制和确认发送。真实报告理解度、老师工时和事实变更联合验证待完成。",
+      "acceptance_success": "老师在网页核对并发布每日/半月反馈，家长通过有效链接查看最新发布与更正记录；按上海时区保存观察窗口、真实分母与帮助；发布、复制消息、人工确认发送分别记录，不伪造渠道送达",
+      "acceptance_failure": "仍有未核实事实或投影滞后时明确范围并阻止误发布；原错误被撤销后不得继续写成订正；过期/撤销链接不可读；旧版本不得冒充最新，复制链接不自动记为已发送或已送达"
+    },
+    {
+      "id": "W1-05",
+      "title": "审核题库与举一反三",
+      "owner_hint": "FE+BE+学科负责人",
+      "priority": "P0",
+      "status": "engineering_complete",
+      "acceptance_status": "pending",
+      "dependency_ids": [
+        "P1-07",
+        "W1-01",
+        "W1-02"
+      ],
+      "release_gate_ids": [
+        "R2"
+      ],
+      "implementation_note": "候选题审核、知识点与题族标注、选做窗口、举一反三及作答记录已有服务和网页实现；首批真实题库审核、门禁操作负担和使用体验尚待验收。",
+      "acceptance_success": "老师在网页审核题目并按实际有余力开放选做窗口；学校任务完成且学生当次愿意才开始，按需提供提示，记录帮助和活动来源，预算用尽或退出即结束",
+      "acceptance_failure": "未审核题目不能被学生选用；未知门禁按未满足处理；重复开始/提交不重复记作答；跳过或退出无扣分无补做，不将活动结果写成学校作业独立证据"
+    },
+    {
+      "id": "W1-06",
+      "title": "预习与自愿小测",
+      "owner_hint": "FE+BE+学科负责人",
+      "priority": "P0",
+      "status": "engineering_complete",
+      "acceptance_status": "pending",
+      "dependency_ids": [
+        "W1-01",
+        "W1-02",
+        "W1-05"
+      ],
+      "release_gate_ids": [
+        "R2"
+      ],
+      "implementation_note": "依据学习档案的当前课次预习、前置状态展示、自愿小测和随时退出已有实现与自动化；教材课次及审核内容、真实网页操作与现场负担待验收。",
+      "acceptance_success": "学生在网页基于已知当前课次查看预习目标和前置状态，自愿选择最多3题的小测；学校任务完成、有余力、当次愿意与时间预算门禁仅作用于系统建议的额外预习和自愿小测，学校布置的预习照常可用；不参加额外活动也可正常完成当天流程",
+      "acceptance_failure": "未知课次不猜课；未审核内容不发布；小测不提供提示，无法可靠评分记为unscorable；退出不欠补做，选做结果不计入知识状态，也不作为报告生成前提"
+    },
+    {
+      "id": "W1-07",
+      "title": "四角色完整网页联合验收",
+      "owner_hint": "QA+TL+现场负责人",
+      "priority": "P0",
+      "status": "not_started",
+      "acceptance_status": "pending",
+      "dependency_ids": [
+        "P1-16",
+        "W1-01",
+        "W1-02",
+        "W1-03",
+        "W1-04",
+        "W1-05",
+        "W1-06"
+      ],
+      "release_gate_ids": [
+        "R2"
+      ],
+      "implementation_note": "完整网页联合验收尚未执行。本项汇总学生、老师、管理员、家长的业务与异常证据；已有模块自动化、Android构建和核心试点均不能独立代替R2。",
+      "acceptance_success": "在声明浏览器和真实使用范围内完成四角色全部正常/异常流程；改判与删除贯穿图谱、记忆、报告；连续使用数据、教研审核、老师容量、成本、部署恢复与交接证据齐全，核心16项及其他6项网页模块均已验收",
+      "acceptance_failure": "任一必需业务只可通过API/脚本完成、页面为空或未审核内容开放，均不能通过；不能把模拟/旧平台记录当真实证据；等待/人工超容量、数据丢失、越权、证据不一致或阻断缺陷未关闭，均阻断R2"
+    }
+  ],
+  "status_rebaseline": {
+    "updated_at": "2026-10-17",
+    "previous_scope": "phase1_correction_app",
+    "reason": "用户确认完整网页先交付，个人图谱、长期AI、家长报告与自愿活动纳入本期，App后续移植。",
+    "historical_progress_note": "14/16 engineering_complete为旧Android纠错范围统计，保留VALIDATION历史，不回写或推定网页完成度。",
+    "reopened_core_ids": [
+      "P1-03",
+      "P1-11",
+      "P1-13",
+      "P1-15"
+    ],
+    "runtime_features_implemented_by_scope_update": false
+  },
+  "acceptance_status_semantics": {
+    "pending": "验收证据未齐或未签收；本次全部任务及C0/R1/R2均为此状态",
+    "accepted": "声明范围的正常/异常流程及依赖证据齐全，并由明确负责人签收；必须附证据与对应版本",
+    "blocked": "验收发现阻断问题，需要记录问题与重新验收范围"
   }
 }

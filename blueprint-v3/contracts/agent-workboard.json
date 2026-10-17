@@ -14,7 +14,7 @@
     "C0": "not_passed",
     "R1": "not_passed",
     "R2": "not_passed",
-    "note": "C0 系统行为已自动化（services/backend/tests/test_c0_acceptance.py）；模型质量须在冻结样本上评测，R1/R2 需真机与现场试点。"
+    "note": "本轮 C0 为纠错主流程、R1 为声明范围受控网页试点、R2 为 16 项核心与 7 项完整网页任务的联合交付。系统行为测试不替代原图质量、实体浏览器与现场证据；原生 App 验收后置。"
   },
   "items": [
     {
@@ -413,5 +413,41 @@
     "embedding_dimensions": 2048,
     "live_validation": "synthetic_protocol_only",
     "production_integration": false
+  },
+  "items_scope": "historical_agent_deliveries",
+  "items_are_current_dispatch_queue": false,
+  "current_execution": {
+    "decision": "complete_web_first_app_migration_later",
+    "confirmed_by_user": true,
+    "decided_at": "2026-10-17",
+    "source_document": "../../docs/WEB_ROADMAP.md",
+    "task_source": "phase1-backlog.json",
+    "task_arrays": [
+      "items",
+      "web_module_items"
+    ],
+    "next_task_ids": [
+      "P1-01",
+      "P1-03",
+      "P1-05",
+      "P1-06",
+      "P1-11",
+      "P1-13",
+      "P1-14",
+      "P1-15",
+      "W1-01",
+      "W1-04"
+    ],
+    "full_web_module_ids": [
+      "W1-01",
+      "W1-02",
+      "W1-03",
+      "W1-04",
+      "W1-05",
+      "W1-06",
+      "W1-07"
+    ],
+    "note": "本对象只索引当前任务，任务状态以 phase1-backlog.json 为准。下方 A～F items、execution_round 与 external_provider_decision 保留历史轮次数据，不据其旧分期派发或推断当前功能完成。其他本轮网页模块可按依赖并行收口。",
+    "app_migration": "after_full_web_delivery"
   }
 }
