@@ -16,7 +16,7 @@
   └─► 选做：practice_items / optional_windows / practice_sessions / practice_responses
 ```
 
-纠错代码不依赖学习层。学习层通过 `learning_outbox` 持久任务（事务性 outbox，至少一次、消费幂等）与共用 Worker 进程运行；学生删除时由 `register_downstream_purger` 注册的清除函数逐表删除。迁移为 `0006_learning_graph` 至 `0010_daily_feedback`。
+纠错代码不依赖学习层。学习层通过 `learning_outbox` 持久任务（事务性 outbox，至少一次、消费幂等）与共用 Worker 进程运行；学生删除时由 `register_downstream_purger` 注册的清除函数逐表删除。迁移为 `0006_learning_graph` 至 `0011_share_delivery`。
 
 ## 个人知识图谱
 

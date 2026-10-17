@@ -8,16 +8,16 @@
 
 | 交接件 | 现有基础与剩余工作 | 位置 / 任务 |
 |---|---|---|
-| 学生网页纠错 | 账号登录、上传、检查、提示、订正再检和历史已有工程；多页拍摄/上传、排序、旋转裁切、历史浏览及真实平板异常恢复按完整网页范围补齐并验收 | [apps/student-web](../apps/student-web/README.md)、[WEB_LOCAL_RUN](WEB_LOCAL_RUN.md)；P1-03～P1-13 |
+| 学生网页纠错 | 账号登录、多页采集编辑（≤4 页、单页≤4 MiB、合计≤8 MiB，排序/旋转/裁切/重拍/删除）、检查、提示、订正再检、历史逐页回看与草稿持久恢复已有工程和自动化；真实平板拍摄、弱网和缓存清除等异常恢复待验收 | [apps/student-web](../apps/student-web/README.md)、[WEB_LOCAL_RUN](WEB_LOCAL_RUN.md)；P1-03～P1-13 |
 | 老师网页 | 登录、复核队列、原图/识别核对、接单、改判与识别修订已有工程；实际复核效率、未确认写入和页面刷新恢复待验收 | [apps/staff-web](../apps/staff-web/README.md)；P1-09、P1-10、P1-13 |
-| 管理员网页 | 复用已有账号与权限后端；学员/教材档案、老师开户/重置、校区授权与既有学情/运行指标的完整网页操作待补齐和验收 | [ACCOUNT_FOUNDATION](ACCOUNT_FOUNDATION.md)；W1-01 |
+| 管理员网页 | 管理员登录学生网页进入管理控制台：学员账号、老师账号（创建、多校区授权、可加数据治理角色、重置密码、修改授权与停用/恢复）与校区运行指标；老师网页学习档案支持五至九年级并显示本校选用教材。校区新建与管理员授权仍走运维脚本，管理员网页真实浏览器流程待验收 | [ACCOUNT_FOUNDATION](ACCOUNT_FOUNDATION.md)；W1-01 |
 | 知识图谱与长期 AI | 知识点候选/确认、证据与图谱、长期记忆、偏好和目标已有实现；课程图谱仍需教研审核，事实引用、撤销传播及学生/老师网页操作待验收 | [LEARNING_LAYER](LEARNING_LAYER.md)；W1-02、W1-03 |
-| 每日反馈、半月报告与家长网页 | 草稿、发布、更正、分享链接、有效期/撤销及家长页面已有实现；发布、复制消息、人工确认发送状态待收口，实际反馈工时和内容质量待验收 | [LEARNING_LAYER](LEARNING_LAYER.md)；W1-04 |
+| 每日反馈、半月报告与家长网页 | 草稿、发布、更正、分享链接、有效期/撤销及家长页面已有实现；发布、复制消息、老师确认发送与家长打开分别持久记录并在老师网页显示；实际反馈工时和内容质量待验收 | [LEARNING_LAYER](LEARNING_LAYER.md)；W1-04 |
 | 审核题库与举一反三 | 已有题库审核与自愿活动工程；内容审核、学校任务完成/老师确认有余力/孩子自愿三项门禁，以及退出体验待验收 | [LEARNING_LAYER](LEARNING_LAYER.md)；W1-05 |
 | 预习与自愿小测 | 已有工程；题库内容、网页操作、跳过退出与帮助条件保存待验收，不以额外做题作为纠错完成条件 | [LEARNING_LAYER](LEARNING_LAYER.md)；W1-06 |
 | 四角色联合验收 | 以同一条真实作业与订正证据贯通学生、老师、管理员和家长；全部模块正常/异常流程、权限、更正和历史连续性待验收 | [PILOT](runbooks/PILOT.md)、[DEVICE_MATRIX](runbooks/DEVICE_MATRIX.md)；W1-07 |
 
-每日反馈的当前能力是发布、生成链接并复制消息供老师发送；**复制消息不代表真实发送或渠道送达**。现有 `view_count` 可作为链接访问记录，不能据此证明特定家长已阅读。人工确认发送的记录与页面状态需按 W1-04 完成；未接入真实发送渠道时，不宣称已有送达回执。
+每日反馈的流程是发布、生成链接并复制消息，由老师自行发给家长，发出后在页面点“我已发给家长”（可注明发送方式）。系统分别记录复制时间、老师确认发送的时间与确认人、链接在该版本发布后被打开的时间。**复制消息不代表真实发送，老师确认也不是渠道送达回执**；链接被打开只说明有人打开了链接，不能证明是特定家长阅读。
 
 ## 共用服务、运行与验收资料
 
@@ -26,7 +26,7 @@
 | 后端服务与 Worker | 工程已具备；完整网页并发、任务恢复、学习层刷新和现场运行待验收 | [services/backend](../services/backend/README.md) |
 | 网页构建与托管 | 学生和老师网页已有构建与后端同源托管；完整角色入口、生产域名及浏览器矩阵待验收 | [WEB_LOCAL_RUN](WEB_LOCAL_RUN.md)、[DEPLOY](runbooks/DEPLOY.md) |
 | 正式接口 | 已有 `0.1.0-draft` 契约与 CI 校验；完整网页扩展接口的文档、响应校验和版本兼容须一并交接 | [contracts/phase1](../contracts/phase1/README.md) |
-| 数据库迁移 | 已有 `0001 → 0010` 与验证记录；升级、回滚范围和备份恢复结果须绑定交付版本 | `services/backend/migrations/versions/` |
+| 数据库迁移 | 已有 `0001 → 0011` 与验证记录；升级、回滚范围和备份恢复结果须绑定交付版本 | `services/backend/migrations/versions/` |
 | 部署产物与配置模板 | 工程已具备，实际生产配置由项目方落实 | `infra/compose.yaml`、`infra/Dockerfile`、`infra/Caddyfile`、`infra/xueban.env.example`、`infra/model.env.example` |
 | 部署、升级与回滚 | 已有手册和 CI Deployment smoke；目标环境的升级与失败回滚演练待完成 | [DEPLOY](runbooks/DEPLOY.md) |
 | 备份、恢复与删除重放 | 已具备脚本与手册；含图片、原作答、订正、改判、报告和删除记录的实际恢复演练待完成 | [BACKUP_RESTORE](runbooks/BACKUP_RESTORE.md)、`infra/scripts/` |

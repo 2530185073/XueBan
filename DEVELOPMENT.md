@@ -21,7 +21,7 @@
 | `apps/staff-web/` | 坐班工作台、学情、内容审核和报告 | 真实接口联调；老师开户/重置入口、未知写入恢复和反馈状态 |
 | `services/backend/` | 账号、授权、私有图片、版本化作答、纠错与学习服务、持久任务 | 生产使用 PostgreSQL；复用现有 API 与迁移，补队列和业务恢复验证 |
 | `services/backend/xueban_backend/providers/` | 模型候选与独立向量适配 | 沿用项目现有模型与纯模型识别决定；按样本和版本评测 |
-| `services/backend/migrations/` | 实际 Alembic 迁移 | 现有链至 0010；追加迁移需核对旧数据、回滚和身份连续性 |
+| `services/backend/migrations/` | 实际 Alembic 迁移 | 现有链至 0011；追加迁移需核对旧数据、回滚和身份连续性 |
 | `contracts/phase1/` | 纠错 OpenAPI、状态、请求和事件契约 | 服务与两个网页校验器同步；学习接口按实际后端核对 |
 | `evals/correction/` | 计分、重放与回归比较 | 补原图端到端质量与各上线切片的绝对发布判定 |
 | `infra/`、`docs/runbooks/` | 部署、备份恢复、运行与现场交接 | 已有工程脚本；真实业务关系恢复、峰值容量与现场证据待完成 |

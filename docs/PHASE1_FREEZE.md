@@ -23,9 +23,9 @@
 | 项目 | 已有内容 | 证据 |
 |---|---|---|
 | 学段与教材 | 初中、人教版；交付只对声明的年级、册次、修订版和题型计分 | [PHASE1](../PHASE1.md)、[CURRICULUM_RESOURCES](../CURRICULUM_RESOURCES.md) |
-| 账号与归属 | 一学员一账号（用户名＋密码），账号绑定固定 `student_id`；首登强制改密；坐班老师由校区管理员开通。老师开户/重置等网页管理操作仍需按 W1-01 收口 | [ACCOUNT_FOUNDATION](ACCOUNT_FOUNDATION.md)、`services/backend/tests/test_account_auth.py` |
+| 账号与归属 | 一学员一账号（用户名＋密码），账号绑定固定 `student_id`；首登强制改密；坐班老师由校区管理员在管理控制台开通、重置、调整校区授权和停用；管理员网页仍需按 W1-01 现场验收 | [ACCOUNT_FOUNDATION](ACCOUNT_FOUNDATION.md)、`services/backend/tests/test_account_auth.py` |
 | 接口与数据结构 | `contracts/phase1` 已有 32 个操作、4 份 JSON Schema；`Problem` 列出对应错误码；前端校验器由契约生成。完整网页新增/扩展接口需同步纳入契约和校验范围 | `contracts/phase1/validate.py`、两端 `contracts:check` |
-| 数据库迁移 | Alembic 链 `0001 → 0010`，已有 SQLite 与 PostgreSQL 双库验证记录 | `services/backend/migrations/versions/` |
+| 数据库迁移 | Alembic 链 `0001 → 0011`，已有 SQLite 与 PostgreSQL 双库验证记录 | `services/backend/migrations/versions/` |
 | 纠错规则 | 模型输出只作候选；老师确认才成为正式结论；看过提示后的作答不能记为独立；订正永不算独立 | [blueprint-v3/10](../blueprint-v3/10-纠错核心流程与首发验收.md)、`test_c0_acceptance.py` |
 | 学习规则版本 | `r1.2-custody`，规则变更触发重算；图谱、记忆、报告等已有工程实现，教研审核与实际质量仍待验收 | `services/backend/xueban_backend/learning_rules.py`、[LEARNING_LAYER](LEARNING_LAYER.md) |
 | 模型服务 | BytePlus ModelArk AP，五角色统一模型 `deepseek-v4-1-flash-260910`，严格 JSON 解析与本地 Schema 校验 | [MODEL_SERVICE_PLAN](../MODEL_SERVICE_PLAN.md) |
