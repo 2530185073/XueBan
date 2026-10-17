@@ -294,9 +294,24 @@ class CorrectionPipeline:
             "coverage 记录未识别处，不能声明整页已无遗漏；若整页看不清，返回空 items 并说明。",
             RECOGNITION_SCHEMA, thinking=False)
         data = deepcopy(result.data)
+        inside = lambda r: r["asset_id"] not in images or (  # noqa: E731  (foreign assets fail below)
+            r["x"] + r["width"] <= images[r["asset_id"]].width_px and r["y"] + r["height"] <= images[r["asset_id"]].height_px)
         try:
             seen = set()
+            # One impossible box must not discard every other question on the page: drop it, keep the
+            # item for human review, never stretch or clip it into a location the model did not report.
+            unrecognized = data["coverage"]["unrecognized_regions"]
+            data["coverage"]["unrecognized_regions"] = [r for r in unrecognized if inside(r)]
+            if len(data["coverage"]["unrecognized_regions"]) != len(unrecognized) and not data["coverage"]["note"]:
+                data["coverage"]["note"] = "部分未识别区域的位置超出图片范围，已舍弃；不能视为整页已无遗漏。"
             self._regions(data["coverage"]["unrecognized_regions"], images, path=("coverage", "unrecognized_regions"))
+            for item in data["items"]:
+                kept = {name: [r for r in item[name] if inside(r)] for name in ("regions", "answer_regions")}
+                if any(len(kept[name]) != len(item[name]) for name in kept):
+                    item.update(kept)
+                    note = "模型给出的位置超出图片范围，已舍弃，需核实题目或作答位置。"
+                    if note not in item["uncertainties"]:
+                        item["uncertainties"] = [*item["uncertainties"], note][-20:]
             for index, item in enumerate(data["items"]):
                 for field_name in ("stem_text", "answer_text"):
                     item[field_name] = _strip_field_label(item[field_name], field_name)

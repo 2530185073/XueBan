@@ -24,7 +24,9 @@ export function uploadState(d: Pick<DraftSummary, 'stage' | 'homeworkId' | 'page
   if (d.pageCount && !d.uploadedCount) return { label: d.stage === 'local' ? `${pages}只在这台设备，还没上传` : `${pages}还在这台设备，尚未上传完成`, tone: 'amber' }
   if (d.uploadedCount < d.pageCount) return { label: `已上传 ${d.uploadedCount} / ${d.pageCount} 页，其余还在这台设备`, tone: 'amber' }
   if (!d.homeworkId) return { label: '还没有送到服务器', tone: 'amber' }
-  return d.stage === 'complete' ? { label: '服务器已收到，可以查看结果', tone: 'green' } : { label: '服务器已收到照片，正在处理', tone: 'neutral' }
+  if (d.stage === 'complete') return { label: '服务器已收到，可以查看结果', tone: 'green' }
+  if (d.stage === 'failed') return { label: '照片已保存在服务器，处理未完成，可重试', tone: 'amber' }
+  return { label: '服务器已收到照片，正在处理', tone: 'neutral' }
 }
 export const stageLabels: Record<DraftStage, string> = { local: '照片已备好', creating: '保存作业', uploading: '上传照片', recognizing: '读题与作答', checking: '逐题检查', complete: '可查看结果', failed: '这次尚未完成', waiting: '进度已保留' }
 export function dateLabel(value: string): string { const date = new Date(value); return Number.isNaN(date.getTime()) ? '时间待确认' : new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(date) }

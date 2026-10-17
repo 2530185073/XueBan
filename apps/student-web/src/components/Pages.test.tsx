@@ -63,12 +63,13 @@ describe('local versus received', () => {
     expect(uploadState({ stage: 'local', homeworkId: null, pageCount: 3, uploadedCount: 0 }).label).toBe('3 页照片只在这台设备，还没上传')
     expect(uploadState({ stage: 'failed', homeworkId: 'homework_one', pageCount: 3, uploadedCount: 1 }).label).toBe('已上传 1 / 3 页，其余还在这台设备')
     expect(uploadState({ stage: 'recognizing', homeworkId: 'homework_one', pageCount: 2, uploadedCount: 2 })).toEqual({ label: '服务器已收到照片，正在处理', tone: 'neutral' })
+    expect(uploadState({ stage: 'failed', homeworkId: 'homework_one', pageCount: 1, uploadedCount: 1 }).label).toContain('处理未完成')
     expect(uploadState({ stage: 'complete', homeworkId: 'homework_one', pageCount: 0, uploadedCount: 0 }).tone).toBe('green')
   })
   it('lists unfinished drafts to continue, with delete only for ones that sent nothing', () => {
     const drafts = [{ ...draftOf([localPage('a'), localPage('b')]), id: 'draft_local' }, { ...draftOf([localPage('c', { uploaded: true })], { stage: 'failed', homeworkId: 'homework_one' }), id: 'draft_sent', title: '数学作业' }, { ...draftOf([], { stage: 'complete' }), id: 'draft_done' }]
     const html = renderToStaticMarkup(<ResumeDrafts workspace={{ ...workspace, drafts } as unknown as Workspace} onOpen={() => {}} />)
-    expect(html).toContain('上次没做完的'); expect(html).toContain('2 页照片只在这台设备，还没上传'); expect(html).toContain('服务器已收到照片，正在处理')
+    expect(html).toContain('上次没做完的'); expect(html).toContain('2 页照片只在这台设备，还没上传'); expect(html).toContain('处理未完成，可重试'); expect(html).not.toContain('正在处理')
     expect(html.match(/删除草稿/g)).toHaveLength(1); expect(html.match(/继续/g)).toHaveLength(2)
     expect(renderToStaticMarkup(<ResumeDrafts workspace={workspace} onOpen={() => {}} />)).toBe('')
   })

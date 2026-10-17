@@ -193,10 +193,25 @@ def test_unknown_coordinates_remain_unknown_without_fabricated_full_page_box():
     assert item["recognition_status"] == "needs_revision"
 
 
-@pytest.mark.parametrize("change", ["outside", "foreign_asset", "duplicate_blank", "present_without_text", "blank_with_text", "confirmed", "declared_complete"])
+def test_out_of_bounds_box_is_dropped_for_review_without_failing_the_page():
+    data = recognition()
+    data["items"].append({**deepcopy(data["items"][0]), "label": "第2题"})
+    data["items"][1]["answer_regions"] = [region(x=0.9, width=0.2)]
+    data["coverage"]["unrecognized_regions"] = [region(x=0.9, width=0.2)]
+    with pipeline([data]) as flow:
+        result = flow.recognize(images=(picture(),)).data
+    first, second = result["items"]
+    assert first["uncertainties"] == data["items"][0]["uncertainties"]
+    assert first["answer_regions"] == data["items"][0]["answer_regions"]
+    assert second["answer_regions"] == [] and second["regions"] == data["items"][1]["regions"]
+    assert second["recognition_status"] == "needs_revision"
+    assert any("超出图片范围" in note for note in second["uncertainties"])
+    assert result["coverage"]["unrecognized_regions"] == [] and "超出图片范围" in result["coverage"]["note"]
+
+
+@pytest.mark.parametrize("change", ["foreign_asset", "duplicate_blank", "present_without_text", "blank_with_text", "confirmed", "declared_complete"])
 def test_invalid_recognition_preserves_billable_attempt_and_fails_closed(change):
     data = recognition()
-    if change == "outside": data["items"][0]["regions"] = [region(x=0.9, width=0.2)]
     if change == "foreign_asset": data["items"][0]["regions"] = [region("asset_other")]
     if change == "duplicate_blank": data["items"].append(deepcopy(data["items"][0]))
     if change == "present_without_text": data["items"][0]["answer_text"] = None
@@ -210,7 +225,6 @@ def test_invalid_recognition_preserves_billable_attempt_and_fails_closed(change)
     assert failure.value.attempts[-1].charge_status == "unknown"
     assert SECRET not in str(failure.value)
     expected = {
-        "outside": ("candidate_semantics", "region_bounds", ("items", 0, "regions", 0)),
         "foreign_asset": ("candidate_semantics", "unknown_asset", ("items", 0, "regions", 0, "asset_id")),
         "duplicate_blank": ("candidate_semantics", "duplicate_label", ("items", 1, "label")),
         "present_without_text": ("candidate_semantics", "answer_status_conflict", ("items", 0, "answer_text")),
