@@ -263,8 +263,35 @@ class CorrectionPipeline:
                                 latency_ms=result.metadata.latency_ms) from None
         return result
 
+    @staticmethod
+    def _mostly_unlocated(data):
+        items = data["items"]
+        return bool(items) and 2 * sum(1 for i in items if i["location_status"] != "located") > len(items)
+
+    @staticmethod
+    def _ledger(result, attempts, latency_ms):
+        """Keep every billable call in the ledger, whichever candidate is used."""
+        return replace(result, metadata=replace(result.metadata, attempts=attempts, latency_ms=latency_ms))
+
     def recognize(self, *, images: tuple[PipelineImage, ...]) -> PipelineResult:
         images = self._images(images)
+        first = self._recognize_once(images)
+        if not self._mostly_unlocated(first.data):
+            return first
+        # A question record needs a real position on the photo. When the model read the page but left
+        # most positions out, ask once more and keep whichever answer locates more questions.
+        try:
+            second = self._recognize_once(images, "上一次输出读出了题目，但大多数题没有给出位置。"
+                                          "这一次请为每道能在图上看到的题给出题干 regions 与作答 answer_regions 的原图像素框；"
+                                          "只有确实无法在图上找到的题才留空数组，仍不能用全页框代替。")
+        except ProviderError as failure:
+            return self._ledger(first, (*first.metadata.attempts, *failure.attempts), first.metadata.latency_ms + failure.latency_ms)
+        located = lambda r: sum(1 for i in r.data["items"] if i["location_status"] == "located")  # noqa: E731
+        chosen = second if located(second) > located(first) else first
+        return self._ledger(chosen, (*first.metadata.attempts, *second.metadata.attempts),
+                            first.metadata.latency_ms + second.metadata.latency_ms)
+
+    def _recognize_once(self, images, retry_note=""):
         result = self._call("recognition", images,
             "输出格式：最外层必须直接包含 items 和 coverage 两个键，且只能有这两个键。"
             "不添加 status、candidate、metadata、顶层 uncertainties，也不使用 data、result 或 response 包装。"
@@ -291,7 +318,7 @@ class CorrectionPipeline:
             "无法辨认必须为 unclear。present 必须有非空 answer_text；blank 的 answer_text 必须为 null。"
             "每项用 asset_id 绑定图片。regions 是题干区域，answer_regions 是本空作答区域；坐标必须为"
             "该原图实际像素坐标，不能猜测；无法定位就返回空数组，不能用全页框冒充定位。"
-            "coverage 记录未识别处，不能声明整页已无遗漏；若整页看不清，返回空 items 并说明。",
+            "coverage 记录未识别处，不能声明整页已无遗漏；若整页看不清，返回空 items 并说明。" + retry_note,
             RECOGNITION_SCHEMA, thinking=False)
         data = deepcopy(result.data)
         inside = lambda r: r["asset_id"] not in images or (  # noqa: E731  (foreign assets fail below)

@@ -186,11 +186,44 @@ def test_unreadable_page_is_explicit_empty_recognition_not_all_correct():
 def test_unknown_coordinates_remain_unknown_without_fabricated_full_page_box():
     data = recognition()
     data["items"][0].update(regions=[], answer_regions=[], uncertainties=["无法定位到原图像素区域。"])
-    with pipeline([data]) as flow:
-        item = flow.recognize(images=(picture(),)).data["items"][0]
+    requests = []
+    with pipeline([data, data], requests) as flow:
+        result = flow.recognize(images=(picture(),))
+    item = result.data["items"][0]
     assert item["regions"] == item["answer_regions"] == []
     assert item["location_status"] == "unknown"
     assert item["recognition_status"] == "needs_revision"
+    # One more request for positions, both billed; never a fabricated box.
+    assert len(requests) == 2 and len(result.metadata.attempts) == 2
+    assert "大多数题没有给出位置" in requests[1]["messages"][0]["content"]
+    assert "大多数题没有给出位置" not in requests[0]["messages"][0]["content"]
+
+
+def test_missing_positions_are_asked_for_once_and_the_better_located_answer_is_kept():
+    unlocated = recognition()
+    unlocated["items"][0].update(regions=[], answer_regions=[])
+    with pipeline([unlocated, recognition()]) as flow:
+        result = flow.recognize(images=(picture(),))
+    assert result.data["items"][0]["location_status"] == "located"
+    assert len(result.metadata.attempts) == 2
+
+
+def test_failed_position_retry_keeps_the_first_answer_and_both_attempts():
+    unlocated = recognition()
+    unlocated["items"][0].update(regions=[], answer_regions=[])
+    broken = recognition()
+    broken["items"][0]["answer_text"] = None
+    with pipeline([unlocated, broken]) as flow:
+        result = flow.recognize(images=(picture(),))
+    assert result.data["items"][0]["location_status"] == "unknown"
+    assert [a.code for a in result.metadata.attempts] == ["ok", "invalid_output"]
+
+
+def test_located_recognition_is_not_repeated():
+    requests = []
+    with pipeline([recognition()], requests) as flow:
+        flow.recognize(images=(picture(),))
+    assert len(requests) == 1
 
 
 def test_out_of_bounds_box_is_dropped_for_review_without_failing_the_page():
