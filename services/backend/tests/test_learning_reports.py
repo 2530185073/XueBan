@@ -199,6 +199,40 @@ def test_daily_feedback_is_drafted_the_same_day_and_lists_what_to_correct(flow, 
     assert "老师发送后又更新了今天的情况" in page and "今天错的题和订正情况" not in page
 
 
+def test_daily_feedback_keeps_publish_copy_confirmed_send_and_opened_apart(flow, same_day):
+    case = reviewed(flow)
+    teacher(flow)
+    link(flow, review(flow, case))
+    learning(flow).drain()
+    [draft] = reports(flow, "daily")
+    assert publish(flow, draft).status_code == 200
+    queue = f"/v1/reports?cadence=daily&status=published&period_start={same_day}"
+    [published] = flow.client.get(queue).json()["items"]
+    assert published["delivery"] == {"links": 0, "copied": False, "sent_confirmed_at": None, "opened_at": None}
+    created = flow.client.post(f"/v1/reports/{draft['id']}/share-links", json={"expires_in_days": 7}).json()
+    assert created["message_copied_at"] is None and created["sent_confirmed_at"] is None
+    [published] = flow.client.get(queue).json()["items"]
+    assert published["delivery"]["links"] == 1 and not published["delivery"]["copied"] and published["delivery"]["sent_confirmed_at"] is None
+
+    copied = flow.client.post(f"/v1/report-share-links/{created['id']}/copied")
+    assert copied.status_code == 200 and copied.json()["message_copied_at"]
+    assert flow.client.get(queue).json()["items"][0]["delivery"]["sent_confirmed_at"] is None
+    sent = flow.client.post(f"/v1/report-share-links/{created['id']}/confirm-sent", json={"note": "已发妈妈微信"})
+    assert sent.status_code == 200 and sent.json()["sent_confirmed_at"] and sent.json()["sent_note"] == "已发妈妈微信"
+    again = flow.client.post(f"/v1/report-share-links/{created['id']}/confirm-sent", json={"note": "改一下"}).json()
+    assert again["sent_confirmed_at"] == sent.json()["sent_confirmed_at"] and again["sent_note"] == "已发妈妈微信"
+    delivery = flow.client.get(queue).json()["items"][0]["delivery"]
+    assert delivery["copied"] and delivery["sent_confirmed_at"] and delivery["opened_at"] is None
+
+    flow.client.get(created["path"], headers={"Authorization": ""})
+    assert flow.client.get(queue).json()["items"][0]["delivery"]["opened_at"]
+
+    other = flow.client.post(f"/v1/reports/{draft['id']}/share-links", json={}).json()
+    flow.client.post(f"/v1/report-share-links/{other['id']}/revoke")
+    assert flow.client.post(f"/v1/report-share-links/{other['id']}/confirm-sent", json={}).status_code == 409
+    assert flow.client.post("/v1/report-share-links/share_missing/copied").status_code == 404
+
+
 def test_daily_feedback_can_be_requested_for_today_but_not_tomorrow(flow, same_day):
     reviewed(flow)
     body = {"period_start": same_day, "cadence": "daily"}

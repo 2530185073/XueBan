@@ -1,6 +1,6 @@
 import type { AttemptRead, Hint } from './api/contracts.generated'
 import type {
-  AgentRun, AssistanceInput, Certainty, Evidence, GateReason, KnowledgeLink, KnowledgeNode, LearningStatus, LinkRole, Memory, MemoryInput, MemoryStatus,
+  AgentRun, AssistanceInput, Certainty, Delivery, Evidence, GateReason, KnowledgeLink, KnowledgeNode, LearningStatus, LinkRole, Memory, MemoryInput, MemoryStatus,
   Report, StaffMemoryCategory,
 } from './api/learningTypes'
 
@@ -213,6 +213,19 @@ export function dayLabel(value: string, at: number): string {
 }
 
 /** The text a teacher pastes into the guardian chat; the link is the only personal data in it besides the name. */
+/** Row label for a guardian feedback: publishing, copying and a teacher's send confirmation are separate facts;
+ * none of them proves delivery, only a link being opened shows the guardian read it. */
+export function deliveryLabel(report: { status: string; supersedes_id: string | null; delivery: Delivery | null } | null): [string, string] {
+  if (!report) return ['今天没有记录', 'muted']
+  if (report.status === 'draft') return report.supersedes_id ? ['有更新待发布', 'rose'] : ['待核对发布', 'amber']
+  const delivery = report.delivery
+  if (delivery?.opened_at) return ['家长已打开', '']
+  if (delivery?.sent_confirmed_at) return ['老师已确认发送', '']
+  if (delivery?.copied) return ['已复制，待确认发送', 'amber']
+  if (delivery && delivery.links > 0) return ['已生成链接，未复制', 'amber']
+  return ['已发布，未发给家长', 'amber']
+}
+
 export function dailyMessage(name: string, value: string, url: string): string {
   const [, month, dayOfMonth] = value.split('-').map(Number)
   return `【学伴】${name} ${month}月${dayOfMonth}日的学习反馈已整理好（今天交的作业、错题订正情况和老师的话），请点开查看：${url}`

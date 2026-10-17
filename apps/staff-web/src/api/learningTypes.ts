@@ -216,7 +216,9 @@ export interface Report {
   staff_note: string | null; next_step: string | null; correction_note: string | null; supersedes_id: string | null; published_at: string | null
   revision: number; regenerated_reason: string | null; updated_at: string | null
 }
-export interface QueuedReport extends Report { focus_count: number; mistake_count: number; sufficient: boolean; student_name: string | null }
+export interface Delivery { links: number; copied: boolean; sent_confirmed_at: string | null; opened_at: string | null }
+export interface QueuedReport extends Report { focus_count: number; mistake_count: number; sufficient: boolean; student_name: string | null; delivery: Delivery | null }
+const isDelivery = (value: unknown): value is Delivery => record(value) && count(value.links) && typeof value.copied === 'boolean' && optTime(value.sent_confirmed_at) && optTime(value.opened_at)
 
 const isCard = (value: unknown): value is EvidenceCard => record(value) && id(value.evidence_id) && day(value.date) && optStr(value.homework_title) &&
   (value.page === null || count(value.page)) && str(value.question, 500) && text(value.result, 32) && text(value.assistance, 64) && optStr(value.staff_explanation) && text(value.certainty, 32)
@@ -256,14 +258,20 @@ export function isReportList(value: unknown): value is { items: Report[] } {
 export function isReportQueue(value: unknown): value is { items: QueuedReport[] } {
   return record(value) && list(value.items, item => {
     const extra = item as unknown as Record<string, unknown>
-    return isReportBase(item) && item.snapshot === null && count(extra.focus_count) && count(extra.mistake_count) && typeof extra.sufficient === 'boolean' && optStr(extra.student_name)
+    return isReportBase(item) && item.snapshot === null && count(extra.focus_count) && count(extra.mistake_count) && typeof extra.sufficient === 'boolean' && optStr(extra.student_name) &&
+      (extra.delivery == null || isDelivery(extra.delivery))
   }, 200) && (value.next_offset === null || count(value.next_offset))
 }
 
-export interface ShareLink { id: string; report_id: string; created_at: string; expires_at: string; revoked_at: string | null; view_count: number; last_viewed_at: string | null }
+export interface ShareLink {
+  id: string; report_id: string; created_at: string; expires_at: string; revoked_at: string | null; view_count: number; last_viewed_at: string | null
+  message_copied_at?: string | null; sent_confirmed_at?: string | null; sent_confirmed_by?: string | null; sent_note?: string | null
+}
 export interface CreatedShareLink extends ShareLink { token: string; path: string }
 export function isShareLink(value: unknown): value is ShareLink {
-  return record(value) && id(value.id) && id(value.report_id) && time(value.created_at) && time(value.expires_at) && optTime(value.revoked_at) && count(value.view_count) && optTime(value.last_viewed_at)
+  return record(value) && id(value.id) && id(value.report_id) && time(value.created_at) && time(value.expires_at) && optTime(value.revoked_at) && count(value.view_count) && optTime(value.last_viewed_at) &&
+    [value.message_copied_at, value.sent_confirmed_at].every(item => item === undefined || optTime(item)) &&
+    [value.sent_confirmed_by, value.sent_note].every(item => item === undefined || optStr(item))
 }
 export function isCreatedShareLink(value: unknown): value is CreatedShareLink {
   return isShareLink(value) && record(value) && typeof value.token === 'string' && /^[A-Za-z0-9_-]{20,128}$/.test(value.token) && value.path === `/r/${value.token}`

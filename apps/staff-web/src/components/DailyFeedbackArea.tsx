@@ -1,16 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowRight, Ban, Check, Copy, MessageSquareText, Plus, Send, TriangleAlert } from 'lucide-react'
+import { ArrowRight, Check, CheckCheck, Copy, MessageSquareText, Plus, Send, TriangleAlert } from 'lucide-react'
 import type { QueuedReport, Report, ReportSnapshot } from '../api/learningTypes'
-import { dailyMessage, dateTime, dayLabel, recentDays, shareState, shareUrl } from '../learning'
+import { dailyMessage, dateTime, dayLabel, deliveryLabel, recentDays, shareUrl } from '../learning'
 import { LoadNote, RefreshButton, useLoad, type LearningContext } from './LearningCommon'
+import { ShareLinkList } from './ShareLinkList'
 
 const LINK_DAYS = 7
-
-function rowState(report: QueuedReport | null): [string, string] {
-  if (!report) return ['今天没有记录', 'muted']
-  if (report.status === 'published') return ['已发送', '']
-  return report.supersedes_id ? ['有更新待发送', 'rose'] : ['待核对发送', 'amber']
-}
 
 export function DailySnapshotView({ snap }: { snap: ReportSnapshot }) {
   const { coverage, school_tasks: tasks, help } = snap
@@ -54,7 +49,7 @@ function DailyDetail({ ctx, reportId, name, day }: { ctx: LearningContext; repor
   const [note, setNote] = useState('')
   const [step, setStep] = useState('')
   const [update, setUpdate] = useState('')
-  const [message, setMessage] = useState<string | null>(null)
+  const [message, setMessage] = useState<{ text: string; linkId: string } | null>(null)
   const [copied, setCopied] = useState(false)
   const box = useRef<HTMLTextAreaElement>(null)
   useEffect(() => { setNote(report?.staff_note ?? ''); setStep(report?.next_step ?? '') }, [report?.id, report?.revision])
@@ -64,16 +59,23 @@ function DailyDetail({ ctx, reportId, name, day }: { ctx: LearningContext; repor
   const dirty = draft && (note.trim() !== (report.staff_note ?? '') || step.trim() !== (report.next_step ?? ''))
   const updateIssue = update.trim() && update.trim().length < 4 ? '更新说明至少 4 个字，或者留空。' : null
 
-  async function copy(text: string) {
-    try { await navigator.clipboard.writeText(text); setCopied(true) }
-    catch { setCopied(false); box.current?.select() }
+  async function copy(text: string, linkId: string) {
+    try { await navigator.clipboard.writeText(text) }
+    catch { setCopied(false); box.current?.select(); return }
+    setCopied(true)
+    await ctx.act(() => ctx.learning.markMessageCopied(linkId), null)
   }
   async function link(target: Report) {
     const created = await ctx.act(() => ctx.learning.createShareLink(target.id, LINK_DAYS), '消息已生成。链接只显示这一次，请复制发到家长微信。')
     if (!created) return
     const text = dailyMessage(name, day, shareUrl(ctx.origin, created.path))
-    setMessage(text)
-    await copy(text)
+    setMessage({ text, linkId: created.id })
+    await copy(text, created.id)
+  }
+  async function confirmSent() {
+    if (!message) return
+    const done = await ctx.act(() => ctx.learning.confirmMessageSent(message.linkId, null), '已记录：老师确认已把消息发给家长。')
+    if (done) setMessage(null)
   }
   async function send() {
     if (updateIssue) return
@@ -92,9 +94,9 @@ function DailyDetail({ ctx, reportId, name, day }: { ctx: LearningContext; repor
   return <div className="card report-detail">
     <div className="section-heading"><span><MessageSquareText size={17} />{name} · {dayLabel(day, Date.now())}</span><RefreshButton state={loaded} label="刷新反馈" /></div>
     <div className="help-row wrap">
-      <span className={`tag ${draft ? 'amber' : report.status === 'superseded' ? 'muted' : ''}`}>{draft ? '草稿' : report.status === 'published' ? '已发送' : '已被新版本取代'}</span>
+      <span className={`tag ${draft ? 'amber' : report.status === 'superseded' ? 'muted' : ''}`}>{draft ? '草稿' : report.status === 'published' ? '已发布' : '已被新版本取代'}</span>
       {report.version > 1 && <span className="tag muted">第 {report.version} 版</span>}
-      {report.published_at && <small className="subtle">发送于 {dateTime(report.published_at)}</small>}
+      {report.published_at && <small className="subtle">发布于 {dateTime(report.published_at)}</small>}
       {draft && <small className="subtle">草稿会随作业和老师核实自动更新</small>}
     </div>
     {draft && report.supersedes_id && <p className="preview-note">发送之后今天的情况又有变化（新作业、订正或改判），这是更新后的内容。家长原来的链接会自动显示最新版。</p>}
@@ -112,8 +114,8 @@ function DailyDetail({ ctx, reportId, name, day }: { ctx: LearningContext; repor
       <h4><Send size={15} />发送给家长</h4>
       {report.supersedes_id && <label>更新说明（可选，家长可见）<textarea value={update} maxLength={500} disabled={ctx.busy} placeholder="例如：晚上补交了数学作业，已加进来。" onChange={event => setUpdate(event.target.value)} /></label>}
       {updateIssue && <small className="form-issue">{updateIssue}</small>}
-      <p className="subtle">点一下会保存老师的话、发布并生成 {LINK_DAYS} 天有效的家长链接，同时把整段消息复制好，直接粘贴到家长微信即可。</p>
-      <button className="button primary" disabled={ctx.busy || !!updateIssue} onClick={() => void send()}><Send size={14} />{report.supersedes_id ? '发送更新' : '发送给家长'}</button>
+      <p className="subtle">点一下会保存老师的话、发布并生成 {LINK_DAYS} 天有效的家长链接，同时把整段消息复制好。粘贴发到家长微信后，再点“我已发给家长”留下记录。</p>
+      <button className="button primary" disabled={ctx.busy || !!updateIssue} onClick={() => void send()}><Send size={14} />{report.supersedes_id ? '发布更新并复制消息' : '发布并复制家长消息'}</button>
     </section>}
 
     {report.status === 'published' && !message && <section className="report-block">
@@ -124,19 +126,16 @@ function DailyDetail({ ctx, reportId, name, day }: { ctx: LearningContext; repor
 
     {message && <div className="share-once" role="status">
       <p><TriangleAlert size={14} /> {copied ? '消息已复制，粘贴到家长微信即可。' : '浏览器没允许自动复制，请选中下面的文字手动复制。'}链接只显示这一次。</p>
-      <textarea ref={box} readOnly value={message} aria-label="发给家长的消息" rows={3} onFocus={event => event.target.select()} />
-      <div className="button-row"><button className="button primary" onClick={() => void copy(message)}><Copy size={14} />{copied ? '已复制' : '复制消息'}</button>
-        <button className="text-link" onClick={() => setMessage(null)}>我已发送，隐藏消息</button></div>
+      <textarea ref={box} readOnly value={message.text} aria-label="发给家长的消息" rows={3} onFocus={event => event.target.select()} />
+      <div className="button-row"><button className="button" disabled={ctx.busy} onClick={() => void copy(message.text, message.linkId)}><Copy size={14} />{copied ? '已复制' : '复制消息'}</button>
+        <button className="button primary" disabled={ctx.busy} onClick={() => void confirmSent()}><CheckCheck size={14} />我已发给家长</button>
+        <button className="text-link" onClick={() => setMessage(null)}>先不发，隐藏消息</button></div>
     </div>}
 
     {!draft && <LoadNote state={links}>
-      {(links.data?.items ?? []).length > 0 && <section className="report-block"><h4>已生成的链接</h4><ul className="hint-list">{links.data!.items.map(item => {
-        const state = shareState(item, Date.now())
-        return <li key={item.id}><div className="help-row"><span className={`tag ${state === 'active' ? '' : 'muted'}`}>{state === 'active' ? '有效' : state === 'revoked' ? '已撤销' : '已过期'}</span>
-          <small>家长打开 {item.view_count} 次{item.last_viewed_at && ` · 最近 ${dateTime(item.last_viewed_at)}`}</small></div>
-          {state === 'active' && <button className="button" disabled={ctx.busy} onClick={() => void ctx.act(() => ctx.learning.revokeShareLink(item.id), '链接已撤销，家长将无法再打开。')}><Ban size={14} />撤销</button>}
-        </li>
-      })}</ul></section>}
+      {links.data && <section className="report-block"><h4>已生成的链接</h4>
+        <p className="subtle">“已复制”和“老师已确认发送”是老师这边的记录，不代表家长已收到；家长点开链接后才显示“家长已打开”。</p>
+        <ShareLinkList ctx={ctx} items={links.data.items} /></section>}
     </LoadNote>}
   </div>
 }
@@ -154,7 +153,8 @@ export default function DailyFeedbackArea({ ctx }: { ctx: LearningContext }) {
   const rows = ctx.students.map(student => ({ student, report: byStudent.get(student.student_id) ?? null }))
     .sort((a, b) => order(a.report) - order(b.report) || a.student.display_name.localeCompare(b.student.display_name, 'zh-CN'))
   const waiting = rows.filter(row => row.report?.status === 'draft').length
-  const done = rows.filter(row => row.report?.status === 'published').length
+  const published = rows.filter(row => row.report?.status === 'published').length
+  const confirmed = rows.filter(row => row.report?.delivery?.sent_confirmed_at || row.report?.delivery?.opened_at).length
   const selected = rows.find(row => row.student.student_id === chosen)
 
   async function generate(studentId: string) {
@@ -164,21 +164,21 @@ export default function DailyFeedbackArea({ ctx }: { ctx: LearningContext }) {
 
   return <main id="main" className="learning-area">
     <aside className="learning-side" aria-label="每日反馈列表">
-      <div className="queue-heading"><div><h2>每日家长反馈</h2><p>孩子当天有作业或活动就自动生成草稿；老师看一眼，一键发送</p></div><RefreshButton state={drafts} label="刷新每日反馈" /></div>
+      <div className="queue-heading"><div><h2>每日家长反馈</h2><p>孩子当天有作业或活动就自动生成草稿；老师核对后发布，复制消息发给家长并确认</p></div><RefreshButton state={drafts} label="刷新每日反馈" /></div>
       <div className="side-block">
         <label>日期<div className="select-wrap"><select value={day} onChange={event => { setDay(event.target.value); setChosen(null) }}>
           {days.map(value => <option key={value} value={value}>{dayLabel(value, Date.now())}</option>)}</select></div></label>
-        <p className="subtle">待发送 {waiting} 人 · 已发送 {done} 人 · 共 {rows.length} 人</p>
+        <p className="subtle">待发布 {waiting} 人 · 已发布 {published} 人（确认发送 {confirmed} 人）· 共 {rows.length} 人</p>
       </div>
       <div className="queue-list">
         <LoadNote state={drafts.error ? drafts : sent}>
           {rows.map(({ student, report }) => {
-            const [label, tone] = rowState(report)
+            const [label, tone] = deliveryLabel(report)
             return <div key={student.student_id} className={`queue-item ${student.student_id === chosen ? 'selected' : ''}`}>
               <div className="queue-item-top"><span className="queue-avatar"><MessageSquareText size={15} /></span><span className={`tag ${tone}`}>{label}</span>
                 {report && report.mistake_count > 0 && <span className="queue-status muted">{report.mistake_count} 道要订正</span>}</div>
               <h3>{student.display_name}</h3>
-              {report ? <button className="text-link" onClick={() => setChosen(student.student_id)}>{report.status === 'draft' ? '核对并发送' : '查看'}<ArrowRight size={14} /></button>
+              {report ? <button className="text-link" onClick={() => setChosen(student.student_id)}>{report.status === 'draft' ? '核对并发布' : '查看'}<ArrowRight size={14} /></button>
                 : <button className="text-link" disabled={ctx.busy} onClick={() => void generate(student.student_id)}><Plus size={14} />仍要生成</button>}
             </div>
           })}

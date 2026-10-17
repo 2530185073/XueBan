@@ -2,11 +2,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { StaffApi } from './api/client'
 import { LearningApi } from './api/learning'
 import {
-  isAgentRun, isCreatedShareLink, isGate, isGenerationStatus, isKnowledgeDetail, isKnowledgeLinkList, isLinkQueue, isMemoryList, isReport, isStudentKnowledge, type AgentRun, type KnowledgeLink,
+  isAgentRun, isCreatedShareLink, isGate, isGenerationStatus, isKnowledgeDetail, isKnowledgeLinkList, isLinkQueue, isMemoryList, isReport, isReportQueue, isShareLink, isStudentKnowledge, type AgentRun, type KnowledgeLink,
 } from './api/learningTypes'
 import {
   diagnosisIssue, finishedPeriods, helpSeen, lastFinishedPeriod, memoryIssue, parseAnswerValues, periodFinished, periodFromStart, periodLabel, primaryConflict,
-  dailyMessage, dayLabel, recentDays, runView, shareState, shareUrl, statusLabel, statusLabels,
+  dailyMessage, dayLabel, deliveryLabel, recentDays, runView, shareState, shareUrl, statusLabel, statusLabels,
 } from './learning'
 import { sampleWorkspace } from './sample'
 import { generationText } from './components/PracticeArea'
@@ -154,6 +154,30 @@ describe('每日反馈', () => {
     expect(dayLabel('2026-11-01', utc('2026-10-31T16:30:00Z'))).toBe('11月1日（今天）')
     expect(dayLabel('2026-10-31', utc('2026-10-31T16:30:00Z'))).toBe('10月31日（昨天）')
     expect(dayLabel('2026-10-29', utc('2026-10-31T16:30:00Z'))).toBe('10月29日')
+  })
+  it('发布、复制、老师确认发送和家长打开分开显示', () => {
+    const published = (delivery: { links: number; copied: boolean; sent_confirmed_at: string | null; opened_at: string | null } | null) => ({ status: 'published', supersedes_id: null, delivery })
+    const none = { links: 0, copied: false, sent_confirmed_at: null, opened_at: null }
+    expect(deliveryLabel(null)[0]).toBe('今天没有记录')
+    expect(deliveryLabel({ status: 'draft', supersedes_id: null, delivery: null })[0]).toBe('待核对发布')
+    expect(deliveryLabel({ status: 'draft', supersedes_id: 'report_1', delivery: null })[0]).toBe('有更新待发布')
+    expect(deliveryLabel(published(none))[0]).toBe('已发布，未发给家长')
+    expect(deliveryLabel(published({ ...none, links: 1 }))[0]).toBe('已生成链接，未复制')
+    expect(deliveryLabel(published({ ...none, links: 1, copied: true }))[0]).toBe('已复制，待确认发送')
+    expect(deliveryLabel(published({ ...none, links: 1, copied: true, sent_confirmed_at: at }))[0]).toBe('老师已确认发送')
+    expect(deliveryLabel(published({ ...none, links: 1, opened_at: at }))[0]).toBe('家长已打开')
+  })
+  it('接受带发送记录的链接与列表，拒绝格式错误的记录', () => {
+    const base = { id: 'share_1', report_id: 'report_1', created_at: at, expires_at: at, revoked_at: null, view_count: 0, last_viewed_at: null }
+    expect(isShareLink(base)).toBe(true)
+    expect(isShareLink({ ...base, message_copied_at: at, sent_confirmed_at: at, sent_confirmed_by: 'staff_a', sent_note: '已发妈妈微信' })).toBe(true)
+    expect(isShareLink({ ...base, sent_confirmed_at: 'yesterday' })).toBe(false)
+    const queued = { id: 'report_1', student_id: 'student_a', cadence: 'daily', period_start: '2026-10-17', period_end: '2026-10-18', version: 1, status: 'published',
+      snapshot: null, staff_note: null, next_step: null, correction_note: null, supersedes_id: null, published_at: at, revision: 2, regenerated_reason: null,
+      published_by: 'staff_a', source_digest: 'a'.repeat(64), created_at: at, updated_at: at, focus_count: 0, mistake_count: 0, sufficient: true, student_name: '小明' }
+    expect(isReportQueue({ items: [{ ...queued, delivery: { links: 1, copied: true, sent_confirmed_at: null, opened_at: null } }], next_offset: null })).toBe(true)
+    expect(isReportQueue({ items: [{ ...queued, delivery: null }], next_offset: null })).toBe(true)
+    expect(isReportQueue({ items: [{ ...queued, delivery: { links: -1, copied: true, sent_confirmed_at: null, opened_at: null } }], next_offset: null })).toBe(false)
   })
   it('发给家长的消息只含姓名、日期和链接', () => {
     expect(dailyMessage('小明', '2026-10-17', 'https://xueban.example.cn/r/abc')).toBe(

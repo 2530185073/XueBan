@@ -390,6 +390,21 @@ class LinkInput(Strict):
     expires_in_days: int = Field(default=LINK_DAYS_DEFAULT, ge=1, le=LINK_DAYS_MAX)
 
 
+class ConfirmSentInput(Strict):
+    note: str | None = Field(default=None, max_length=200)
+
+
+def delivery(report: LearningReport, period_links: list[ReportShareLink]) -> dict:
+    """What staff did with this version and whether any link of its period was opened afterwards."""
+    own = [link for link in period_links if link.report_id == report.id]
+    confirmed = [link.sent_confirmed_at for link in own if link.sent_confirmed_at]
+    opened = [link.last_viewed_at for link in period_links
+              if link.last_viewed_at and report.published_at and link.last_viewed_at >= report.published_at]
+    return {"links": len(own), "copied": any(link.message_copied_at for link in own),
+            "sent_confirmed_at": iso(max(confirmed)) if confirmed else None,
+            "opened_at": iso(max(opened)) if opened else None}
+
+
 def token_digest(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
@@ -465,9 +480,20 @@ def install_reports(app, engine, cfg, database_session, current_actor):
             query = query.where(LearningReport.period_start == period_start)
         rows = list(session.scalars(query.order_by(LearningReport.period_start.desc(), LearningReport.id).offset(offset).limit(limit + 1)))
         names = dict(session.execute(select(Student.id, Student.display_name).where(Student.id.in_({r.student_id for r in rows[:limit]}))).all())
+        period_links = defaultdict(list)
+        if status != "draft" and rows:
+            family = select(LearningReport.id).where(LearningReport.student_id.in_({r.student_id for r in rows[:limit]}),
+                                                     LearningReport.cadence == cadence,
+                                                     LearningReport.period_start.in_({r.period_start for r in rows[:limit]}))
+            reports = {r.id: r for r in session.scalars(select(LearningReport).where(LearningReport.id.in_(family)))}
+            for link in session.scalars(select(ReportShareLink).where(ReportShareLink.report_id.in_(family))):
+                origin = reports[link.report_id]
+                period_links[(origin.student_id, origin.period_start)].append(link)
         return {"items": [{**report_dict(r), "snapshot": None, "student_name": names.get(r.student_id),
                            "focus_count": len(r.snapshot["focus"]), "mistake_count": len(r.snapshot.get("mistakes", [])),
-                           "sufficient": r.snapshot["sufficient"]} for r in rows[:limit]],
+                           "sufficient": r.snapshot["sufficient"],
+                           "delivery": delivery(r, period_links[(r.student_id, r.period_start)]) if status != "draft" else None}
+                          for r in rows[:limit]],
                 "next_offset": offset + limit if len(rows) > limit else None}
 
     @app.get("/v1/reports/{report_id}", operation_id="getLearningReport")
@@ -554,6 +580,32 @@ def install_reports(app, engine, cfg, database_session, current_actor):
         session.commit()
         return link_dict(link)
 
+    def staff_link(session, actor, link_id):
+        require_staff(actor)
+        link = session.scalar(select(ReportShareLink).where(ReportShareLink.id == link_id).with_for_update())
+        if link is None:
+            raise Problem(404, "not_found", "not_found", "资源不存在或不可访问。")
+        require_student(session, actor, link.student_id)
+        return link
+
+    @app.post("/v1/report-share-links/{link_id}/copied", operation_id="markReportMessageCopied")
+    def mark_copied(link_id: str, actor: ActorDep, session: SessionDep):
+        link = staff_link(session, actor, link_id)
+        link.message_copied_at = link.message_copied_at or now()
+        session.commit()
+        return link_dict(link)
+
+    @app.post("/v1/report-share-links/{link_id}/confirm-sent", operation_id="confirmReportMessageSent")
+    def confirm_sent(link_id: str, payload: ConfirmSentInput, actor: ActorDep, session: SessionDep):
+        link = staff_link(session, actor, link_id)
+        if link.sent_confirmed_at is None:
+            if link.revoked_at is not None:
+                raise Problem(409, "conflict", "link_revoked", "链接已撤销，请生成新链接后再发送。")
+            link.sent_confirmed_at, link.sent_confirmed_by = now(), actor.id
+            link.sent_note = (payload.note or "").strip() or None
+            session.commit()
+        return link_dict(link)
+
     no_store = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex, nofollow"}
 
     @app.get("/v1/report-links/{token}", include_in_schema=False)
@@ -580,7 +632,9 @@ def install_reports(app, engine, cfg, database_session, current_actor):
 def link_dict(link):
     return {"id": link.id, "report_id": link.report_id, "created_by": link.created_by, "created_at": iso(link.created_at),
             "expires_at": iso(link.expires_at), "revoked_at": iso(link.revoked_at),
-            "view_count": link.view_count, "last_viewed_at": iso(link.last_viewed_at)}
+            "view_count": link.view_count, "last_viewed_at": iso(link.last_viewed_at),
+            "message_copied_at": iso(link.message_copied_at), "sent_confirmed_at": iso(link.sent_confirmed_at),
+            "sent_confirmed_by": link.sent_confirmed_by, "sent_note": link.sent_note}
 
 
 STYLE = """body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;margin:0;background:#f6f7f9;color:#1f2933;line-height:1.6}

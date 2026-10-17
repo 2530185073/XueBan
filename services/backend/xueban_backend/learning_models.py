@@ -265,6 +265,11 @@ class ReportShareLink(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     view_count: Mapped[int] = mapped_column(Integer, nullable=False)
     last_viewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Staff-side facts only: copying or confirming does not prove the guardian received the message.
+    message_copied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_confirmed_by: Mapped[str | None] = mapped_column(String(64))
+    sent_note: Mapped[str | None] = mapped_column(Text)
 
 
 class PracticeItem(Base):

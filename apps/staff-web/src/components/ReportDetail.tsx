@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { Ban, Check, Copy, FileText, Send, Share2, TriangleAlert } from 'lucide-react'
+import { Check, Copy, FileText, Send, Share2, TriangleAlert } from 'lucide-react'
 import type { FocusItem, Report, ReportSnapshot } from '../api/learningTypes'
-import { dateTime, openQuestionLabels, periodLabel, regeneratedLabels, reportStatusLabels, shareState, shareUrl, statusLabel } from '../learning'
+import { dateTime, openQuestionLabels, periodLabel, regeneratedLabels, reportStatusLabels, shareUrl, statusLabel } from '../learning'
 import { LoadNote, RefreshButton, useLoad, type LearningContext } from './LearningCommon'
+import { ShareLinkList } from './ShareLinkList'
 
 const helpKinds: Record<string, string> = { question: '作业答疑', recognition: '识别有误', judgment: '判断有疑问', appeal: '申请重查' }
-const shareLabels = { active: '有效', revoked: '已撤销', expired: '已过期' }
 
 function Focus({ item }: { item: FocusItem }) {
   return <section className="report-block">
@@ -62,7 +62,7 @@ export default function ReportDetail({ ctx, reportId, studentName, onOpen }: { c
   const [step, setStep] = useState('')
   const [correction, setCorrection] = useState('')
   const [days, setDays] = useState(30)
-  const [created, setCreated] = useState<{ url: string; expires: string } | null>(null)
+  const [created, setCreated] = useState<{ id: string; url: string; expires: string } | null>(null)
   const [copied, setCopied] = useState(false)
   const urlInput = useRef<HTMLInputElement>(null)
   useEffect(() => { setNote(report?.staff_note ?? ''); setStep(report?.next_step ?? '') }, [report?.id, report?.revision])
@@ -84,12 +84,14 @@ export default function ReportDetail({ ctx, reportId, studentName, onOpen }: { c
   }
   async function share() {
     const link = await ctx.act(() => ctx.learning.createShareLink(report!.id, days), '家长链接已生成。链接只显示这一次，请现在复制。')
-    if (link) { setCopied(false); setCreated({ url: shareUrl(ctx.origin, link.path), expires: link.expires_at }) }
+    if (link) { setCopied(false); setCreated({ id: link.id, url: shareUrl(ctx.origin, link.path), expires: link.expires_at }) }
   }
   async function copy() {
     if (!created) return
-    try { await navigator.clipboard.writeText(created.url); setCopied(true) }
-    catch { urlInput.current?.select() }
+    try { await navigator.clipboard.writeText(created.url) }
+    catch { urlInput.current?.select(); return }
+    setCopied(true)
+    await ctx.act(() => ctx.learning.markMessageCopied(created.id), null)
   }
 
   return <div className="card report-detail">
@@ -135,17 +137,11 @@ export default function ReportDetail({ ctx, reportId, studentName, onOpen }: { c
         <p><TriangleAlert size={14} /> 链接只显示这一次，关闭或刷新后无法再查看；请现在复制给家长。有效至 {dateTime(created.expires)}。</p>
         <div className="button-row"><input ref={urlInput} readOnly value={created.url} aria-label="家长链接" onFocus={event => event.target.select()} />
           <button className="button primary" onClick={() => void copy()}><Copy size={14} />{copied ? '已复制' : '复制链接'}</button></div>
-        <button className="text-link" onClick={() => setCreated(null)}>我已复制，隐藏链接</button>
+        <button className="text-link" onClick={() => setCreated(null)}>隐藏链接</button>
+        <p className="subtle">发给家长后，在下面的链接记录里点“我已发给家长”。</p>
       </div>}
       <LoadNote state={links}>
-        {links.data && links.data.items.length === 0 && <p className="subtle">还没有生成过链接。</p>}
-        <ul className="hint-list">{(links.data?.items ?? []).map(link => {
-          const state = shareState(link, Date.now())
-          return <li key={link.id}><div className="help-row"><span className={`tag ${state === 'active' ? '' : 'muted'}`}>{shareLabels[state]}</span><time>创建于 {dateTime(link.created_at)}</time></div>
-            <small>有效至 {dateTime(link.expires_at)} · 打开 {link.view_count} 次{link.last_viewed_at && ` · 最近 ${dateTime(link.last_viewed_at)}`}{link.revoked_at && ` · 撤销于 ${dateTime(link.revoked_at)}`}</small>
-            {state === 'active' && <button className="button" disabled={ctx.busy} onClick={() => void ctx.act(() => ctx.learning.revokeShareLink(link.id), '链接已撤销，家长将无法再打开。')}><Ban size={14} />撤销</button>}
-          </li>
-        })}</ul>
+        {links.data && <ShareLinkList ctx={ctx} items={links.data.items} />}
       </LoadNote>
     </section>}
   </div>

@@ -85,6 +85,11 @@ export class LearningApi {
   }
   shareLinks(reportId: string, signal?: AbortSignal) { return this.api.call(`/v1/reports/${segment(reportId)}/share-links`, isShareLinkList, { signal }) }
   revokeShareLink(id: string) { return this.api.call(`/v1/report-share-links/${segment(id)}/revoke`, isShareLink, { payload: {} }) }
+  markMessageCopied(id: string) { return this.api.call(`/v1/report-share-links/${segment(id)}/copied`, isShareLink, { payload: {} }) }
+  confirmMessageSent(id: string, note: string | null) {
+    if (note !== null && note.length > 200) throw invalid()
+    return this.api.call(`/v1/report-share-links/${segment(id)}/confirm-sent`, isShareLink, { payload: { note } })
+  }
 
   practiceItems(status: Extract<ItemStatus, 'candidate' | 'approved'>, knowledgeId: string | null, signal?: AbortSignal) {
     const params = new URLSearchParams({ status }); if (knowledgeId) params.set('knowledge_id', knowledgeId)
