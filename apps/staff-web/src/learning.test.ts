@@ -6,7 +6,7 @@ import {
 } from './api/learningTypes'
 import {
   diagnosisIssue, finishedPeriods, helpSeen, lastFinishedPeriod, memoryIssue, parseAnswerValues, periodFinished, periodFromStart, periodLabel, primaryConflict,
-  runView, shareState, shareUrl, statusLabel, statusLabels,
+  dailyMessage, dayLabel, recentDays, runView, shareState, shareUrl, statusLabel, statusLabels,
 } from './learning'
 import { sampleWorkspace } from './sample'
 import { generationText } from './components/PracticeArea'
@@ -41,7 +41,7 @@ const snapshot = {
   limitations: '本报告只汇总本期在托管班拍照、经老师核实的学校作业。',
 }
 const report = {
-  id: 'report_1', student_id: 'student_a', period_start: '2026-10-01', period_end: '2026-10-16', version: 2, status: 'draft', snapshot, staff_note: null, next_step: null,
+  id: 'report_1', student_id: 'student_a', cadence: 'half_month', period_start: '2026-10-01', period_end: '2026-10-16', version: 2, status: 'draft', snapshot, staff_note: null, next_step: null,
   correction_note: null, supersedes_id: 'report_0', published_at: null, revision: 3, regenerated_reason: 'correction_required', published_by: null, source_digest: 'x', created_at: at, updated_at: at,
 }
 
@@ -84,6 +84,15 @@ describe('学情接口的手写校验', () => {
     expect(isReport({ ...report, snapshot: { ...snapshot, school_tasks: { ...snapshot.school_tasks, staff_verified: -1 } } })).toBe(false)
     expect(isReport({ ...report, snapshot: { ...snapshot, focus: [{ ...snapshot.focus[0], status_at_period_end: 'weak' }] } })).toBe(false)
     expect(isReport({ ...report, snapshot: null })).toBe(false)
+    expect(isReport({ ...report, cadence: 'weekly' })).toBe(false)
+  })
+  it('每日反馈：错题订正与自愿活动', () => {
+    const mistake = { case_id: 'case_1', homework_title: '数学练习册', page: 2, question: '计算 -3 + 5', verdict: '答错', progress: 'needs_correction', correction: '还没订正' }
+    const daily = { ...report, cadence: 'daily', period_start: '2026-10-17', period_end: '2026-10-18', supersedes_id: null,
+      snapshot: { ...snapshot, mistakes: [mistake], activity_kinds: { preview: 1, variant: 0 } } }
+    expect(isReport(daily)).toBe(true)
+    expect(isReport({ ...daily, snapshot: { ...daily.snapshot, mistakes: [{ ...mistake, page: -1 }] } })).toBe(false)
+    expect(isReport({ ...daily, snapshot: { ...daily.snapshot, activity_kinds: { preview: 'one', variant: 0 } } })).toBe(false)
   })
   it('家长链接只接受 /r/{token}', () => {
     const base = { id: 'share_1', report_id: 'report_1', created_by: 'staff_a', created_at: at, expires_at: '2026-11-15T08:00:00+00:00', revoked_at: null, view_count: 0, last_viewed_at: null }
@@ -135,6 +144,20 @@ describe('半月周期（北京时间）', () => {
     expect(periodFinished('2026-10-01', utc('2026-10-15T16:00:00Z'))).toBe(true)
     expect(periodLabel('2028-02-16')).toBe('2028-02-16 至 2028-02-29')
     expect(periodLabel('2026-10-01', '2026-10-16')).toBe('2026-10-01 至 2026-10-15')
+  })
+})
+
+describe('每日反馈', () => {
+  const utc = (value: string) => Date.parse(value)
+  it('按北京时间列出今天和之前几天，跨月', () => {
+    expect(recentDays(utc('2026-10-31T16:30:00Z'), 3)).toEqual(['2026-11-01', '2026-10-31', '2026-10-30'])
+    expect(dayLabel('2026-11-01', utc('2026-10-31T16:30:00Z'))).toBe('11月1日（今天）')
+    expect(dayLabel('2026-10-31', utc('2026-10-31T16:30:00Z'))).toBe('10月31日（昨天）')
+    expect(dayLabel('2026-10-29', utc('2026-10-31T16:30:00Z'))).toBe('10月29日')
+  })
+  it('发给家长的消息只含姓名、日期和链接', () => {
+    expect(dailyMessage('小明', '2026-10-17', 'https://xueban.example.cn/r/abc')).toBe(
+      '【学伴】小明 10月17日的学习反馈已整理好（今天交的作业、错题订正情况和老师的话），请点开查看：https://xueban.example.cn/r/abc')
   })
 })
 
@@ -220,6 +243,18 @@ describe('学情接口请求', () => {
     await learning.editReport('report_1', { expected_revision: 3, staff_note: '认真', next_step: null })
     expect(transport.mock.calls[1][1].method).toBe('PATCH')
     await expect(learning.report('report_1')).rejects.toMatchObject({ status: 502 })
+  })
+  it('每日反馈按日期取队列，生成时带 cadence', async () => {
+    const queued = { ...report, cadence: 'daily', snapshot: null, focus_count: 0, mistake_count: 2, sufficient: false, student_name: '合成学生' }
+    const daily = { ...report, cadence: 'daily', period_start: '2026-10-17', period_end: '2026-10-18' }
+    const { learning, transport } = await signedIn(response({ items: [queued], next_offset: null }), response(daily))
+    const queue = await learning.reportQueue('draft', undefined, '2026-10-17')
+    expect(queue.items[0].mistake_count).toBe(2)
+    expect(transport.mock.calls[1][0]).toBe(`${ORIGIN}/v1/reports?status=draft&cadence=daily&period_start=2026-10-17&limit=200`)
+    await learning.generateDaily('student_a', '2026-10-17')
+    expect(JSON.parse(transport.mock.calls[2][1].body)).toEqual({ period_start: '2026-10-17', cadence: 'daily' })
+    expect(() => learning.generateDaily('student_a', '10/17')).toThrow()
+    expect(() => learning.reportQueue('draft', undefined, '2026-10-17&x=1')).toThrow()
   })
   it('本地拒绝不合规的周期起点和额外时间，不发请求', async () => {
     const { learning, transport } = await signedIn()

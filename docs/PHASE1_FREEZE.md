@@ -12,7 +12,7 @@
 | 平台 | Android 平板 App（Kotlin/Compose/CameraX/WorkManager），学生网页为同账号的补充入口，不计入 App 交付 | [ANDROID_PHASE1](../ANDROID_PHASE1.md)、[apps/android](../apps/android/README.md) |
 | 账号与归属 | 一学员一账号（用户名+密码），账号绑定固定 `student_id`；首登强制改密；坐班老师由校区管理员开通 | [ACCOUNT_FOUNDATION](ACCOUNT_FOUNDATION.md)、`services/backend/tests/test_account_auth.py` |
 | 接口与数据结构 | `contracts/phase1` 32 个操作、4 份 JSON Schema；`Problem` 列出后端实际返回的全部错误码；前端校验器由契约生成，CI 校验一致 | `contracts/phase1/validate.py`、两端 `contracts:check` |
-| 数据库迁移 | Alembic 链 `0001 → 0009`，SQLite 与 PostgreSQL 双库测试 | `services/backend/migrations/versions/` |
+| 数据库迁移 | Alembic 链 `0001 → 0010`，SQLite 与 PostgreSQL 双库测试 | `services/backend/migrations/versions/` |
 | 纠错规则 | 模型输出只作候选；老师确认才成为正式结论；看过提示后的作答不能记为独立；订正永不算独立 | [blueprint-v3/10](../blueprint-v3/10-纠错核心流程与首发验收.md)、`test_c0_acceptance.py` |
 | 学习规则版本 | `r1.2-custody`（变更即触发全量重算） | `services/backend/xueban_backend/learning_rules.py` |
 | 模型服务 | BytePlus ModelArk AP，五角色统一模型 `deepseek-v4-1-flash-260910`，严格 JSON 解析与本地 Schema 校验 | [MODEL_SERVICE_PLAN](../MODEL_SERVICE_PLAN.md) |

@@ -198,4 +198,24 @@ export function orderEvidence(items: Evidence[]): Evidence[] {
 }
 
 export const shortDate = (value: string) => new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit' }).format(new Date(value))
+/** Today and the days before it in Asia/Shanghai, newest first. */
+export function recentDays(at: number, howMany = 7): string[] {
+  return Array.from({ length: howMany }, (_, i) => {
+    const { year, month, day } = shanghaiDate(at - i * 86_400_000)
+    return iso(year, month, day)
+  })
+}
+
+export function dayLabel(value: string, at: number): string {
+  const [today, yesterday] = recentDays(at, 2)
+  const [, month, dayOfMonth] = value.split('-').map(Number)
+  return `${month}月${dayOfMonth}日${value === today ? '（今天）' : value === yesterday ? '（昨天）' : ''}`
+}
+
+/** The text a teacher pastes into the guardian chat; the link is the only personal data in it besides the name. */
+export function dailyMessage(name: string, value: string, url: string): string {
+  const [, month, dayOfMonth] = value.split('-').map(Number)
+  return `【学伴】${name} ${month}月${dayOfMonth}日的学习反馈已整理好（今天交的作业、错题订正情况和老师的话），请点开查看：${url}`
+}
+
 export const dateTime = (value: string) => new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value))

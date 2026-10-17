@@ -7,6 +7,10 @@ unknown. Drafts follow the facts; a published version is never rewritten, and a
 change to facts inside its window yields a correction version that staff must
 publish with an explanation. Guardians have no account: staff issue revocable
 links that always open the newest published version with its correction trail.
+
+Daily feedback uses the same machinery with one Asia/Shanghai day as the
+window. A draft appears as soon as the learner has activity that day so staff
+can review and send it before pickup; later facts open an update version.
 """
 from collections import Counter, defaultdict
 from datetime import date, datetime, time, timedelta, timezone
@@ -29,14 +33,15 @@ from .device_auth import utc
 from .errors import Problem
 from .governance import register_downstream_purger
 from .learning_models import (KnowledgeDiagnosis, KnowledgeNode, LearningEvidence, LearningProjection, LearningReport,
-                              ReportShareLink, StudentLearningProfile)
+                              PracticeSession, ReportShareLink, StudentLearningProfile)
 from .learning_projection import (fingerprints, new_id, published_graph, register_periodic, register_projection_followup)
 from .learning_rules import compute_state
 from .models import Homework, Student
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 REPORT_RULE = "report-r1"
-REFRESH_PERIODS = 12
+DAILY_RULE = "daily-r1"
+REFRESH_PERIODS = {"half_month": 12, "daily": 14}
 LINK_DAYS_DEFAULT, LINK_DAYS_MAX = 30, 90
 REPORT_SECTIONS = []
 ASSISTANCE_LABEL = {"independent": "独立完成（老师核实）", "no_recorded_help": "未记录帮助", "direction": "看过提示方向",
@@ -45,6 +50,12 @@ STATUS_LABEL = {"needs_help_now": "当前需要帮助", "consolidating": "正在
                 "no_judgment": "暂不判断"}
 LIMITATIONS = ("本报告只汇总本期在托管班拍照、经老师核实的学校作业；不代表全部学校作业或整章掌握情况。"
                "没有证据不表示薄弱，也不为填满报告安排测验。学校作业题量和难度不同，不做横向比较；观察变化不代表因果提分。")
+DAILY_LIMITATIONS = ("这是今天在托管班拍照提交的作业汇总，对错以老师核实为准，还没核实的题不算对错。"
+                     "一天的表现有起伏很正常，不代表整体掌握水平；没有出现的知识点不表示薄弱，也不需要在家额外加题。")
+VERDICT_LABEL = {"incorrect": "答错", "partially_correct": "部分正确", "unanswered": "未作答", "correct": "答对"}
+CORRECTION_LABEL = {"verified_resolved": "已订正，老师确认通过", "rechecking": "订正已提交，正在检查",
+                    "needs_correction": "还没订正", "editing": "正在订正", "paused": "订正暂停，下次继续", "pending": "待安排订正"}
+OPEN_CORRECTION = ("needs_correction", "editing", "rechecking", "paused")
 
 
 def register_report_section(function):
@@ -87,21 +98,25 @@ def last_completed_period(at: datetime) -> tuple[date, date]:
     return period_of(current_start - timedelta(days=1))
 
 
-def parse_period(value: str) -> tuple[date, date]:
+def bounds(cadence: str, start: date) -> tuple[date, date]:
+    return (start, start + timedelta(days=1)) if cadence == "daily" else period_of(start)
+
+
+def parse_period(value: str, cadence: str = "half_month") -> tuple[date, date]:
     try:
         start = date.fromisoformat(value)
     except ValueError:
-        raise Problem(422, "validation", "invalid_request", "周期起点须为 YYYY-MM-01 或 YYYY-MM-16。") from None
-    if start.day not in (1, 16):
+        raise Problem(422, "validation", "invalid_request", "周期起点须为 YYYY-MM-DD 日期。") from None
+    if cadence != "daily" and start.day not in (1, 16):
         raise Problem(422, "validation", "invalid_request", "周期起点须为每月 1 日或 16 日。")
-    return period_of(start)
+    return bounds(cadence, start)
 
 
 def _digest(snapshot) -> str:
     return hashlib.sha256(json.dumps(snapshot, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
-def build_snapshot(session, student: Student, start: date, end: date) -> dict:
+def build_snapshot(session, student: Student, start: date, end: date, cadence: str = "half_month") -> dict:
     """Facts of one window, recomputed from current valid records only."""
     window_start, window_end = window(start, end)
     inside = lambda moment: moment is not None and window_start <= moment < window_end  # noqa: E731
@@ -201,7 +216,7 @@ def build_snapshot(session, student: Student, start: date, end: date) -> dict:
         key, value = contributor(session, student, window_start, window_end)
         sections[key] = value
     observed = sorted({local_day(utc(h.occurred_at)).isoformat() for h in period_homeworks.values()})
-    return {
+    snapshot = {
         "rule_version": REPORT_RULE, "period": {"start": start.isoformat(), "end_exclusive": end.isoformat(),
                                                 "timezone": "Asia/Shanghai"},
         "coverage": {"observed_days": len(observed), "observed_dates": observed, "homeworks": len(period_homeworks),
@@ -218,10 +233,45 @@ def build_snapshot(session, student: Student, start: date, end: date) -> dict:
         "focus": focus, "steady": steady, "unknown_current": unknown,
         "sufficient": bool(focus or steady), "evidence_ids": sorted(evidence_ids), "sections": sections,
         "limitations": LIMITATIONS}
+    if cadence == "daily":
+        snapshot.update(daily_facts(session, student, entities, period_homeworks, window_start, window_end))
+        snapshot["rule_version"], snapshot["limitations"], snapshot["unknown_current"] = DAILY_RULE, DAILY_LIMITATIONS, []
+        snapshot["coverage"]["partial_period"] = False
+    return snapshot
+
+
+def daily_facts(session, student, entities, period_homeworks, window_start, window_end) -> dict:
+    """What a guardian asks at pickup: which questions went wrong today and whether they are fixed."""
+    mistakes = []
+    for homework_id, case in entities["case"].values():
+        if homework_id not in period_homeworks or case.get("lifecycle", "active") != "active":
+            continue
+        decision = case.get("current_decision") or {}
+        confirmed = decision.get("origin") == "staff" and decision.get("validity") == "confirmed"
+        progress = case.get("progress") or "pending"
+        wrong = confirmed and decision.get("verdict") in ("incorrect", "partially_correct", "unanswered")
+        corrected = progress == "verified_resolved" and case.get("current_attempt_id") != case.get("root_attempt_id")
+        if not (wrong or corrected or progress in OPEN_CORRECTION):
+            continue
+        homework = period_homeworks[homework_id]
+        question = entities["question"].get(case.get("question_id"), (None, {}))[1]
+        pages = [r.get("page_index") for r in question.get("regions", []) if isinstance(r, dict) and r.get("page_index") is not None]
+        mistakes.append({"case_id": case.get("id"), "homework_title": homework.title, "page": (pages[0] + 1) if pages else None,
+                         "question": (question.get("stem_text") or "")[:120],
+                         "verdict": VERDICT_LABEL.get(decision.get("verdict")) if wrong else None, "progress": progress,
+                         "correction": CORRECTION_LABEL.get(progress, progress),
+                         "_order": (utc(homework.occurred_at).isoformat(), homework_id, pages[0] if pages else 0, case.get("id") or "")})
+    mistakes.sort(key=lambda m: m.pop("_order"))
+    sessions = [r for r in session.scalars(select(PracticeSession).where(PracticeSession.student_id == student.id))
+                if window_start <= utc(r.started_at) < window_end]
+    return {"cadence": "daily", "mistakes": mistakes[:30],
+            "activity_kinds": {"preview": sum(1 for r in sessions if r.purpose == "preview"),
+                               "variant": sum(1 for r in sessions if r.purpose == "variant")}}
 
 
 def report_dict(report: LearningReport, *, public=False) -> dict:
-    body = {"id": report.id, "student_id": report.student_id, "period_start": report.period_start, "period_end": report.period_end,
+    body = {"id": report.id, "student_id": report.student_id, "cadence": report.cadence, "period_start": report.period_start,
+            "period_end": report.period_end,
             "version": report.version, "status": report.status, "snapshot": report.snapshot, "staff_note": report.staff_note,
             "next_step": report.next_step, "correction_note": report.correction_note, "supersedes_id": report.supersedes_id,
             "published_at": iso(report.published_at)}
@@ -232,16 +282,16 @@ def report_dict(report: LearningReport, *, public=False) -> dict:
     return body
 
 
-def versions(session, student_id, period_start, lock=False):
-    query = (select(LearningReport).where(LearningReport.student_id == student_id, LearningReport.period_start == period_start)
-             .order_by(LearningReport.version))
+def versions(session, student_id, period_start, lock=False, cadence="half_month"):
+    query = (select(LearningReport).where(LearningReport.student_id == student_id, LearningReport.cadence == cadence,
+                                          LearningReport.period_start == period_start).order_by(LearningReport.version))
     return list(session.scalars(query.with_for_update() if lock else query))
 
 
-def refresh(session, student: Student, start: date, end: date, reason: str) -> LearningReport | None:
+def refresh(session, student: Student, start: date, end: date, reason: str, cadence: str = "half_month") -> LearningReport | None:
     """Keep the draft equal to current facts; open a correction when published facts changed."""
-    rows = versions(session, student.id, start.isoformat(), lock=True)
-    snapshot = build_snapshot(session, student, start, end)
+    rows = versions(session, student.id, start.isoformat(), lock=True, cadence=cadence)
+    snapshot = build_snapshot(session, student, start, end, cadence)
     digest, stamp = _digest(snapshot), now()
     latest = rows[-1] if rows else None
     published = next((r for r in reversed(rows) if r.status == "published"), None)
@@ -256,7 +306,7 @@ def refresh(session, student: Student, start: date, end: date, reason: str) -> L
     if published is not None and published.source_digest == digest:
         return published
     report = LearningReport(id=new_id("report"), tenant_id=student.tenant_id, campus_id=student.campus_id, student_id=student.id,
-                            period_start=start.isoformat(), period_end=end.isoformat(), version=(latest.version + 1) if latest else 1,
+                            cadence=cadence, period_start=start.isoformat(), period_end=end.isoformat(), version=(latest.version + 1) if latest else 1,
                             status="draft", source_digest=digest, snapshot=snapshot,
                             next_step=published.next_step if published else None, staff_note=published.staff_note if published else None,
                             supersedes_id=published.id if published else None,
@@ -271,10 +321,30 @@ def refresh(session, student: Student, start: date, end: date, reason: str) -> L
 def generate_due_reports(session, worker):
     """Every active learner gets a report for the period that just ended."""
     start, end = last_completed_period(now())
-    existing = set(session.scalars(select(LearningReport.student_id).where(LearningReport.period_start == start.isoformat())))
+    existing = set(session.scalars(select(LearningReport.student_id).where(LearningReport.cadence == "half_month",
+                                                                           LearningReport.period_start == start.isoformat())))
     for student in session.scalars(select(Student).where(Student.active.is_(True))):
         if student.id not in existing:
             refresh(session, student, start, end, "scheduled")
+
+
+@register_periodic(timedelta(minutes=5))
+def generate_daily_feedback(session, worker):
+    """Learners with activity today (or late yesterday) get a daily draft without anyone asking."""
+    today = local_day(now())
+    for day in (today - timedelta(days=1), today):
+        start, end = bounds("daily", day)
+        window_start, window_end = window(start, end)
+        existing = set(session.scalars(select(LearningReport.student_id).where(LearningReport.cadence == "daily",
+                                                                               LearningReport.period_start == start.isoformat())))
+        active = set(session.scalars(select(Homework.student_id).where(Homework.occurred_at >= window_start, Homework.occurred_at < window_end,
+                                                                       Homework.processing_blocked.is_(False))))
+        active |= set(session.scalars(select(PracticeSession.student_id).where(PracticeSession.started_at >= window_start,
+                                                                               PracticeSession.started_at < window_end)))
+        for student_id in sorted(active - existing):
+            student = session.get(Student, student_id)
+            if student is not None and student.active:
+                refresh(session, student, start, end, "scheduled", "daily")
 
 
 @register_projection_followup
@@ -282,10 +352,12 @@ def refresh_after_projection(session, tenant_id, student_id, worker):
     student = session.get(Student, student_id)
     if student is None:
         return
-    starts = sorted(set(session.scalars(select(LearningReport.period_start).where(LearningReport.student_id == student_id))),
-                    reverse=True)[:REFRESH_PERIODS]
-    for value in starts:
-        refresh(session, student, *period_of(date.fromisoformat(value)), "facts_changed")
+    for cadence, keep in REFRESH_PERIODS.items():
+        starts = sorted(set(session.scalars(select(LearningReport.period_start).where(LearningReport.student_id == student_id,
+                                                                                      LearningReport.cadence == cadence))),
+                        reverse=True)[:keep]
+        for value in starts:
+            refresh(session, student, *bounds(cadence, date.fromisoformat(value)), "facts_changed", cadence)
 
 
 @register_downstream_purger
@@ -299,7 +371,8 @@ class Strict(BaseModel):
 
 
 class GenerateInput(Strict):
-    period_start: str = Field(pattern=r"^\d{4}-\d{2}-(01|16)$")
+    period_start: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    cadence: Literal["half_month", "daily"] = "half_month"
 
 
 class EditInput(Strict):
@@ -328,7 +401,7 @@ def resolve_link(session, token: str):
     origin = session.get(LearningReport, link.report_id)
     if origin is None:
         raise Problem(404, "not_found", "not_found", "链接不存在、已过期或已被撤销。")
-    rows = versions(session, origin.student_id, origin.period_start)
+    rows = versions(session, origin.student_id, origin.period_start, cadence=origin.cadence)
     shown = [r for r in rows if r.status in ("published", "superseded")]
     current = next(r for r in reversed(shown) if r.status == "published")
     return link, current, shown
@@ -370,22 +443,30 @@ def install_reports(app, engine, cfg, database_session, current_actor):
     def generate(student_id: str, payload: GenerateInput, actor: ActorDep, session: SessionDep):
         require_staff(actor)
         student = require_student(session, actor, student_id)
-        start, end = parse_period(payload.period_start)
-        if window(start, end)[1] > now():
+        start, end = parse_period(payload.period_start, payload.cadence)
+        if payload.cadence == "daily" and window(start, end)[0] > now():
+            raise Problem(422, "validation", "invalid_request", "这一天还没开始，不能生成每日反馈。")
+        if payload.cadence == "half_month" and window(start, end)[1] > now():
             raise Problem(422, "validation", "invalid_request", "周期尚未结束，结束后才能生成报告。")
         session.scalar(select(Student).where(Student.id == student_id).with_for_update())
-        report = refresh(session, student, start, end, "requested")
+        report = refresh(session, student, start, end, "requested", payload.cadence)
         session.commit()
         return report_dict(report)
 
     @app.get("/v1/reports", operation_id="listReportQueue")
     def queue(actor: ActorDep, session: SessionDep, status: Literal["draft", "published", "superseded"] = "draft",
+              cadence: Literal["half_month", "daily"] = "half_month", period_start: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
               limit: Annotated[int, Query(ge=1, le=200)] = 100, offset: Annotated[int, Query(ge=0, le=10000)] = 0):
         require_staff(actor)
         students = accessible_students(actor).with_only_columns(Student.id)
-        rows = list(session.scalars(select(LearningReport).where(LearningReport.student_id.in_(students), LearningReport.status == status)
-                                    .order_by(LearningReport.period_start.desc(), LearningReport.id).offset(offset).limit(limit + 1)))
-        return {"items": [{**report_dict(r), "snapshot": None, "focus_count": len(r.snapshot["focus"]),
+        query = select(LearningReport).where(LearningReport.student_id.in_(students), LearningReport.status == status,
+                                             LearningReport.cadence == cadence)
+        if period_start is not None:
+            query = query.where(LearningReport.period_start == period_start)
+        rows = list(session.scalars(query.order_by(LearningReport.period_start.desc(), LearningReport.id).offset(offset).limit(limit + 1)))
+        names = dict(session.execute(select(Student.id, Student.display_name).where(Student.id.in_({r.student_id for r in rows[:limit]}))).all())
+        return {"items": [{**report_dict(r), "snapshot": None, "student_name": names.get(r.student_id),
+                           "focus_count": len(r.snapshot["focus"]), "mistake_count": len(r.snapshot.get("mistakes", [])),
                            "sufficient": r.snapshot["sufficient"]} for r in rows[:limit]],
                 "next_offset": offset + limit if len(rows) > limit else None}
 
@@ -421,12 +502,12 @@ def install_reports(app, engine, cfg, database_session, current_actor):
         current = fingerprints(session, [student.id]).get(student.id)
         if current is not None and (projection is None or projection.source_fingerprint != current):
             raise Problem(409, "conflict", "projection_pending", "最新的改判或作答还在汇总，请稍后再发布。")
-        latest = refresh(session, student, *period_of(date.fromisoformat(report.period_start)), "facts_changed")
+        latest = refresh(session, student, *bounds(report.cadence, date.fromisoformat(report.period_start)), "facts_changed", report.cadence)
         if latest is not report or report.revision != payload.expected_revision:
             session.commit()
             raise Problem(409, "conflict", "report_changed", "报告事实已更新，请重新核对后发布。")
         previous = session.get(LearningReport, report.supersedes_id) if report.supersedes_id else None
-        if previous is not None and not payload.correction_note:
+        if previous is not None and report.cadence == "half_month" and not payload.correction_note:
             raise Problem(422, "validation", "invalid_request", "更正版本必须写明更正说明。")
         stamp = now()
         if previous is not None:
@@ -458,7 +539,8 @@ def install_reports(app, engine, cfg, database_session, current_actor):
         report = load(session, actor, report_id)
         rows = session.scalars(select(ReportShareLink).where(ReportShareLink.student_id == report.student_id,
                                                              ReportShareLink.report_id.in_(
-                                                                 [r.id for r in versions(session, report.student_id, report.period_start)])))
+                                                                 [r.id for r in versions(session, report.student_id, report.period_start,
+                                                                                         cadence=report.cadence)])))
         return {"items": [link_dict(r) for r in rows]}
 
     @app.post("/v1/report-share-links/{link_id}/revoke", operation_id="revokeReportShareLink")
@@ -516,6 +598,8 @@ def render_missing():
 
 
 def render_report(body):
+    if body["report"]["cadence"] == "daily":
+        return render_daily(body)
     e = lambda value: html.escape(str(value)) if value is not None else ""  # noqa: E731
     report, snap = body["report"], body["report"]["snapshot"]
     period, coverage, tasks, help_ = snap["period"], snap["coverage"], snap["school_tasks"], snap["help"]
@@ -567,5 +651,59 @@ def render_report(body):
     if report["staff_note"] or report["next_step"]:
         parts.append(f"<section><h2>老师的话</h2><p>{e(report['staff_note'])}</p>"
                      + (f"<p><b>下一步：</b>{e(report['next_step'])}</p>" if report["next_step"] else "") + "</section>")
+    parts.append(f"<p class=muted>{e(snap['limitations'])}</p></main></html>")
+    return "".join(parts)
+
+
+def render_daily(body):
+    e = lambda value: html.escape(str(value)) if value is not None else ""  # noqa: E731
+    report, snap = body["report"], body["report"]["snapshot"]
+    coverage, tasks, help_ = snap["coverage"], snap["school_tasks"], snap["help"]
+    parts = [f"<!doctype html><html lang=zh-CN><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+             f"<meta name=robots content=noindex><title>学伴今日反馈</title><style>{STYLE}</style><main>",
+             f"<p class=muted>学伴 · 托管班今日学习反馈</p><h1>{e(body['student_name'])} · {e(snap['period']['start'])}</h1>",
+             f"<p class=muted>老师核对后发送于 {e(_parse(report['published_at']).astimezone(SHANGHAI).strftime('%H:%M') if report['published_at'] else '')}"
+             + (f" · 第 {e(report['version'])} 版" if report["version"] > 1 else "") + "</p>"]
+    if body["corrections"]:
+        notes = "".join(f"<li>{e(c['correction_note'])}</li>" for c in body["corrections"] if c["correction_note"])
+        parts.append("<section class=notice><p>老师发送后又更新了今天的情况，以下为最新内容。</p>"
+                     + (f"<ul>{notes}</ul>" if notes else "") + "</section>")
+    if report["staff_note"] or report["next_step"]:
+        parts.append(f"<section><h2 style='margin-top:0'>老师的话</h2><p>{e(report['staff_note'])}</p>"
+                     + (f"<p><b>明天留意：</b>{e(report['next_step'])}</p>" if report["next_step"] else "") + "</section>")
+    pending = tasks["awaiting_verification"] + tasks["not_judged"]
+    if coverage["homeworks"]:
+        parts.append(f"<section><h2 style='margin-top:0'>今天的作业</h2><dl><dt>拍照作业</dt><dd>{e(coverage['homeworks'])} 份，共 {e(tasks['questions'])} 道题</dd>"
+                     f"<dt>老师已核实</dt><dd>{e(tasks['staff_verified'])} 道：答对 {e(tasks['verdicts']['correct'])}，答错 {e(tasks['verdicts']['incorrect'])}，"
+                     f"部分正确 {e(tasks['verdicts']['partially_correct'])}</dd>"
+                     f"<dt>订正</dt><dd>已完成 {e(tasks['corrected_resolved'])} 道；还没完成 {e(tasks['correction_open'])} 道</dd>"
+                     + (f"<dt>待核实</dt><dd>{e(pending)} 道（还没核实的不算对错）</dd>" if pending else "") + "</dl></section>")
+    else:
+        parts.append("<section><h2 style='margin-top:0'>今天的作业</h2><p>今天没有在托管班拍照提交学校作业。</p></section>")
+    if snap.get("mistakes"):
+        rows = "".join(
+            f"<div class=card><dl><dt>题目</dt><dd>{e(m['question']) or '（题目文字未识别）'}</dd>"
+            f"<dt>出处</dt><dd>{e(m['homework_title'])}{(' · 第 ' + e(m['page']) + ' 页') if m['page'] else ''}</dd>"
+            + (f"<dt>老师判断</dt><dd>{e(m['verdict'])}</dd>" if m["verdict"] else "")
+            + f"<dt>订正</dt><dd>{e(m['correction'])}</dd></dl></div>" for m in snap["mistakes"])
+        parts.append(f"<section><h2 style='margin-top:0'>今天错的题和订正情况</h2>{rows}</section>")
+    if snap["focus"]:
+        rows = "".join(f"<li>{e(f['name'])}：今天 {e(f['denominator'])} 次核实作答中出错 {e(f['errors'])} 次"
+                       + (f"（已核实的具体问题：{e('；'.join(f['verified_scope']))}）" if f["verified_scope"] else "") + "</li>"
+                       for f in snap["focus"])
+        parts.append(f"<section><h2 style='margin-top:0'>今天卡住的知识点</h2><ul>{rows}</ul>"
+                     "<p class=muted>坐班老师会在后续作业里继续观察，家长无需额外布题。</p></section>")
+    if snap["steady"]:
+        rows = "、".join(e(s["name"]) for s in snap["steady"])
+        parts.append(f"<section><h2 style='margin-top:0'>今天做得好的</h2><p>{rows}</p></section>")
+    if help_["requests"] or help_["hints_viewed"]:
+        rows = "".join(f"<li>{e(h['question'])} —— {e(h['note'])}</li>" for h in help_["staff_help"])
+        parts.append(f"<section><h2 style='margin-top:0'>求助与提示</h2><p>向老师求助 {e(help_['requests'])} 次，查看提示 {e(help_['hints_viewed'])} 次。</p>"
+                     + (f"<ul>{rows}</ul>" if rows else "") + "</section>")
+    kinds, optional = snap.get("activity_kinds") or {}, snap["sections"].get("optional_activity") or {}
+    if kinds.get("preview") or kinds.get("variant"):
+        done = [f"预习 {kinds['preview']} 次"] * bool(kinds.get("preview")) + [f"举一反三练习 {kinds['variant']} 次"] * bool(kinds.get("variant"))
+        parts.append(f"<section><h2 style='margin-top:0'>自愿活动</h2><p>{'，'.join(done)}，共答 {e(optional.get('answered', 0))} 题、"
+                     f"答对 {e(optional.get('correct', 0))} 题。自愿活动不计入知识点判断。</p></section>")
     parts.append(f"<p class=muted>{e(snap['limitations'])}</p></main></html>")
     return "".join(parts)

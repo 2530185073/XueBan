@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Brain, BookOpen, CircleHelp, ClipboardCheck, Eye, FileText, Library, LoaderCircle, LockKeyhole, LogOut, Network, ShieldCheck, Sparkles, UserRound, X } from 'lucide-react'
+import { Brain, BookOpen, CircleHelp, ClipboardCheck, Eye, FileText, Library, LoaderCircle, LockKeyhole, LogOut, MessageSquareText, Network, ShieldCheck, Sparkles, UserRound, X } from 'lucide-react'
 import { ApiError, errorMessage, isConflict, StaffApi } from './api/client'
 import { LearningApi } from './api/learning'
 import type { AttemptCondition } from './api/learningTypes'
@@ -20,13 +20,14 @@ import type { LearningContext } from './components/LearningCommon'
 import MemoryArea from './components/MemoryArea'
 import PracticeArea from './components/PracticeArea'
 import ReportArea from './components/ReportArea'
+import DailyFeedbackArea from './components/DailyFeedbackArea'
 import StudentProfileArea from './components/StudentProfileArea'
 import { attemptChain } from './workspace'
 
 type Phase = 'login' | 'password' | 'ready' | 'sample'
-type Area = 'desk' | 'links' | 'profile' | 'memory' | 'reports' | 'practice'
+type Area = 'desk' | 'links' | 'profile' | 'memory' | 'daily' | 'reports' | 'practice'
 const areas: [Area, string, typeof BookOpen][] = [['desk', '坐班工作台', ClipboardCheck], ['links', '知识点映射确认', Network], ['profile', '学员画像', UserRound],
-  ['memory', '学伴记忆', Brain], ['reports', '半月报告', FileText], ['practice', '题库审核与选做', Library]]
+  ['memory', '学伴记忆', Brain], ['daily', '每日反馈', MessageSquareText], ['reports', '半月报告', FileText], ['practice', '题库审核与选做', Library]]
 const STAFF_ROLES = ['sitting_teacher', 'campus_admin']
 // setTimeout delays above 2^31-1 ms overflow and fire immediately.
 const MAX_TIMER = 2_147_000_000
@@ -353,6 +354,7 @@ export default function App() {
     {ready && area === 'links' ? <KnowledgeLinkArea ctx={ctx} onOpenCase={openCase} />
     : ready && area === 'profile' ? <StudentProfileArea ctx={ctx} studentId={student} onStudent={setStudentId} />
     : ready && area === 'memory' ? <MemoryArea ctx={ctx} studentId={student} onStudent={setStudentId} />
+    : ready && area === 'daily' ? <DailyFeedbackArea ctx={ctx} />
     : ready && area === 'reports' ? <ReportArea ctx={ctx} studentId={student} onStudent={setStudentId} />
     : ready && area === 'practice' ? <PracticeArea ctx={ctx} studentId={student} onStudent={setStudentId} />
     : <main id="main" className="workbench">

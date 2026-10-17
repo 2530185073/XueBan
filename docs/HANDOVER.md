@@ -9,7 +9,7 @@
 | 后端服务 | 已具备 | [services/backend](../services/backend/README.md) |
 | 坐班工作台 / 学生网页 | 已具备（由后端同源托管） | [apps/staff-web](../apps/staff-web/README.md)、[apps/student-web](../apps/student-web/README.md) |
 | 正式接口 | 已具备（`0.1.0-draft`，CI 校验） | [contracts/phase1](../contracts/phase1/README.md) |
-| 数据库迁移 | 已具备（`0001 → 0009`） | `services/backend/migrations/versions/` |
+| 数据库迁移 | 已具备（`0001 → 0010`） | `services/backend/migrations/versions/` |
 | 部署产物与配置模板 | 已具备 | `infra/compose.yaml`、`infra/Dockerfile`、`infra/Caddyfile`、`infra/xueban.env.example`、`infra/model.env.example` |
 | 部署、升级与回滚 | 已具备（CI Deployment smoke） | [DEPLOY](runbooks/DEPLOY.md) |
 | 备份、恢复与删除重放 | 已具备脚本与手册；生产演练待现场 | [BACKUP_RESTORE](runbooks/BACKUP_RESTORE.md)、`infra/scripts/` |
@@ -21,6 +21,6 @@
 | 冻结记录 | 工程口径已冻结；设备/题型/样本/阈值待现场 | [PHASE1_FREEZE](PHASE1_FREEZE.md) |
 | 试点流程与 C0/R1/R2 证据 | 清单已具备；证据待现场 | [PILOT](runbooks/PILOT.md) |
 | 已知支持范围 | 待现场：按冻结题型与设备矩阵结果填写 | 本表与 [PHASE1_FREEZE](PHASE1_FREEZE.md) |
-| 后续阶段学习层 | 已具备（知识图谱、长期 AI、家长报告、举一反三、预习小测） | [LEARNING_LAYER](LEARNING_LAYER.md) |
+| 后续阶段学习层 | 已具备（知识图谱、长期 AI、半月报告与每日家长反馈、举一反三、预习小测） | [LEARNING_LAYER](LEARNING_LAYER.md) |
 
 验证记录见 [VALIDATION](../VALIDATION.md)。

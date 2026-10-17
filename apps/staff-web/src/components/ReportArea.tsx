@@ -51,9 +51,9 @@ export default function ReportArea({ ctx, studentId, onStudent }: { ctx: Learnin
       </div>}
       <div className="queue-list">
         {mode === 'student' ? <LoadNote state={own}>
-          {own.data?.items.map(report => <ReportItem key={report.id} report={report} name={name(report.student_id)} selected={report.id === chosen} onSelect={() => setChosen(report.id)}
+          {own.data?.items.filter(report => report.cadence === 'half_month').map(report => <ReportItem key={report.id} report={report} name={name(report.student_id)} selected={report.id === chosen} onSelect={() => setChosen(report.id)}
             extra={report.snapshot?.sufficient ? `${report.snapshot.focus.length} 个具体问题` : '学科证据不足'} />)}
-          {own.data && own.data.items.length === 0 && <div className="queue-empty"><p>这位学员还没有报告</p><span>每期结束后系统会自动生成草稿。</span></div>}
+          {own.data && !own.data.items.some(report => report.cadence === 'half_month') && <div className="queue-empty"><p>这位学员还没有报告</p><span>每期结束后系统会自动生成草稿。</span></div>}
         </LoadNote> : <LoadNote state={queue}>
           {queue.data?.items.map(report => <ReportItem key={report.id} report={report} name={name(report.student_id)} selected={report.id === chosen} onSelect={() => setChosen(report.id)}
             extra={report.sufficient ? `${report.focus_count} 个具体问题` : '学科证据不足'} />)}

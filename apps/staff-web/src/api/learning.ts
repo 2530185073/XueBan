@@ -10,6 +10,7 @@ import {
 const segment = encodeURIComponent
 const invalid = () => new ApiError(422, 'Invalid request', 'invalid_request')
 const PERIOD_START = /^\d{4}-\d{2}-(01|16)$/
+const DAY = /^\d{4}-\d{2}-\d{2}$/
 
 /** Knowledge, memory, report and practice endpoints, on the same session and pending-write lock as the workbench. */
 export class LearningApi {
@@ -57,11 +58,19 @@ export class LearningApi {
   requestSummary(studentId: string) { return this.api.call(`/v1/students/${segment(studentId)}/agent-runs`, isAgentRun, { payload: { purpose: 'staff_summary' } }) }
   runs(studentId: string, signal?: AbortSignal) { return this.api.call(`/v1/students/${segment(studentId)}/agent-runs`, isAgentRunList, { signal }) }
 
-  reportQueue(status: Exclude<ReportStatus, 'superseded'>, signal?: AbortSignal) { return this.api.call(`/v1/reports?status=${status}`, isReportQueue, { signal }) }
+  reportQueue(status: Exclude<ReportStatus, 'superseded'>, signal?: AbortSignal, daily?: string) {
+    if (daily !== undefined && !DAY.test(daily)) throw invalid()
+    const scope = daily ? `&cadence=daily&period_start=${daily}&limit=200` : ''
+    return this.api.call(`/v1/reports?status=${status}${scope}`, isReportQueue, { signal })
+  }
   studentReports(studentId: string, signal?: AbortSignal) { return this.api.call(`/v1/students/${segment(studentId)}/reports`, isReportList, { signal }) }
   generateReport(studentId: string, periodStart: string) {
     if (!PERIOD_START.test(periodStart)) throw invalid()
     return this.api.call(`/v1/students/${segment(studentId)}/reports`, isReport, { payload: { period_start: periodStart } })
+  }
+  generateDaily(studentId: string, day: string) {
+    if (!DAY.test(day)) throw invalid()
+    return this.api.call(`/v1/students/${segment(studentId)}/reports`, isReport, { payload: { period_start: day, cadence: 'daily' } })
   }
   report(id: string, signal?: AbortSignal) { return this.api.call(`/v1/reports/${segment(id)}`, isReport, { signal }) }
   editReport(id: string, payload: { expected_revision: number; staff_note: string | null; next_step: string | null }) {

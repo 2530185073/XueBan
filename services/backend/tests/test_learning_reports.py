@@ -1,4 +1,4 @@
-"""Half-month reports: fixed windows, locked facts, publication, corrections and guardian links."""
+"""Half-month reports and daily feedback: fixed windows, locked facts, publication, corrections and guardian links."""
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
@@ -39,8 +39,8 @@ def after_period(flow, monkeypatch):
     return start.isoformat()
 
 
-def reports(flow):
-    return flow.client.get("/v1/students/student_a/reports").json()["items"]
+def reports(flow, cadence="half_month"):
+    return [r for r in flow.client.get("/v1/students/student_a/reports").json()["items"] if r["cadence"] == cadence]
 
 
 def publish(flow, report, note=None):
@@ -140,7 +140,8 @@ def test_student_sees_only_published_reports_and_purge_removes_them(flow, after_
     reviewed(flow)
     learning(flow).drain()
     with Session(flow.database.engine) as session:
-        draft_id = session.scalar(select(LearningReport.id).where(LearningReport.student_id == "student_a"))
+        draft_id = session.scalar(select(LearningReport.id).where(LearningReport.student_id == "student_a",
+                                                                  LearningReport.cadence == "half_month"))
         assert session.scalar(select(LearningReport.id).where(LearningReport.student_id == "student_b"))
     assert reports(flow) == []
     assert flow.client.get(f"/v1/reports/{draft_id}").status_code == 404
@@ -153,3 +154,84 @@ def test_student_sees_only_published_reports_and_purge_removes_them(flow, after_
         session.commit()
         for model in (LearningReport, ReportShareLink):
             assert session.scalar(select(func.count()).select_from(model).where(model.student_id == "student_a")) == 0
+
+
+@pytest.fixture
+def same_day(flow, monkeypatch):
+    with Session(flow.database.engine) as session:
+        occurred = utc(session.get(Homework, flow.homework_id).occurred_at)
+    monkeypatch.setattr(learning_reports, "now", lambda: occurred + timedelta(minutes=1))
+    return local_day(occurred).isoformat()
+
+
+def test_daily_feedback_is_drafted_the_same_day_and_lists_what_to_correct(flow, same_day):
+    case = reviewed(flow)
+    teacher(flow)
+    case = review(flow, case)
+    link(flow, case)
+    learning(flow).drain()
+    [draft] = reports(flow, "daily")
+    assert draft["period_start"] == same_day and draft["status"] == "draft" and draft["version"] == 1
+    [queued] = flow.client.get(f"/v1/reports?cadence=daily&period_start={same_day}").json()["items"]
+    assert queued["id"] == draft["id"] and queued["student_name"] and queued["mistake_count"] == 1
+    assert draft["id"] not in {r["id"] for r in flow.client.get("/v1/reports").json()["items"]}
+    snapshot = draft["snapshot"]
+    assert snapshot["rule_version"] == "daily-r1" and snapshot["unknown_current"] == []
+    [mistake] = snapshot["mistakes"]
+    assert mistake["case_id"] == case["id"] and mistake["verdict"] == "答错" and mistake["correction"] == "还没订正"
+    assert [f["knowledge_id"] for f in snapshot["focus"]] == ["kp-rational-add-sub"]
+    edited = flow.client.patch(f"/v1/reports/{draft['id']}", json={"expected_revision": draft["revision"], "staff_note": "今天很专注。",
+                                                                   "next_step": "明天先把这道题订正完。"}).json()
+    v1 = publish(flow, edited)
+    assert v1.status_code == 200, v1.text
+    created = flow.client.post(f"/v1/reports/{draft['id']}/share-links", json={"expires_in_days": 7}).json()
+    page = flow.client.get(created["path"], headers={"Authorization": ""}).text
+    assert "今日学习反馈" in page and "今天错的题和订正情况" in page and "还没订正" in page and "今天很专注。" in page
+    assert "半月" not in page
+
+    review(flow, flow.client.get(f"/v1/cases/{case['id']}").json(), action="replace", verdict="correct")
+    learning(flow).drain()
+    items = {r["version"]: r for r in reports(flow, "daily")}
+    assert items[2]["status"] == "draft" and items[2]["supersedes_id"] == v1.json()["id"] and items[2]["snapshot"]["mistakes"] == []
+    assert items[2]["staff_note"] == "今天很专注。"
+    assert publish(flow, items[2]).status_code == 200
+    page = flow.client.get(created["path"], headers={"Authorization": ""}).text
+    assert "老师发送后又更新了今天的情况" in page and "今天错的题和订正情况" not in page
+
+
+def test_daily_feedback_can_be_requested_for_today_but_not_tomorrow(flow, same_day):
+    reviewed(flow)
+    body = {"period_start": same_day, "cadence": "daily"}
+    assert flow.client.post("/v1/students/student_a/reports", json=body).status_code == 403
+    teacher(flow)
+    created = flow.client.post("/v1/students/student_a/reports", json=body)
+    assert created.status_code == 201, created.text
+    assert created.json()["cadence"] == "daily" and created.json()["snapshot"]["coverage"]["homeworks"] == 1
+    tomorrow = (date.fromisoformat(same_day) + timedelta(days=1)).isoformat()
+    assert flow.client.post("/v1/students/student_a/reports", json={**body, "period_start": tomorrow}).status_code == 422
+    assert flow.client.post("/v1/students/student_a/reports", json={**body, "period_start": "2026-13-01"}).status_code == 422
+    learning(flow).drain()
+    assert len(reports(flow, "daily")) == 1
+
+
+def test_daily_feedback_tells_a_real_correction_apart_from_a_rejudgment(flow, same_day):
+    case = reviewed(flow)
+    teacher(flow)
+    case = review(flow, case)
+    asset = flow.uploaded()
+    response = flow.post(f"/v1/cases/{case['id']}/attempts", {
+        "expected_revision": case["revision"], "parent_attempt_id": case["current_attempt_id"],
+        "question_revision": case["current_question_revision"], "asset_ids": [asset["id"]],
+        "occurred_at": "2026-10-17T01:01:00Z", "reported_help": "none_reported"})
+    assert response.status_code == 202, response.text
+    flow.worker.run_once()
+    flow.pipeline.verdict = "correct"
+    flow.start_check(flow.client.get(f"/v1/cases/{case['id']}").json())
+    flow.worker.run_once()
+    case = review(flow, flow.client.get(f"/v1/cases/{case['id']}").json(), verdict="correct")
+    assert case["progress"] == "verified_resolved"
+    learning(flow).drain()
+    [draft] = reports(flow, "daily")
+    [mistake] = draft["snapshot"]["mistakes"]
+    assert mistake["verdict"] is None and mistake["correction"] == "已订正，老师确认通过"
+    assert draft["snapshot"]["school_tasks"]["corrected_resolved"] == 1

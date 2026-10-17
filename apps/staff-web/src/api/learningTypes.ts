@@ -192,9 +192,11 @@ export function isAgentRunList(value: unknown): value is AgentRunList {
 /** Older runs carry an empty context until the worker fills it in. */
 export const runEvidence = (run: AgentRun) => run.context.evidence_ids ?? []
 
-// Half-month reports
+// Half-month reports and daily feedback
 
 export type ReportStatus = 'draft' | 'published' | 'superseded'
+export type ReportCadence = 'half_month' | 'daily'
+export interface DailyMistake { case_id: string; homework_title: string | null; page: number | null; question: string; verdict: string | null; progress: string; correction: string }
 export interface EvidenceCard { evidence_id: string; date: string; homework_title: string | null; page: number | null; question: string; result: string; assistance: string; staff_explanation: string | null; certainty: string }
 export interface FocusItem {
   knowledge_id: string; name: string; errors: number; denominator: number; independent_errors: number; counter_evidence: number; assistance: Record<string, number>
@@ -206,17 +208,20 @@ export interface ReportSnapshot {
   school_tasks: { questions: number; staff_verified: number; awaiting_verification: number; not_judged: number; verdicts: Record<'correct' | 'incorrect' | 'partially_correct' | 'unanswered', number>; corrected_resolved: number; correction_open: number }
   help: { requests: number; by_kind: Record<string, number>; resolved: number; hints_viewed: number; answers_shown: number; staff_help: { date: string; kind: string; question: string; outcome: string; note: string }[] }
   focus: FocusItem[]; steady: { knowledge_id: string; name: string; correct: number; independent_correct: number }[]; unknown_current: { knowledge_id: string; name: string }[]
-  sufficient: boolean; sections: { optional_activity?: { summary: string } }; limitations: string
+  sufficient: boolean; sections: { optional_activity?: { summary: string; answered?: number; correct?: number } }; limitations: string
+  mistakes?: DailyMistake[]; activity_kinds?: { preview: number; variant: number }
 }
 export interface Report {
-  id: string; student_id: string; period_start: string; period_end: string; version: number; status: ReportStatus; snapshot: ReportSnapshot | null
+  id: string; student_id: string; cadence: ReportCadence; period_start: string; period_end: string; version: number; status: ReportStatus; snapshot: ReportSnapshot | null
   staff_note: string | null; next_step: string | null; correction_note: string | null; supersedes_id: string | null; published_at: string | null
   revision: number; regenerated_reason: string | null; updated_at: string | null
 }
-export interface QueuedReport extends Report { focus_count: number; sufficient: boolean }
+export interface QueuedReport extends Report { focus_count: number; mistake_count: number; sufficient: boolean; student_name: string | null }
 
 const isCard = (value: unknown): value is EvidenceCard => record(value) && id(value.evidence_id) && day(value.date) && optStr(value.homework_title) &&
   (value.page === null || count(value.page)) && str(value.question, 500) && text(value.result, 32) && text(value.assistance, 64) && optStr(value.staff_explanation) && text(value.certainty, 32)
+const isMistake = (value: unknown): value is DailyMistake => record(value) && id(value.case_id) && optStr(value.homework_title) &&
+  (value.page === null || count(value.page)) && str(value.question, 500) && optStr(value.verdict) && text(value.progress, 32) && text(value.correction, 64)
 const isFocus = (value: unknown): value is FocusItem => record(value) && id(value.knowledge_id) && text(value.name, 200) &&
   [value.errors, value.denominator, value.independent_errors, value.counter_evidence].every(count) && counts(value.assistance) && status(value.status_at_period_end) &&
   text(value.status_label, 32) && list(value.verified_scope, item => text(item, 500), 50) && list(value.possible_causes, item => text(item, 500), 50) &&
@@ -233,10 +238,12 @@ export function isReportSnapshot(value: unknown): value is ReportSnapshot {
     list(help.staff_help, item => record(item) && day(item.date) && text(item.kind, 32) && str(item.question, 200) && text(item.outcome, 32) && str(item.note, 500), 20) &&
     list(value.focus, isFocus, 500) && list(value.steady, item => record(item) && id(item.knowledge_id) && text(item.name, 200) && count(item.correct) && count(item.independent_correct), 500) &&
     list(value.unknown_current, item => record(item) && id(item.knowledge_id) && text(item.name, 200), 50) && typeof value.sufficient === 'boolean' &&
-    (sections.optional_activity === undefined || (record(sections.optional_activity) && text(sections.optional_activity.summary, 500))) && text(value.limitations, 2000)
+    (sections.optional_activity === undefined || (record(sections.optional_activity) && text(sections.optional_activity.summary, 500))) && text(value.limitations, 2000) &&
+    (value.mistakes === undefined || list(value.mistakes, isMistake, 30)) &&
+    (value.activity_kinds === undefined || (record(value.activity_kinds) && count(value.activity_kinds.preview) && count(value.activity_kinds.variant)))
 }
 function isReportBase(value: unknown): value is Report {
-  return record(value) && id(value.id) && id(value.student_id) && day(value.period_start) && day(value.period_end) && count(value.version) && (value.version as number) >= 1 &&
+  return record(value) && id(value.id) && id(value.student_id) && oneOf<ReportCadence>(['half_month', 'daily'])(value.cadence) && day(value.period_start) && day(value.period_end) && count(value.version) && (value.version as number) >= 1 &&
     oneOf<ReportStatus>(['draft', 'published', 'superseded'])(value.status) && optStr(value.staff_note) && optStr(value.next_step) && optStr(value.correction_note) &&
     optStr(value.supersedes_id) && optTime(value.published_at) && count(value.revision) && optStr(value.regenerated_reason) && optTime(value.updated_at)
 }
@@ -247,8 +254,10 @@ export function isReportList(value: unknown): value is { items: Report[] } {
   return record(value) && list(value.items, isReport, 500)
 }
 export function isReportQueue(value: unknown): value is { items: QueuedReport[] } {
-  return record(value) && list(value.items, item => isReportBase(item) && item.snapshot === null && count((item as unknown as Record<string, unknown>).focus_count) &&
-    typeof (item as unknown as Record<string, unknown>).sufficient === 'boolean', 200)
+  return record(value) && list(value.items, item => {
+    const extra = item as unknown as Record<string, unknown>
+    return isReportBase(item) && item.snapshot === null && count(extra.focus_count) && count(extra.mistake_count) && typeof extra.sufficient === 'boolean' && optStr(extra.student_name)
+  }, 200) && (value.next_offset === null || count(value.next_offset))
 }
 
 export interface ShareLink { id: string; report_id: string; created_at: string; expires_at: string; revoked_at: string | null; view_count: number; last_viewed_at: string | null }

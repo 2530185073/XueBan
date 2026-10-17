@@ -90,7 +90,7 @@ PYTHONPATH=services/backend services/backend/.venv/bin/python -m xueban_backend.
 
 所有业务写入要求 `Idempotency-Key`，作用域为真实主体、授权学生、实际操作路径；同键同载荷重放原响应，同键不同载荷409。聚合写入先锁作业，再核验 `expected_revision`；幂等记录、业务变动、任务及事件同一事务提交。客户端应在新的操作前读取最新 aggregate；重试旧操作保持原键和原载荷。
 
-`0001_identity_homeworks → 0002_device_pairing → 0003_correction → 0004_password_accounts → 0005_deletion_requests → 0006_learning_graph → 0007_agent_memory → 0008_learning_reports → 0009_optional_practice` 是显式迁移。0003新增私有资产、当前文档、不可变版本快照、任务和事件。应用不使用 `create_all` 绕过迁移。授权仍由服务层强制执行，数据库通过原作业归属外键组织业务记录；此切片没有宣称已部署 PostgreSQL RLS。
+`0001_identity_homeworks → 0002_device_pairing → 0003_correction → 0004_password_accounts → 0005_deletion_requests → 0006_learning_graph → 0007_agent_memory → 0008_learning_reports → 0009_optional_practice → 0010_daily_feedback` 是显式迁移。0003新增私有资产、当前文档、不可变版本快照、任务和事件。应用不使用 `create_all` 绕过迁移。授权仍由服务层强制执行，数据库通过原作业归属外键组织业务记录；此切片没有宣称已部署 PostgreSQL RLS。
 
 任务表是事务持久队列。PG通过 `FOR UPDATE SKIP LOCKED` 领取，提交租约后再执行模型，模型调用期间不持有数据库事务。进程崩溃、重启后可重新领取过期租约；完成时校验租约 token 和期限，旧 Worker 不能覆盖新结果。最多执行3次；429/5xx等暂时失败有限退避，超时保留费用未知并终止，等待用户明确重试。重启恢复可能重复一次已计费推理，不能保证外部模型恰好调用一次；每次执行的开始、元数据及费用未知记录持久保存，业务结果不会重复生成。
 

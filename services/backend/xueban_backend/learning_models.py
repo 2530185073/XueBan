@@ -223,11 +223,12 @@ class AgentRun(Base):
 
 
 class LearningReport(Base):
-    """One version of a half-month report; published versions are never rewritten."""
+    """One version of a half-month report or daily feedback; published versions are never rewritten."""
     __tablename__ = "learning_reports"
-    __table_args__ = (student_fk(), Index("ix_learning_reports_period", "student_id", "period_start", "version", unique=True),
+    __table_args__ = (student_fk(), Index("ix_learning_reports_period", "student_id", "cadence", "period_start", "version", unique=True),
                       Index("ix_learning_reports_status", "tenant_id", "campus_id", "status"))
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    cadence: Mapped[str] = mapped_column(String(16), nullable=False, default="half_month", server_default="half_month")
     tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
     campus_id: Mapped[str] = mapped_column(String(64), nullable=False)
     student_id: Mapped[str] = mapped_column(String(64), nullable=False)

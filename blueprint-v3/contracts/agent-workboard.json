@@ -381,6 +381,23 @@
         "apps/student-web/src/components/OptionalActivities.tsx"
       ],
       "acceptance": "课程未知不猜课；现场门禁操作负担待试点"
+    },
+    {
+      "id": "F06",
+      "title": "每日家长反馈：当天自动草稿、错题订正情况、老师一键发送",
+      "owner_role": "integration_agent",
+      "dependency_ids": [
+        "F03"
+      ],
+      "phase1_task_ids": [],
+      "status": "artifact_ready",
+      "artifact_paths": [
+        "services/backend/xueban_backend/learning_reports.py",
+        "services/backend/migrations/versions/0010_daily_feedback.py",
+        "apps/staff-web/src/components/DailyFeedbackArea.tsx"
+      ],
+      "acceptance": "有作业或活动的学员当天自动有草稿；只列老师确认的错题与真实订正；发送后变化生成更新版本，原链接显示最新；家长页无需账号、可撤销",
+      "evidence": "后端双库 676 passed、5 skipped（新增每日反馈 3 项×双库）；坐班工作台 73 tests；家长页 390 宽截图人工查看。家长理解度与老师每日操作时长待试点"
     }
   ],
   "execution_round": 3,
