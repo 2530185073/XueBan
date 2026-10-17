@@ -40,6 +40,12 @@ class ResetPassword(Strict):
     new_password: SecretStr
 
 
+class StaffAccess(Strict):
+    campus_ids: list[Annotated[str, Field(pattern=ID_PATTERN)]] = Field(min_length=1, max_length=20)
+    roles: list[str] = Field(min_length=1, max_length=2)
+    active: bool
+
+
 def needs_staff(case: dict, attempt: dict | None, question: dict | None = None) -> str | None:
     if case["lifecycle"] != "active" or case["progress"] == "verified_resolved":
         return None
@@ -150,6 +156,44 @@ def install_staff(app, engine, cfg, database_session, current_actor):
             revoke_sessions(session, principal_id)
             result = {"principal_id": principal_id, "must_change_password": True}
             record_operation(session, actor.id, "reset-staff:" + principal_id, idempotency_key, body, secret, credential_version=account.password_version, response_json=result)
+            return result
+
+    @app.post("/v1/admin/staff-accounts/{principal_id}/access", operation_id="updateStaffAccess")
+    def update_staff_access(principal_id: str, payload: StaffAccess, authorization: str | None = Header(default=None), idempotency_key: str = KEY):
+        secret = mac_key(signing_key(cfg))
+        roles = sorted(set(payload.roles))
+        if "sitting_teacher" not in roles or not set(roles) <= set(STAFF_ROLES):
+            raise Problem(422, "validation", "invalid_request", "老师账号必须包含坐班老师角色，可另加数据治理角色。")
+        campus_ids = sorted(set(payload.campus_ids))
+        body = {"principal_id": principal_id, "campus_ids": campus_ids, "roles": roles, "active": payload.active}
+        with Session(engine) as session, session.begin():
+            actor, campuses = admin_scope(session, authorization)
+            account = session.scalar(select(PasswordAccount).where(PasswordAccount.principal_id == principal_id, PasswordAccount.student_id.is_(None), PasswordAccount.tenant_id == actor.tenant_id).with_for_update())
+            if account is None or principal_id == actor.id or not manageable(session, campuses, principal_id):
+                raise Problem(404, "not_found", "not_found", "老师账号不存在或无权管理。")
+            old = operation(session, actor.id, "access-staff:" + principal_id, idempotency_key, body, secret)
+            if old:
+                return old.response_json
+            if not set(campus_ids) <= set(campuses):
+                raise Problem(403, "authorization", "access_denied", "所选校区不在当前管理员授权范围。")
+            current_roles = set(session.scalars(select(PrincipalRole.role).where(PrincipalRole.principal_id == principal_id)))
+            if not current_roles <= set(STAFF_ROLES):
+                raise Problem(409, "conflict", "not_staff_account", "该账号不是坐班老师账号，不能在此修改权限。")
+            for role in current_roles - set(roles):
+                session.delete(session.get(PrincipalRole, (principal_id, role)))
+            session.add_all([PrincipalRole(principal_id=principal_id, role=role) for role in set(roles) - current_roles])
+            grants = {g.campus_id: g for g in session.scalars(select(PrincipalCampusGrant).where(PrincipalCampusGrant.principal_id == principal_id).with_for_update())}
+            for campus_id, grant in grants.items():
+                grant.active = campus_id in campus_ids
+            session.add_all([PrincipalCampusGrant(principal_id=principal_id, campus_id=c, tenant_id=actor.tenant_id, active=True) for c in campus_ids if c not in grants])
+            narrowed = bool(current_roles - set(roles)) or any(g.active is False for g in grants.values()) or (account.active and not payload.active)
+            account.active = payload.active
+            account.updated_at = datetime.now(timezone.utc)
+            if narrowed:
+                revoke_sessions(session, principal_id)
+            session.flush()
+            result = staff_item(session, account)
+            record_operation(session, actor.id, "access-staff:" + principal_id, idempotency_key, body, secret, credential_version=account.password_version, response_json=result)
             return result
 
     @app.get("/v1/review-queue", operation_id="listReviewQueue")
