@@ -203,10 +203,15 @@ class DeletionExecutor:
         self.store = LocalAssetStore(settings.asset_storage_dir)
         self.ledger = DeletionLedger(settings.deletion_ledger_path) if settings.deletion_ledger_path else None
 
+    def _retention(self):
+        return timedelta(seconds=max(self.settings.device_cache_retention_seconds, self.settings.device_session_ttl_seconds))
+
     def _claim(self):
         timestamp = now()
         with Session(self.engine, expire_on_commit=False) as session:
-            eligible = or_(DeletionRequest.status == "accepted", (DeletionRequest.status == "running") & (DeletionRequest.lease_expires_at <= timestamp), DeletionRequest.status == "waiting_devices")
+            # A request still inside its device window must not hold back newer server-side deletions.
+            devices_due = (DeletionRequest.status == "waiting_devices") & (DeletionRequest.server_completed_at <= timestamp - self._retention())
+            eligible = or_(DeletionRequest.status == "accepted", (DeletionRequest.status == "running") & (DeletionRequest.lease_expires_at <= timestamp), devices_due)
             row = session.scalar(select(DeletionRequest).where(eligible).order_by(DeletionRequest.requested_at).with_for_update(skip_locked=True).limit(1))
             if row is None:
                 return None
@@ -222,8 +227,7 @@ class DeletionExecutor:
 
     def _finish_devices(self, session, row, timestamp):
         server_done = row.server_completed_at.replace(tzinfo=row.server_completed_at.tzinfo or timestamp.tzinfo)
-        retention = timedelta(seconds=max(self.settings.device_cache_retention_seconds, self.settings.device_session_ttl_seconds))
-        if timestamp < server_done + retention:
+        if timestamp < server_done + self._retention():
             session.rollback()
             return None
         row.targets = {**row.targets, "device_caches": "done"}

@@ -301,6 +301,11 @@ class CorrectionWorker:
         save_entity(session, self.contracts, homework.id, "case", case)
 
 
+def run_round(*runners) -> bool:
+    """Give every executor one turn so a sustained correction backlog cannot starve learning jobs."""
+    return any([runner() for runner in runners])
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run persistent photo correction jobs")
     parser.add_argument("--once", action="store_true")
@@ -315,7 +320,7 @@ def main():
             worker = CorrectionWorker(engine, settings, pipeline)
             learning = LearningWorker(engine, client=pipeline.client)
             while True:
-                worked = deletions.run_once() or worker.run_once() or learning.run_once()
+                worked = run_round(deletions.run_once, worker.run_once, learning.run_once)
                 if args.once:
                     break
                 if not worked:

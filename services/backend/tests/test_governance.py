@@ -116,6 +116,29 @@ def test_restored_backup_is_purged_again_from_ledger(flow, tmp_path):
     client.close()
 
 
+def test_device_retention_wait_does_not_block_later_deletions(flow, tmp_path):
+    flow.ready()
+    cfg, client = configured(flow, tmp_path)
+    headers = add_steward(flow)
+    first = client.post("/v1/students/student_a/deletion-requests", json=BODY, headers={**headers, "Idempotency-Key": "delete-student-a-5"}).json()
+    executor = DeletionExecutor(flow.database.engine, cfg)
+    assert executor.run_once()
+    with Session(flow.database.engine) as session:
+        session.add(Student(id="student_later", tenant_id="tenant_a", campus_id="campus_a", display_name="合成学员乙", active=True))
+        session.flush()
+        session.add(StudentGrant(principal_id="steward_a", student_id="student_later", tenant_id="tenant_a", active=True))
+        session.commit()
+    later = client.post("/v1/students/student_later/deletion-requests", json=BODY, headers={**headers, "Idempotency-Key": "delete-student-later-1"})
+    assert later.status_code == 202, later.text
+
+    # The older request is still inside its device-cache window; the newer one must not wait behind it.
+    assert executor.run_once()
+    statuses = {r["id"]: client.get(f"/v1/deletion-requests/{r['id']}", headers=headers).json()["status"] for r in (first, later.json())}
+    assert statuses == {first["id"]: "waiting_devices", later.json()["id"]: "waiting_devices"}
+    assert not executor.run_once()
+    client.close()
+
+
 def test_deletion_refused_without_ledger(flow):
     headers = add_steward(flow)
     response = flow.client.post("/v1/students/student_a/deletion-requests", json=BODY, headers={**headers, "Idempotency-Key": "delete-student-a-4"})
