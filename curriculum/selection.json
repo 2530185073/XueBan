@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "decided_at": "2026-10-17",
+  "decided_by": "项目方（用户在对话中提供各年级各科出版社）",
+  "scope_note": "只收主科；音乐、体育与健康、美术不收。初中“政治”即统编《道德与法治》。",
+  "source": {
+    "repository": "TapXWorld/ChinaTextbook",
+    "commit": "5a80345f2043ba6f8db8d7be9cf3db82725ff1f7",
+    "license": null,
+    "rights_note": "仓库未声明许可，教材版权属出版社。PDF 只下载到本机资料目录用于版本核对与目录整理，不提交仓库、不对外分发。"
+  },
+  "classes": [
+    {
+      "grade": 7, "label": "初一",
+      "subjects": [
+        {"subject": "语文", "publisher": "人民教育出版社", "path": "初中/语文/统编版-人民教育出版社/七年级"},
+        {"subject": "数学", "publisher": "北京师范大学出版社", "path": "初中/数学/北师大版-北京师范大学出版社/七年级"},
+        {"subject": "英语", "publisher": "人民教育出版社", "path": "初中/英语/人教版-人民教育出版社/七年级"},
+        {"subject": "道德与法治", "publisher": "人民教育出版社", "path": "初中/道德与法治/统编版-人民教育出版社/七年级"},
+        {"subject": "历史", "publisher": "人民教育出版社", "path": "初中/历史/统编版-人民教育出版社/七年级"},
+        {"subject": "地理", "publisher": "人民教育出版社", "path": "初中/地理/人教版-人民教育出版社/七年级"},
+        {"subject": "生物学", "publisher": "江苏凤凰科学技术出版社", "path": "初中/生物学/苏科版-江苏凤凰科学技术出版社/七年级"}
+      ]
+    },
+    {
+      "grade": 8, "label": "初二",
+      "subjects": [
+        {"subject": "语文", "publisher": "人民教育出版社", "path": "初中/语文/统编版-人民教育出版社/八年级"},
+        {"subject": "数学", "publisher": "北京师范大学出版社", "path": "初中/数学/北师大版-北京师范大学出版社/八年级"},
+        {"subject": "英语", "publisher": "人民教育出版社", "path": "初中/英语/人教版-人民教育出版社/八年级"},
+        {"subject": "物理", "publisher": "江苏凤凰科学技术出版社", "path": "初中/物理/苏科版-江苏凤凰科学技术出版社/八年级"},
+        {"subject": "道德与法治", "publisher": "人民教育出版社", "path": "初中/道德与法治/统编版-人民教育出版社/八年级"},
+        {"subject": "历史", "publisher": "人民教育出版社", "path": "初中/历史/统编版-人民教育出版社/八年级"},
+        {"subject": "地理", "publisher": "人民教育出版社", "path": "初中/地理/人教版-人民教育出版社/八年级"},
+        {"subject": "生物学", "publisher": "江苏凤凰科学技术出版社", "path": "初中/生物学/苏科版-江苏凤凰科学技术出版社/八年级"}
+      ]
+    },
+    {
+      "grade": 5, "label": "五年级",
+      "subjects": [
+        {"subject": "语文", "publisher": "人民教育出版社", "path": "小学/语文/统编版", "match": "五年级"},
+        {"subject": "数学", "publisher": "人民教育出版社", "path": "小学/数学/人教版", "match": "五年级"},
+        {"subject": "英语", "publisher": "陕西旅游出版社", "path": "小学/英语/陕旅版", "match": "五年级"},
+        {"subject": "科学", "publisher": "教育科学出版社", "path": "小学/科学/教科版", "match": "五年级"}
+      ]
+    },
+    {
+      "grade": 6, "label": "六年级",
+      "subjects": [
+        {"subject": "语文", "publisher": "人民教育出版社", "path": "小学/语文/统编版", "match": "六年级"},
+        {"subject": "数学", "publisher": "人民教育出版社", "path": "小学/数学/人教版", "match": "六年级"},
+        {"subject": "英语", "publisher": "陕西旅游出版社", "path": "小学/英语/陕旅版", "match": "六年级"},
+        {"subject": "科学", "publisher": "教育科学出版社", "path": "小学/科学/教科版", "match": "六年级"}
+      ]
+    }
+  ]
+}

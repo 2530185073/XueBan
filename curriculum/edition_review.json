@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "note": "人工核对结论，用于封面与版权页读不出年份的扫描本；extract_catalog.py 用它覆盖 check_manually。",
+  "reviews": [
+    {
+      "id": "g7-geography-down",
+      "verdict": "outdated",
+      "reviewed_at": "2026-10-17",
+      "evidence": "本地目录从“第六章 我们生活的大洲——亚洲”起、无跨学科主题学习；平台现行版从“第七章 我们生活的大洲——亚洲”起，含“【跨学科主题学习】认识东南亚世界遗产”。"
+    },
+    {
+      "id": "g8-geography-down",
+      "verdict": "outdated",
+      "reviewed_at": "2026-10-17",
+      "evidence": "本地目录“第六章 北方地区 / 第七章 南方地区”；平台现行版为“第六章 中国地理差异 / 第七章 北方地区 / 第八章 南方地区”，含跨学科主题学习。"
+    }
+  ]
+}
