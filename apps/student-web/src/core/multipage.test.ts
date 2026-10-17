@@ -127,6 +127,17 @@ describe('multi-page drafts', () => {
     await expect(s.client.editPage(d.id, b, { rotate: 1 })).rejects.toMatchObject({ code: 'draft_locked' })
     await expect(s.client.discardDraft(d.id)).rejects.toMatchObject({ code: 'draft_locked' })
   })
+  it('runs recognition again on request when it located no question, without re-uploading pages', async () => {
+    const s = server(); await login(s.client)
+    const d = await s.client.createDraft([page('one'), page('two')])
+    await s.client.runDraft(d.id)
+    await s.client.runDraft(d.id)
+    expect(s.recognitions()).toHaveLength(1)
+    await s.client.runDraft(d.id, { rerecognize: true })
+    const [first, second] = s.recognitions()
+    expect(s.recognitions()).toHaveLength(2); expect(second.key).not.toBe(first.key)
+    expect(second.body.asset_ids).toEqual(first.body.asset_ids); expect(s.uploads()).toHaveLength(2)
+  })
   it('resumes after a weak-network failure mid-batch without re-sending received pages', async () => {
     const s = server(); await login(s.client); s.failPut(2)
     const d = await s.client.createDraft([page('one'), page('two'), page('three')])

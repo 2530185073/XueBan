@@ -454,6 +454,24 @@ def test_staff_revision_that_clears_judgment_stays_in_review_queue(flow):
     assert queue().get(case["id"]) != "awaiting_check"
 
 
+def test_recognition_that_located_nothing_can_be_run_again_but_not_after_questions_exist(flow):
+    flow.pipeline.unknown_location = True
+    asset, job = flow.recognize()
+    assert flow.worker.run_once()
+    assert flow.client.get(f"/v1/jobs/{job['id']}").json()["status"] == "succeeded"
+    assert flow.homework()["case_ids"] == []
+    assert "1 道没能在照片上定位" in flow.homework()["coverage"]["note"]
+
+    path = f"/v1/homeworks/{flow.homework_id}/recognitions"
+    flow.pipeline.unknown_location = False
+    again = flow.post(path, {"expected_revision": flow.homework()["revision"], "asset_ids": [asset["id"]]})
+    assert again.status_code == 202, again.text
+    assert flow.worker.run_once()
+    assert len(flow.homework()["case_ids"]) == 1
+    third = flow.post(path, {"expected_revision": flow.homework()["revision"], "asset_ids": [asset["id"]]})
+    assert third.status_code == 409
+
+
 def test_failed_commit_rolls_back_task_and_idempotency_for_retry(flow, monkeypatch):
     import xueban_backend.correction_api as api
     asset = flow.uploaded()

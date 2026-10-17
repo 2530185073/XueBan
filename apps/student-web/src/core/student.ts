@@ -443,12 +443,12 @@ export class StudentClient {
     throw new StudentError('job_waiting', 0, '任务仍在处理中，可稍后打开这份记录继续查看。')
   }
   private jobSucceeded(job: Job) { if (job.status !== 'succeeded') throw new StudentError(`job_${job.status}`, 0, job.status === 'failed' ? '本次识别或检查未完成。原图和失败记录已保留，可明确重试未完成部分。' : '任务版本已变化，请刷新作业查看最新结果。') }
-  runDraft(id: string, options: { retryFailed?: boolean } = {}): Promise<DraftView> {
+  runDraft(id: string, options: { retryFailed?: boolean; rerecognize?: boolean } = {}): Promise<DraftView> {
     const key = `${this.epoch}:${id}`; const existing = this.runs.get(key); if (existing) return existing
     const run = async () => { const ctx = await this.authorize(); if (typeof navigator !== 'undefined' && navigator.locks) return navigator.locks.request(`xueban:${ctx.scope}:${id}`, () => this.process(ctx, id, options)); return this.process(ctx, id, options) }
     const result = run().finally(() => { this.runs.delete(key) }); this.runs.set(key, result); return result
   }
-  private async process(ctx: Context, id: string, options: { retryFailed?: boolean }): Promise<DraftView> {
+  private async process(ctx: Context, id: string, options: { retryFailed?: boolean; rerecognize?: boolean }): Promise<DraftView> {
     const d = await this.store.draft(ctx.scope, id); this.check(ctx)
     const journalId = d.journalId ?? id
     const post = <T>(name: string, path: string, body: unknown, shape: string, requestShape: string) => this.write<T>(ctx, `${journalId}:${name}`, path, body, shape, requestShape)
@@ -458,6 +458,12 @@ export class StudentClient {
       for (const pending of await this.store.pending(ctx.scope, `${journalId}:`)) await this.replay(ctx, pending)
       const recognitionOp = await this.store.operation(ctx.scope, `${journalId}:${d.correction ? 'correction' : 'recognition'}-${d.generation}`)
       if (!d.recognitionJobId && recognitionOp?.response) d.recognitionJobId = (recognitionOp.response as Accepted).job.id
+      // A recognition that finished without locating any question is run again on request, as a new generation.
+      if (options.rerecognize && !d.correction && d.homeworkId && d.recognitionJobId && !await this.store.hasPending(ctx.scope, `${journalId}:`)) {
+        const hw = await this.read<HomeworkSession>(ctx, `/v1/homeworks/${encoded(d.homeworkId)}`, 'HomeworkSession')
+        const job = await this.read<Job>(ctx, `/v1/jobs/${encoded(d.recognitionJobId)}`, 'Job')
+        if (!hw.case_ids.length && job.status === 'succeeded') { d.recognitionJobId = undefined; d.generation++; d.checkJobs = {}; await this.save(ctx, d) }
+      }
       if (options.retryFailed && d.stage === 'failed' && !await this.store.hasPending(ctx.scope, `${journalId}:`)) {
         if (d.recognitionJobId) {
           const job = await this.read<Job>(ctx, `/v1/jobs/${encoded(d.recognitionJobId)}`, 'Job')

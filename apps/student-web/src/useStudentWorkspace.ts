@@ -123,6 +123,7 @@ export function useStudentWorkspace() {
     discardDraft: (id: string) => action('正在删除草稿', async () => { await client.discardDraft(id); if (activeDraft.current === id) show(null); setNotice('这份还没上传的草稿已从这台设备删除。'); await sync() }),
     openDraft: (id: string) => action('正在打开作业', () => selectDraft(id)),
     run: () => action('正在检查作业', async () => { if (!draft) return; const next = await client.runDraft(draft.id, { retryFailed: draft.stage === 'failed' }); setDraft(next); setDetail(next.detail); setRecordVersion(v => v + 1); await sync() }),
+    rerecognize: () => action('正在重新识别', async () => { if (!draft) return; const next = await client.runDraft(draft.id, { rerecognize: true }); setDraft(next); setDetail(next.detail); setRecordVersion(v => v + 1); await sync() }),
     refreshDetail: () => action('正在刷新结果', refreshOpened),
     loadHistory: (more = false) => action('正在读取历史', async () => {
       const page = await client.history(more ? cursor ?? undefined : undefined)
