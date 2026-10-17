@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createStudentClient, remoteDraftId, safeError } from './core'
+import { createStudentClient, remoteDraftId, safeError, type EditChange } from './core'
 import { type CorrectionTarget } from './presentation'
 import type { Account, CaseDetail, CreateHelp, DraftSummary, DraftView, Hint, HomeworkDetail, HomeworkSession, HomeworkSummary, IdentityContext } from './core/types'
 
@@ -52,18 +52,42 @@ export function useStudentWorkspace() {
     if (current && currentId === activeDraft.current) { setDraft(current); setDetail(current.detail) }
   }, [client, clearWork])
   const deviceNotice = useCallback(async () => { if (!client.selectedStudentId) return; const text = await client.takeDeviceNotice().catch(() => null); if (text) setNotice(text) }, [client])
-  useEffect(() => {
-    let live = true
-    void client.restore().then(async () => { if (live) { await sync(); await deviceNotice() } }).catch((e: unknown) => { if (live) fail(e) }).finally(() => { if (live) setLoading(false) })
-    const unsubscribe = client.subscribe(() => { void sync().catch(fail) })
-    return () => { live = false; unsubscribe() }
-  }, [client, deviceNotice, fail, sync])
   const action = useCallback(async (label: string, task: () => Promise<void>) => {
     if (busyRef.current) return false
     busyRef.current = true; setBusy(label); setError(null); setNotice(null)
     try { await task(); return true } catch (e) { fail(e); return false } finally { busyRef.current = false; setBusy('') }
   }, [fail])
-  const selectDraft = useCallback(async (id: string) => { activeDraft.current = id; const next = await client.getDraft(id); setDraft(next); setDetail(next.detail); setHint(null) }, [client])
+  // The open draft id per student for this tab only, so a reload lands back on the same work.
+  const remember = useCallback((id: string | null) => {
+    const student = client.selectedStudentId; if (!student) return
+    try { if (id) sessionStorage.setItem(`xueban:active-draft:${student}`, id); else sessionStorage.removeItem(`xueban:active-draft:${student}`) } catch { /* Only a convenience after reload. */ }
+  }, [client])
+  const show = useCallback((next: DraftView | null) => { activeDraft.current = next?.id ?? null; remember(next?.id ?? null); setDraft(next); setDetail(next?.detail ?? null); setHint(null) }, [remember])
+  const selectDraft = useCallback(async (id: string) => { activeDraft.current = id; show(await client.getDraft(id)) }, [client, show])
+  /** After reload or sign-in: reopen the remembered draft, with server progress when the server already has it. */
+  const resumeActive = useCallback(async () => {
+    const student = client.selectedStudentId; if (!student || activeDraft.current) return
+    let id: string | null = null
+    try { id = sessionStorage.getItem(`xueban:active-draft:${student}`) } catch { return }
+    if (!id) return
+    try {
+      const local = await client.getDraft(id)
+      if (local.homeworkId && !local.correction && !local.editable) { try { const opened = await client.openHomework(local.homeworkId); await selectDraft(opened.draftId ?? id); return } catch { /* Offline: show what this device has. */ } }
+      if (!activeDraft.current) show(local)
+    } catch { remember(null) }
+  }, [client, remember, selectDraft, show])
+  useEffect(() => {
+    let live = true
+    void client.restore().then(async () => { if (live) { await sync(); await deviceNotice(); await resumeActive() } }).catch((e: unknown) => { if (live) fail(e) }).finally(() => { if (live) setLoading(false) })
+    const unsubscribe = client.subscribe(() => { void sync().catch(fail) })
+    return () => { live = false; unsubscribe() }
+  }, [client, deviceNotice, fail, resumeActive, sync])
+  const [online, setOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine !== false)
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine !== false)
+    window.addEventListener('online', update); window.addEventListener('offline', update)
+    return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update) }
+  }, [])
   // Background, read-only and cancelled by sign-out; one failing homework does not hide the others.
   const loadSummaries = useCallback((items: HomeworkSession[], known: Record<string, HomeworkSummary | undefined>) => {
     const run = ++summaryRun.current, queue = items.filter(h => known[h.id]?.revision !== h.revision)
@@ -79,16 +103,24 @@ export function useStudentWorkspace() {
     const next = await client.openHomework(homeworkId); setDetail(next); await sync(); setDetail(next); setRecordVersion(v => v + 1)
   }, [client, detail?.homework.id, draft?.homeworkId, sync])
   return {
-    client, account, identity, studentId, loading, busy, error, notice, drafts, history, cursor, draft, detail, hint, summaries, summaryFailed, recordVersion,
+    client, account, identity, studentId, loading, busy, error, notice, drafts, history, cursor, draft, detail, hint, summaries, summaryFailed, recordVersion, online,
     clearError: () => setError(null),
+    showNotice: (text: string | null) => setNotice(text),
     /** Learning panels handle their own errors; one that signed the account out is shown like any other. */
     report: (failure: unknown) => { if (!client.identity) fail(failure) },
-    login: (username: string, password: string) => action('正在登录', async () => { clearWork(); await client.login(username, password); await sync(); await deviceNotice() }),
+    login: (username: string, password: string) => action('正在登录', async () => { clearWork(); await client.login(username, password); await sync(); await deviceNotice(); await resumeActive() }),
     changePassword: (currentPassword: string, newPassword: string) => action('正在保存新密码', async () => { await client.changePassword(currentPassword, newPassword); await sync(); setNotice('密码已更新，以后用新密码登录同一个作业本。') }),
     reconnect: () => action('正在恢复连接', async () => { await client.restore(); await sync(); await deviceNotice() }),
-    logout: () => action('正在退出登录', async () => { try { await client.logout() } finally { clearWork() } await sync(); setError(null); setNotice(null) }),
-    newWork: () => { if (busyRef.current) return; activeDraft.current = null; setDraft(null); setDetail(null); setHint(null); setError(null); setNotice(null) },
-    importPhoto: (file: File, correction?: CorrectionTarget) => action('正在准备照片', async () => { const next = correction ? await client.createCorrection(correction.caseId, file, 'unknown', correction.parentAttemptId) : await client.createDraft(file); activeDraft.current = next.id; setDraft(next); setDetail(next.detail); setHint(null); await sync() }),
+    logout: () => action('正在退出登录', async () => { remember(null); try { await client.logout() } finally { clearWork() } await sync(); setError(null); setNotice(null) }),
+    newWork: () => { if (busyRef.current) return; remember(null); activeDraft.current = null; setDraft(null); setDetail(null); setHint(null); setError(null); setNotice(null) },
+    /** A correction takes exactly one photo; homework takes one or more pages. */
+    importPhotos: (files: File[], correction?: CorrectionTarget) => action(files.length > 1 ? `正在准备 ${files.length} 张照片` : '正在准备照片', async () => { const next = correction ? await client.createCorrection(correction.caseId, files[0], 'unknown', correction.parentAttemptId) : await client.createDraft(files); show(next); await sync() }),
+    addPages: (files: File[]) => action('正在加入照片', async () => { if (!draft) return; show(await client.addPages(draft.id, files)); await sync() }),
+    removePage: (pageId: string) => action('正在删除这一页', async () => { if (!draft) return; const next = await client.removePage(draft.id, pageId); show(next); if (!next) setNotice('最后一页已删除，这份草稿也一起移除了。'); await sync() }),
+    movePage: (pageId: string, delta: number) => action('正在调整页序', async () => { if (!draft) return; show(await client.movePage(draft.id, pageId, delta)); await sync() }),
+    editPage: (pageId: string, change: EditChange) => action(change.crop ? '正在裁切照片' : change.reset ? '正在恢复原图' : '正在旋转照片', async () => { if (!draft) return; show(await client.editPage(draft.id, pageId, change)); await sync() }),
+    replacePage: (pageId: string, file: File) => action('正在换上新照片', async () => { if (!draft) return; show(await client.replacePage(draft.id, pageId, file)); setNotice('这一页已换成新照片，可以继续上传。'); await sync() }),
+    discardDraft: (id: string) => action('正在删除草稿', async () => { await client.discardDraft(id); if (activeDraft.current === id) show(null); setNotice('这份还没上传的草稿已从这台设备删除。'); await sync() }),
     openDraft: (id: string) => action('正在打开作业', () => selectDraft(id)),
     run: () => action('正在检查作业', async () => { if (!draft) return; const next = await client.runDraft(draft.id, { retryFailed: draft.stage === 'failed' }); setDraft(next); setDetail(next.detail); setRecordVersion(v => v + 1); await sync() }),
     refreshDetail: () => action('正在刷新结果', refreshOpened),
@@ -108,7 +140,7 @@ export function useStudentWorkspace() {
     }),
     clearLocalData: () => action('正在清除本机草稿', async () => {
       const report = await client.clearLocalData()
-      activeDraft.current = null; setDraft(null); setDetail(null); setHint(null); await sync()
+      show(null); await sync()
       setNotice(`已从这台设备清除 ${report.drafts} 份草稿和 ${report.operations} 条提交记录${report.expiredPending ? `（其中 ${report.expiredPending} 条结果尚未确认）` : ''}。服务器上的作业不受影响。`)
     }),
   }

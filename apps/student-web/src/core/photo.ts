@@ -1,6 +1,7 @@
 import type { NormalizedPhoto } from './types'
 import { StudentError } from './errors'
-const invalid = () => new StudentError('invalid_photo', 422, '请选择清晰的 JPEG、PNG 或 WebP 图片，原图不能超过 2400 万像素。')
+import { MAX_PAGE_BYTES, MAX_SOURCE_BYTES, mib, planEdit, type PageEdit } from './pages'
+const invalid = () => new StudentError('invalid_photo', 422, '这张照片打不开。请选择清晰的 JPG 或 PNG 图片，原图不超过 2400 万像素、24 MiB。')
 export function imageDimensions(bytes: Uint8Array): { width: number; height: number } {
   const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength); let width = 0, height = 0
   const ascii = (start: number, length: number) => String.fromCharCode(...bytes.slice(start, start + length))
@@ -27,25 +28,47 @@ export function imageDimensions(bytes: Uint8Array): { width: number; height: num
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width * height > 24_000_000) throw invalid()
   return { width, height }
 }
-export async function normalizePhoto(file: Blob): Promise<NormalizedPhoto> {
-  if (!file.size || file.size > 24 * 1024 * 1024) throw invalid()
+/** Long edge of an uploaded page; enough for handwriting and keeps four pages well inside the batch total. */
+export const MAX_EDGE = 2400
+const MIN_EDGE = 900
+const tooLarge = (maxBytes: number) => new StudentError('page_too_large', 422, `这张照片压缩后仍超过 ${mib(maxBytes)}，可能是画面太复杂或太大。请靠近作业重新拍一张，或裁掉多余部分。`)
+/** Draws at decreasing size until the JPEG fits `maxBytes`; refuses rather than shrinking text below a readable size. */
+async function encode(width: number, height: number, draw: (context: CanvasRenderingContext2D, scale: number) => void, maxBytes: number): Promise<NormalizedPhoto> {
+  const canvas = document.createElement('canvas'); const context = canvas.getContext('2d'); if (!context) throw invalid()
+  for (let step = 0, scale = 1; Math.max(width, height) * scale >= MIN_EDGE || step === 0; step++, scale *= 0.82) {
+    const w = Math.max(1, Math.round(width * scale)), h = Math.max(1, Math.round(height * scale))
+    canvas.width = w; canvas.height = h
+    context.setTransform(1, 0, 0, 1, 0, 0); context.fillStyle = 'white'; context.fillRect(0, 0, w, h); draw(context, w / width)
+    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(invalid()), 'image/jpeg', step ? 0.85 : 0.9))
+    if (blob.size <= maxBytes) {
+      const hash = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())
+      return { blob, width: w, height: h, sha256: Array.from(new Uint8Array(hash), n => n.toString(16).padStart(2, '0')).join(''), mime: 'image/jpeg', size: blob.size }
+    }
+  }
+  throw tooLarge(maxBytes)
+}
+export async function normalizePhoto(file: Blob, maxBytes = MAX_PAGE_BYTES): Promise<NormalizedPhoto> {
+  if (!file.size || file.size > MAX_SOURCE_BYTES) throw invalid()
   imageDimensions(new Uint8Array(await file.arrayBuffer())) // Bound decoded allocation before browser decode.
   let bitmap: ImageBitmap
   try { bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' }) } catch { throw invalid() }
   try {
-    let { width, height } = bitmap
-    if (width * height > 24_000_000) throw invalid()
-    const canvas = document.createElement('canvas'); const context = canvas.getContext('2d'); if (!context) throw invalid()
-    for (let step = 0; step < 8; step++) {
-      canvas.width = width; canvas.height = height
-      context.fillStyle = 'white'; context.fillRect(0, 0, width, height); context.drawImage(bitmap, 0, 0, width, height)
-      const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(invalid()), 'image/jpeg', step ? 0.85 : 0.94))
-      if (blob.size <= 4_194_304) {
-        const hash = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())
-        return { blob, width, height, sha256: Array.from(new Uint8Array(hash), n => n.toString(16).padStart(2, '0')).join(''), mime: 'image/jpeg', size: blob.size }
-      }
-      width = Math.max(1, Math.floor(width * 0.8)); height = Math.max(1, Math.floor(height * 0.8))
-    }
-    throw invalid()
+    if (bitmap.width * bitmap.height > 24_000_000) throw invalid()
+    const plan = planEdit(bitmap.width, bitmap.height, { rotation: 0, crop: null }, MAX_EDGE)
+    return await encode(plan.width, plan.height, (context, scale) => context.drawImage(bitmap, 0, 0, bitmap.width * plan.scale * scale, bitmap.height * plan.scale * scale), maxBytes)
+  } finally { bitmap.close() }
+}
+/** Re-renders a kept local original turned and cropped, so repeated edits never stack JPEG losses. */
+export async function editPhoto(source: NormalizedPhoto, edit: PageEdit, maxBytes = MAX_PAGE_BYTES): Promise<NormalizedPhoto> {
+  let bitmap: ImageBitmap
+  try { bitmap = await createImageBitmap(source.blob) } catch { throw new StudentError('photo_unreadable', 0, '这一页的照片在本机读取不到了，请删除这一页后重新拍照或选择。') }
+  try {
+    const plan = planEdit(bitmap.width, bitmap.height, edit, MAX_EDGE)
+    return await encode(plan.width, plan.height, (context, scale) => {
+      const s = plan.scale * scale
+      context.scale(s, s); context.translate(-plan.sx, -plan.sy)
+      context.translate(plan.rotatedWidth / 2, plan.rotatedHeight / 2); context.rotate(edit.rotation * Math.PI / 180)
+      context.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2)
+    }, maxBytes)
   } finally { bitmap.close() }
 }

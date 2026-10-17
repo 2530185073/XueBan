@@ -1,7 +1,21 @@
-import type { JournalEntry, StoredDraft } from './types'
+import type { JournalEntry, LegacyDraft, StoredDraft } from './types'
 import { StudentError } from './errors'
 
 export const LOCAL_TTL_MS = 7 * 24 * 60 * 60 * 1000
+export const DRAFT_FORMAT = 2
+/** The single page of a format-1 draft keeps the journal names it was written with (`upload`, `renew-N`, `complete`). */
+export const LEGACY_PAGE_ID = 'legacy'
+/**
+ * Upgrades a format-1 single-photo draft in memory; it is written back as
+ * format 2 on its next save. Upload state moves onto the page unchanged so an
+ * unconfirmed upload still replays with its original key.
+ */
+export function migrateDraft(d: StoredDraft | LegacyDraft): StoredDraft {
+  if (d.format === DRAFT_FORMAT) return d
+  const { photo, assetId, ticketGeneration, format: _format, ...rest } = d
+  const received = !!assetId && (['recognizing', 'checking', 'complete', 'waiting'].includes(rest.stage) || !!rest.recognitionJobId)
+  return { ...rest, format: DRAFT_FORMAT, locked: rest.stage !== 'local', pages: photo ? [{ id: LEGACY_PAGE_ID, photo, rotation: 0, crop: null, assetId, uploaded: received, ticketGeneration: ticketGeneration ?? 0 }] : [] }
+}
 export interface PurgeReport { drafts: number; operations: number; expiredPending: number }
 export interface DeviceNotice { scope: string; expiredPending: number; at: string }
 const key = (scope: string, id: string) => JSON.stringify([scope, id])
@@ -57,9 +71,10 @@ export class DraftStore {
       tx.oncomplete = () => resolve(result); tx.onabort = tx.onerror = () => reject(new StudentError('storage_write', 0, '本机草稿清理未完成，请稍后重试。'))
     })
   }
-  async draft(scope: string, id: string) { const d = await this.read<StoredDraft | undefined>('drafts', key(scope, id)); if (!d || d.scope !== scope) throw new StudentError('draft_not_found', 404); return d }
-  async drafts(scope: string) { return (await this.read<StoredDraft[]>('drafts')).filter(d => d.scope === scope).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) }
+  async draft(scope: string, id: string) { const d = await this.read<StoredDraft | LegacyDraft | undefined>('drafts', key(scope, id)); if (!d || d.scope !== scope) throw new StudentError('draft_not_found', 404); return migrateDraft(d) }
+  async drafts(scope: string) { return (await this.read<(StoredDraft | LegacyDraft)[]>('drafts')).filter(d => d.scope === scope).map(migrateDraft).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) }
   saveDraft(draft: StoredDraft) { return this.write('drafts', key(draft.scope, draft.id), draft) }
+  deleteDraft(scope: string, id: string) { return this.write('drafts', key(scope, id)) }
   async operation(scope: string, id: string) { return this.read<JournalEntry | undefined>('operations', key(scope, id)) }
   async reserve(entry: JournalEntry): Promise<JournalEntry> {
     const db = await this.db

@@ -158,7 +158,7 @@ describe('appeal and help requests', () => {
 
 describe('device cache hygiene', () => {
   const entry = (scope: string, id: string, updatedAt: string | undefined, response?: unknown): JournalEntry => ({ scope, id, path: '/v1/test', key: `key_${id}`, body: '{}', shape: 'Accepted', updatedAt, ...(response === undefined ? {} : { response }) })
-  const draft = (scope: string, id: string, updatedAt: string): StoredDraft => ({ id, scope, title: '合成作业', stage: 'failed', createdAt: updatedAt, updatedAt, homeworkId: null, error: null, photo, detail: null, generation: 0, ticketGeneration: 0, checkJobs: {} })
+  const draft = (scope: string, id: string, updatedAt: string): StoredDraft => ({ format: 2, id, scope, title: '合成作业', stage: 'failed', createdAt: updatedAt, updatedAt, homeworkId: null, error: null, pages: [{ id: 'page_one', photo, rotation: 0, crop: null, uploaded: false, ticketGeneration: 0 }], locked: true, detail: null, generation: 0, checkJobs: {} })
   it('purges entries older than 7 days, keeps a draft alive while its unknown write is young, and leaves one notice', async () => {
     const store = new DraftStore(new IDBFactory()), now = Date.parse('2026-10-17T00:00:00Z'), a = scopeOf(), b = scopeOf('actor_other')
     await store.saveDraft(draft(a, 'draft_old', daysAgo(10, now))); await store.saveDraft(draft(a, 'draft_kept', daysAgo(10, now))); await store.saveDraft(draft(a, 'draft_recent', daysAgo(1, now)))

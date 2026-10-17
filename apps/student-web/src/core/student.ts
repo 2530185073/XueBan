@@ -1,8 +1,10 @@
-import type { Account, AdminRequestOptions, AuthSession, Accepted, AssetAccess, AttemptRead, CaseDetail, CaseRecord, CheckRun, CorrectionCase, CreateCorrection, CreateHelp, DecisionRead, DraftView, HelpRequest, Hint, HomeworkDetail, HomeworkPage, HomeworkSession, HomeworkSummary, IdentityContext, ImageAsset, InputVersions, Job, JournalEntry, NormalizedPhoto, QuestionRead, RequestHint, Review, StoredDraft, UploadTicket } from './types'
+import type { Account, AdminRequestOptions, AuthSession, Accepted, AssetAccess, AttemptRead, CaseDetail, CaseRecord, CheckRun, CorrectionCase, CreateCorrection, CreateHelp, DecisionRead, DraftSummary, DraftView, HelpRequest, Hint, HomeworkDetail, HomeworkPage, HomeworkSession, HomeworkSummary, IdentityContext, ImageAsset, InputVersions, Job, JournalEntry, NormalizedPhoto, QuestionRead, RequestHint, Review, StoredDraft, StoredPage, UploadTicket } from './types'
 import { StudentApi } from './api'
 import { StudentError, safeError } from './errors'
-import { DraftStore, type PurgeReport } from './store'
-import { normalizePhoto } from './photo'
+import { DRAFT_FORMAT, DraftStore, LEGACY_PAGE_ID, type PurgeReport } from './store'
+import { editPhoto, normalizePhoto } from './photo'
+import { applyChange, checkBatch, checkSelection, isIdentity, movePage, pageBudget, removePage, type EditChange, type PageEdit } from './pages'
+import { homeworkPageIds } from './homeworkPages'
 import { valid } from './validation'
 import { bucketOfCase, countBuckets, firstUnresolved, isRetired, orderActiveCases, retiredCases } from './cases'
 import { ObjectUrls } from './objectUrls'
@@ -22,6 +24,13 @@ async function mapLimit<T, R>(items: T[], limit: number, task: (item: T) => Prom
   return out
 }
 const unique = (ids: (string | null | undefined)[]) => [...new Set(ids.filter((id): id is string => !!id))]
+/** Journal name of one page's upload step; each page has its own idempotency keys. */
+const pageOp = (page: StoredPage, name: string) => page.id === LEGACY_PAGE_ID ? name : `${name}:${page.id}`
+const newPage = (photo: NormalizedPhoto): StoredPage => ({ id: crypto.randomUUID(), photo, rotation: 0, crop: null, uploaded: false, ticketGeneration: 0 })
+const bytesOf = (pages: StoredPage[]) => pages.reduce((sum, page) => sum + page.photo.size, 0)
+async function readable(blob: Blob, index: number) {
+  try { await blob.slice(0, 64).arrayBuffer() } catch { throw new StudentError('photo_unreadable', 0, `第 ${index + 1} 页照片在这台设备上已经读取不到（可能被浏览器清理了）。请重新选择这一页，再继续上传。`) }
+}
 export function decisionLabel(row: CaseDetail): string {
   const d = effectiveDecision(row)
   if (row.attempt.recognition_status !== 'ready') return '识别待核实 · 请重拍或请老师看'
@@ -33,7 +42,7 @@ export function decisionLabel(row: CaseDetail): string {
 interface Context { scope: string; student: string; epoch: number }
 interface Session { access_token: string; expires_at: string; kind: 'account' }
 interface PendingAuth { body: string; key: string }
-export interface ClientOptions { origin?: string; transport?: typeof fetch; storage?: Storage; store?: DraftStore; normalize?: (file: Blob) => Promise<NormalizedPhoto>; sleep?: (ms: number) => Promise<void> }
+export interface ClientOptions { origin?: string; transport?: typeof fetch; storage?: Storage; store?: DraftStore; normalize?: (file: Blob, maxBytes?: number) => Promise<NormalizedPhoto>; edit?: (source: NormalizedPhoto, edit: PageEdit, maxBytes?: number) => Promise<NormalizedPhoto>; sleep?: (ms: number) => Promise<void> }
 export class StudentClient {
   private session: Session | null = null
   private currentAccount: Account | null = null
@@ -47,7 +56,8 @@ export class StudentClient {
   private store: DraftStore
   private storage: Storage
   private origin: string
-  private normalize: (file: Blob) => Promise<NormalizedPhoto>
+  private normalize: (file: Blob, maxBytes?: number) => Promise<NormalizedPhoto>
+  private edit: (source: NormalizedPhoto, edit: PageEdit, maxBytes?: number) => Promise<NormalizedPhoto>
   private sleep: (ms: number) => Promise<void>
   private runs = new Map<string, Promise<DraftView>>()
   private images = new Map<string, Promise<Blob>>()
@@ -58,7 +68,7 @@ export class StudentClient {
     const url = new URL(this.origin)
     if (url.origin !== this.origin || !['http:', 'https:'].includes(url.protocol)) throw new StudentError('invalid_origin', 422)
     this.storage = options.storage ?? sessionStorage; this.store = options.store ?? new DraftStore()
-    this.normalize = options.normalize ?? normalizePhoto; this.sleep = options.sleep ?? (ms => new Promise(resolve => setTimeout(resolve, ms)))
+    this.normalize = options.normalize ?? normalizePhoto; this.edit = options.edit ?? editPhoto; this.sleep = options.sleep ?? (ms => new Promise(resolve => setTimeout(resolve, ms)))
     this.api = new StudentApi(this.origin, () => this.token(), () => this.disconnect(), options.transport)
     this.housekeeping = this.store.purgeExpired().catch(() => null)
   }
@@ -234,11 +244,90 @@ export class StudentClient {
       throw e
     }
   }
-  private view(d: StoredDraft): DraftView { return { id: d.id, title: d.title, stage: d.stage, createdAt: d.createdAt, updatedAt: d.updatedAt, homeworkId: d.homeworkId, error: d.error, photo: d.photo?.blob ?? null, detail: d.detail, correction: d.correction ? { caseId: d.correction.caseId, parentAttemptId: d.correction.parentAttemptId } : undefined } }
-  async listDrafts() { const ctx = await this.authorize(); const drafts = await this.store.drafts(ctx.scope); this.check(ctx); return drafts.map(d => { const { photo: _p, detail: _d, ...summary } = this.view(d); return summary }) }
+  private view(d: StoredDraft): DraftView {
+    const pages = d.pages.map(p => ({ id: p.id, blob: p.photo.blob, width: p.photo.width, height: p.photo.height, size: p.photo.size, edited: !!p.original, assetId: p.assetId, uploaded: p.uploaded }))
+    return { id: d.id, title: d.title, stage: d.stage, createdAt: d.createdAt, updatedAt: d.updatedAt, homeworkId: d.homeworkId, error: d.error, pageCount: pages.length, uploadedCount: pages.filter(p => p.uploaded).length, photo: pages[0]?.blob ?? null, pages, editable: !d.locked, detail: d.detail, correction: d.correction ? { caseId: d.correction.caseId, parentAttemptId: d.correction.parentAttemptId } : undefined }
+  }
+  async listDrafts(): Promise<DraftSummary[]> { const ctx = await this.authorize(); const drafts = await this.store.drafts(ctx.scope); this.check(ctx); return drafts.map(d => { const { photo: _p, detail: _d, pages: _pages, editable: _e, ...summary } = this.view(d); return summary }) }
   async getDraft(id: string) { const ctx = await this.authorize(); const d = await this.store.draft(ctx.scope, id); this.check(ctx); return this.view(d) }
   private async save(ctx: Context, d: StoredDraft) { this.check(ctx); d.updatedAt = new Date().toISOString(); await this.store.saveDraft(d); this.check(ctx); this.changed() }
-  async createDraft(file: Blob, title = '学校作业') { const ctx = await this.authorize(); const photo = await this.normalize(file); this.check(ctx); const now = new Date().toISOString(); const d: StoredDraft = { id: crypto.randomUUID(), title: title.trim().slice(0, 120) || '学校作业', stage: 'local', createdAt: now, updatedAt: now, homeworkId: null, error: null, scope: ctx.scope, photo, detail: null, generation: 0, ticketGeneration: 0, checkJobs: {} }; await this.save(ctx, d); return this.view(d) }
+  /** Re-encodes a whole selection or none of it, sharing the remaining batch bytes between the new pages. */
+  private async importPages(files: Blob[], existing: StoredPage[]): Promise<StoredPage[]> {
+    const pages: StoredPage[] = []
+    for (const [index, file] of files.entries()) {
+      let photo: NormalizedPhoto
+      try { photo = await this.normalize(file, pageBudget(bytesOf(existing) + bytesOf(pages), files.length - index)) }
+      catch (e) { if (files.length < 2 || !(e instanceof StudentError)) throw e; throw new StudentError(e.code, e.status, `第 ${index + 1} 张：${e.message} 这次选的照片都还没有加入。`) }
+      pages.push(newPage(photo))
+    }
+    checkBatch([...existing, ...pages].map(page => page.photo.size))
+    return pages
+  }
+  async createDraft(files: Blob | Blob[], title = '学校作业') {
+    const list = Array.isArray(files) ? files : [files]; checkSelection(0, list)
+    const ctx = await this.authorize(); const pages = await this.importPages(list, []); this.check(ctx)
+    const now = new Date().toISOString(); const d: StoredDraft = { format: DRAFT_FORMAT, id: crypto.randomUUID(), title: title.trim().slice(0, 120) || '学校作业', stage: 'local', createdAt: now, updatedAt: now, homeworkId: null, error: null, scope: ctx.scope, pages, locked: false, detail: null, generation: 0, checkJobs: {} }
+    await this.save(ctx, d); return this.view(d)
+  }
+  /** Applies a page change to a draft that has sent nothing yet. */
+  private async changePages(id: string, change: (d: StoredDraft) => Promise<StoredPage[]> | StoredPage[]): Promise<DraftView | null> {
+    const ctx = await this.authorize(), d = await this.store.draft(ctx.scope, id); this.check(ctx)
+    if (d.locked) throw new StudentError('draft_locked', 409, '这份作业已经开始上传，页面不能再调整。可以继续未完成的检查。')
+    const pages = await change(d); this.check(ctx)
+    if (!pages.length) { await this.store.deleteDraft(ctx.scope, id); this.check(ctx); this.changed(); return null }
+    checkBatch(pages.map(page => page.photo.size)); d.pages = pages; await this.save(ctx, d); return this.view(d)
+  }
+  addPages(id: string, files: Blob[]) {
+    return this.changePages(id, async d => {
+      if (d.correction) throw new StudentError('correction_single_photo', 422, '订正一次只拍这道题的一张照片。')
+      checkSelection(d.pages.length, files); return [...d.pages, ...await this.importPages(files, d.pages)]
+    })
+  }
+  /** Removing the last page discards the draft and returns null. */
+  removePage(id: string, pageId: string) { return this.changePages(id, d => removePage(d.pages, pageId)) }
+  movePage(id: string, pageId: string, delta: number) { return this.changePages(id, d => movePage(d.pages, pageId, delta)) }
+  /** Turns or crops a page, always re-rendered from the imported original. */
+  editPage(id: string, pageId: string, change: EditChange) {
+    return this.changePages(id, async d => {
+      const index = d.pages.findIndex(page => page.id === pageId); if (index < 0) throw new StudentError('page_not_found', 404, '这一页已经不在草稿里了，请刷新后再试。')
+      const page = d.pages[index], source = page.original ?? page.photo, next = applyChange(page, change)
+      const photo = isIdentity(next) ? source : await this.edit(source, next, pageBudget(bytesOf(d.pages) - page.photo.size))
+      const pages = [...d.pages]; pages[index] = { ...page, ...next, photo, original: isIdentity(next) ? undefined : source }; return pages
+    })
+  }
+  /** A local draft that has sent nothing can be thrown away; anything already sent stays recoverable. */
+  async discardDraft(id: string) {
+    const ctx = await this.authorize(), d = await this.store.draft(ctx.scope, id); this.check(ctx)
+    if (d.locked || d.homeworkId || await this.store.hasPending(ctx.scope, `${d.journalId ?? d.id}:`)) throw new StudentError('draft_locked', 409, '这份作业已经开始上传，不能直接删除。可以继续未完成的检查，或在历史记录里清除本机草稿。')
+    await this.store.deleteDraft(ctx.scope, id); this.check(ctx); this.changed()
+  }
+  /**
+   * Swaps in a newly chosen photo for a page the server has not received,
+   * e.g. after the browser lost the local copy mid-upload. The page gets a new
+   * id so its upload uses new keys; an abandoned reservation can at most leave
+   * an unused, never-uploaded asset on the server.
+   */
+  async replacePage(id: string, pageId: string, file: Blob): Promise<DraftView> {
+    checkSelection(0, [file])
+    const ctx = await this.authorize(), d = await this.store.draft(ctx.scope, id); this.check(ctx)
+    const index = d.pages.findIndex(page => page.id === pageId); if (index < 0) throw new StudentError('page_not_found', 404, '这一页已经不在草稿里了，请刷新后再试。')
+    const page = d.pages[index], journalId = d.journalId ?? d.id, received = new StudentError('page_uploaded', 409, '这一页服务器已经收到了，不需要重新选择。请继续未完成的检查。')
+    if (page.uploaded) throw received
+    const assetId = page.assetId ?? ((await this.store.operation(ctx.scope, `${journalId}:${pageOp(page, 'upload')}`))?.response as UploadTicket | undefined)?.asset.id
+    if (assetId && (await this.read<ImageAsset>(ctx, `/v1/assets/${encoded(assetId)}`, 'ImageAsset')).status === 'uploaded') { page.assetId = assetId; page.uploaded = true; await this.save(ctx, d); throw received }
+    const photo = await this.normalize(file, pageBudget(bytesOf(d.pages) - page.photo.size)); this.check(ctx)
+    for (let n = 0; n <= page.ticketGeneration; n++) await this.store.removeOperation(ctx.scope, `${journalId}:${pageOp(page, `renew-${n}`)}`)
+    for (const name of ['upload', 'complete']) await this.store.removeOperation(ctx.scope, `${journalId}:${pageOp(page, name)}`)
+    d.pages[index] = newPage(photo); if (d.error?.code === 'photo_unreadable' || d.error?.code === 'image_rejected') d.error = null
+    await this.save(ctx, d); return this.view(d)
+  }
+  /** Original homework pages in page order, without later correction photos. */
+  async homeworkPages(detail: HomeworkDetail): Promise<string[]> {
+    const ctx = await this.authorize(), hw = detail.homework
+    if (hw.scope.student_id !== ctx.student) throw new StudentError('access_denied', 403)
+    const assets = await mapLimit(hw.asset_ids, 3, id => this.read<ImageAsset>(ctx, `/v1/assets/${encoded(id)}`, 'ImageAsset'))
+    return homeworkPageIds(assets.filter(a => a.homework_id === hw.id), detail.jobs, detail.cases)
+  }
   private async caseRecordRead(ctx: Context, id: string, homeworkId?: string): Promise<CorrectionCase> {
     const c = await this.read<CorrectionCase>(ctx, `/v1/cases/${encoded(id)}`, 'CorrectionCase')
     if (c.scope.student_id !== ctx.student || homeworkId && c.homework_id !== homeworkId) throw new StudentError('access_denied', 403)
@@ -306,13 +395,15 @@ export class StudentClient {
   async openHomework(id: string): Promise<HomeworkDetail> {
     const ctx = await this.authorize(), detail = await this.detail(ctx, id), drafts = await this.store.drafts(ctx.scope)
     let d = drafts.find(d => d.homeworkId === id && !d.correction)
-    if (!d) { const now = new Date().toISOString(); d = { id: remoteDraftId(id), scope: ctx.scope, title: detail.homework.title ?? '学校作业', stage: 'waiting', createdAt: detail.homework.created_at, updatedAt: now, homeworkId: id, error: null, photo: null, detail, generation: 0, ticketGeneration: 0, checkJobs: {} } }
+    if (!d) { const now = new Date().toISOString(); d = { format: DRAFT_FORMAT, id: remoteDraftId(id), scope: ctx.scope, title: detail.homework.title ?? '学校作业', stage: 'waiting', createdAt: detail.homework.created_at, updatedAt: now, homeworkId: id, error: null, pages: [], locked: true, detail, generation: 0, checkJobs: {} } }
     const recognition = [...detail.jobs].reverse().find(j => j.kind === 'recognize_homework')
     // Do not bypass an uncertain local write by adopting a remote job. The
     // original journal must replay its own key/body before advancing.
     d.detail = detail
-    if (!d.photo) d.recognitionJobId ??= recognition?.id
-    if (recognition?.status === 'failed') d.stage = 'failed'
+    if (!d.pages.length) d.recognitionJobId ??= recognition?.id
+    // Pages not yet received, or no recognition started yet, is unfinished work and never shown as complete.
+    if (d.pages.some(page => !page.uploaded) || !recognition && !detail.cases.length) d.stage = d.stage === 'failed' ? 'failed' : 'waiting'
+    else if (recognition?.status === 'failed') d.stage = 'failed'
     else if (detail.jobs.some(active)) d.stage = 'waiting'
     else d.stage = detail.cases.every(row => effectiveDecision(row) || row.attempt.recognition_status !== 'ready') ? 'complete' : 'waiting'
     detail.draftId = d.id
@@ -338,8 +429,9 @@ export class StudentClient {
   async createCorrection(caseId: string, file: Blob, reportedHelp: CreateCorrection['reported_help'] = 'unknown', expectedParentAttemptId?: string): Promise<DraftView> {
     const ctx = await this.authorize(), row = await this.caseDetail(ctx, caseId)
     if (expectedParentAttemptId && row.attempt.id !== expectedParentAttemptId) throw new StudentError('newer_correction_exists', 409)
+    checkSelection(0, [file])
     const photo = await this.normalize(file); this.check(ctx)
-    const now = new Date().toISOString(), d: StoredDraft = { id: crypto.randomUUID(), scope: ctx.scope, title: '新订正照片', stage: 'local', createdAt: now, updatedAt: now, homeworkId: row.case.homework_id, photo, detail: null, error: null, generation: 0, ticketGeneration: 0, checkJobs: {}, correction: { caseId, parentAttemptId: row.case.current_attempt_id, reportedHelp } }
+    const now = new Date().toISOString(), d: StoredDraft = { format: DRAFT_FORMAT, id: crypto.randomUUID(), scope: ctx.scope, title: '新订正照片', stage: 'local', createdAt: now, updatedAt: now, homeworkId: row.case.homework_id, pages: [newPage(photo)], locked: false, detail: null, error: null, generation: 0, checkJobs: {}, correction: { caseId, parentAttemptId: row.case.current_attempt_id, reportedHelp } }
     await this.save(ctx, d); return this.view(d)
   }
   private async awaitJob(ctx: Context, id: string): Promise<Job> {
@@ -394,30 +486,40 @@ export class StudentClient {
       const path = `/v1/homeworks/${encoded(d.homeworkId)}`
       let hw = await this.read<HomeworkSession>(ctx, path, 'HomeworkSession')
       if (hw.scope.student_id !== ctx.student || hw.processing_blocked) throw new StudentError('access_denied', 403)
-      if (d.photo) {
-        d.stage = 'uploading'; await this.save(ctx, d)
-        let ticket: UploadTicket | undefined
-        if (!d.assetId) {
-          ticket = await post<UploadTicket>('upload', `${path}/uploads`, { expected_revision: hw.revision, page_index: hw.asset_ids.length, sha256: d.photo.sha256, byte_size: d.photo.size, mime_type: d.photo.mime, width: d.photo.width, height: d.photo.height }, 'UploadTicket', 'CreateUpload')
-          d.assetId = ticket.asset.id; await this.save(ctx, d)
-        }
-        const assetPath = `/v1/assets/${encoded(d.assetId)}`; let asset = await this.read<ImageAsset>(ctx, assetPath, 'ImageAsset')
-        if (asset.status !== 'uploaded') {
-          if (asset.status !== 'awaiting_upload') throw new StudentError('image_rejected', 422)
-          if (!ticket || Date.parse(ticket.expires_at) <= Date.now() + 15_000) {
-            const old = await this.store.operation(ctx.scope, `${journalId}:renew-${d.ticketGeneration}`)
-            if (!old || old.response !== undefined) { d.ticketGeneration++; await this.save(ctx, d) }
-            ticket = await post<UploadTicket>(`renew-${d.ticketGeneration}`, `${assetPath}/upload-ticket`, { expected_revision: asset.revision }, 'UploadTicket', 'RenewUpload')
+      if (d.pages.length) {
+        if (!d.locked) checkBatch(d.pages.map(page => page.photo.size))
+        d.stage = 'uploading'; d.locked = true; await this.save(ctx, d)
+        // Pages go one by one in the saved order; each page's own journal makes a retry resume where it stopped.
+        for (const [index, page] of d.pages.entries()) {
+          if (page.uploaded) continue
+          const op = (name: string) => pageOp(page, name)
+          let ticket: UploadTicket | undefined
+          if (!page.assetId) {
+            await readable(page.photo.blob, index)
+            const current = await this.read<HomeworkSession>(ctx, path, 'HomeworkSession')
+            ticket = await post<UploadTicket>(op('upload'), `${path}/uploads`, { expected_revision: current.revision, page_index: d.correction ? current.asset_ids.length : index, sha256: page.photo.sha256, byte_size: page.photo.size, mime_type: page.photo.mime, width: page.photo.width, height: page.photo.height }, 'UploadTicket', 'CreateUpload')
+            page.assetId = ticket.asset.id; await this.save(ctx, d)
           }
-          this.check(ctx); await this.api.upload(ticket.put_url, ticket.required_headers as Record<string, string>, d.photo.blob); this.check(ctx)
-          asset = await this.read<ImageAsset>(ctx, assetPath, 'ImageAsset')
-          if (asset.status !== 'uploaded') asset = await post<ImageAsset>('complete', `${assetPath}/complete`, { expected_revision: asset.revision, sha256: d.photo.sha256, byte_size: d.photo.size }, 'ImageAsset', 'CompleteUpload')
-          if (asset.status !== 'uploaded') throw new StudentError('upload_incomplete', 422)
+          const assetPath = `/v1/assets/${encoded(page.assetId)}`; let asset = await this.read<ImageAsset>(ctx, assetPath, 'ImageAsset')
+          if (asset.status !== 'uploaded') {
+            if (asset.status !== 'awaiting_upload') throw new StudentError('image_rejected', 422, `第 ${index + 1} 页照片没有被服务器接收。请重新选择这一页，再继续上传。`)
+            await readable(page.photo.blob, index)
+            if (!ticket || Date.parse(ticket.expires_at) <= Date.now() + 15_000) {
+              const old = await this.store.operation(ctx.scope, `${journalId}:${op(`renew-${page.ticketGeneration}`)}`)
+              if (!old || old.response !== undefined) { page.ticketGeneration++; await this.save(ctx, d) }
+              ticket = await post<UploadTicket>(op(`renew-${page.ticketGeneration}`), `${assetPath}/upload-ticket`, { expected_revision: asset.revision }, 'UploadTicket', 'RenewUpload')
+            }
+            this.check(ctx); await this.api.upload(ticket.put_url, ticket.required_headers as Record<string, string>, page.photo.blob); this.check(ctx)
+            asset = await this.read<ImageAsset>(ctx, assetPath, 'ImageAsset')
+            if (asset.status !== 'uploaded') asset = await post<ImageAsset>(op('complete'), `${assetPath}/complete`, { expected_revision: asset.revision, sha256: page.photo.sha256, byte_size: page.photo.size }, 'ImageAsset', 'CompleteUpload')
+            if (asset.status !== 'uploaded') throw new StudentError('upload_incomplete', 422)
+          }
+          page.uploaded = true; await this.save(ctx, d)
         }
       }
       hw = await this.read<HomeworkSession>(ctx, path, 'HomeworkSession')
       if (!d.recognitionJobId && (d.correction || !hw.case_ids.length)) {
-        if (!d.photo && d.generation === 0) {
+        if (!d.pages.length && d.generation === 0) {
           for (const jobId of [...hw.job_ids].reverse()) { const job = await this.read<Job>(ctx, `/v1/jobs/${encoded(jobId)}`, 'Job'); if (job.kind === 'recognize_homework') { d.recognitionJobId = job.id; break } }
         }
         if (!d.recognitionJobId) {
@@ -427,8 +529,8 @@ export class StudentClient {
             const c = (await this.caseDetail(ctx, d.correction.caseId)).case
             const op = await this.store.operation(ctx.scope, `${journalId}:correction-${d.generation}`)
             if (!op && c.current_attempt_id !== d.correction.parentAttemptId) throw new StudentError('newer_correction_exists', 409)
-            accepted = await post<Accepted>(`correction-${d.generation}`, `/v1/cases/${encoded(c.id)}/attempts`, { expected_revision: c.revision, parent_attempt_id: d.correction.parentAttemptId, question_revision: c.current_question_revision, asset_ids: [d.assetId!], occurred_at: d.createdAt, reported_help: d.correction.reportedHelp }, 'Accepted', 'CreateCorrection')
-          } else accepted = await post<Accepted>(`recognition-${d.generation}`, `${path}/recognitions`, { expected_revision: hw.revision, asset_ids: d.assetId ? [d.assetId] : hw.asset_ids }, 'Accepted', 'StartRecognition')
+            accepted = await post<Accepted>(`correction-${d.generation}`, `/v1/cases/${encoded(c.id)}/attempts`, { expected_revision: c.revision, parent_attempt_id: d.correction.parentAttemptId, question_revision: c.current_question_revision, asset_ids: [d.pages[0].assetId!], occurred_at: d.createdAt, reported_help: d.correction.reportedHelp }, 'Accepted', 'CreateCorrection')
+          } else accepted = await post<Accepted>(`recognition-${d.generation}`, `${path}/recognitions`, { expected_revision: hw.revision, asset_ids: d.pages.length ? d.pages.map(page => page.assetId!) : hw.asset_ids }, 'Accepted', 'StartRecognition')
           d.recognitionJobId = accepted.job.id
         }
         await this.save(ctx, d)
