@@ -7,7 +7,10 @@ never placed in the instructions.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
 import json
+import re
+import unicodedata
 
 from sqlalchemy import select
 
@@ -22,6 +25,99 @@ INSTRUCTIONS = (
     "从 candidates 中选择这道题直接考查的知识点，最多 3 个。primary 只给最直接考查、最可能出错的 1 个，其余为 secondary。"
     "只能使用 candidates 中的 id；拿不准时返回空 links。rationale 用一句话说明题目哪一步用到该知识点，不判断学生对错，"
     "不评价学生能力。")
+
+
+def _label_key(value: str | None) -> str:
+    """Keep matching tolerant of punctuation and the common Chinese 的/与/和."""
+    text = unicodedata.normalize("NFKC", value or "").lower()
+    text = re.sub(r"[^\w\u4e00-\u9fff]+", "", text)
+    return text.replace("的", "").replace("与", "").replace("和", "").replace("及", "")
+
+
+def _match_node(label: str, nodes: list[KnowledgeNode]) -> KnowledgeNode | None:
+    key = _label_key(label)
+    if not key:
+        return None
+    exact = [node for node in nodes if _label_key(node.name) == key]
+    if exact:
+        return exact[0]
+    contained = [node for node in nodes
+                 if _label_key(node.name) and (key in _label_key(node.name) or _label_key(node.name) in key)]
+    if not contained:
+        return None
+    return max(contained, key=lambda node: len(_label_key(node.name)))
+
+
+def _current_links(session, question_id: str) -> dict[str, QuestionKnowledgeLink]:
+    current = {}
+    for link in session.scalars(select(QuestionKnowledgeLink).where(QuestionKnowledgeLink.question_id == question_id)
+                                .order_by(QuestionKnowledgeLink.created_at, QuestionKnowledgeLink.id)):
+        current[link.knowledge_id] = link
+    return current
+
+
+def auto_confirm_model_links(session, tenant_id: str, student_id: str) -> int:
+    """Persist safe model-to-graph links for current AI-judged mistakes.
+
+    The correction model already returns the knowledge point names alongside
+    its verdict. Matching those names against the published graph lets the
+    student see a useful map immediately; a teacher can still replace the
+    link later through the existing append-only review flow.
+    """
+    graph = published_graph(session)
+    if graph is None:
+        return 0
+    nodes = list(session.scalars(select(KnowledgeNode).where(
+        KnowledgeNode.graph_version == graph.version,
+        KnowledgeNode.node_type.in_(('concept', 'skill')))))
+    if not nodes:
+        return 0
+    homeworks = select(Homework.id).where(Homework.student_id == student_id, Homework.tenant_id == tenant_id,
+                                         Homework.processing_blocked.is_(False))
+    added = 0
+    for case in session.scalars(select(Entity).where(Entity.homework_id.in_(homeworks), Entity.kind == "case")):
+        document = case.document
+        decision = document.get("current_decision") or {}
+        if (document.get("lifecycle", "active") != "active"
+                or decision.get("origin") != "model"
+                or decision.get("validity") != "candidate"
+                or decision.get("verdict") not in ("incorrect", "partially_correct")):
+            continue
+        question = session.get(Entity, document.get("question_id"))
+        if question is None:
+            continue
+        labels = [value.strip() for value in decision.get("knowledge_points", [])
+                  if isinstance(value, str) and value.strip()]
+        matched = []
+        for label in labels:
+            node = _match_node(label, nodes)
+            if node and node.id not in {item.id for item in matched}:
+                matched.append(node)
+            if len(matched) == MAX_LINKS:
+                break
+        if not matched:
+            continue
+        current = _current_links(session, question.id)
+        staff_primary = next((link for link in current.values()
+                              if link.status == "confirmed" and link.role == "primary" and link.source == "staff"), None)
+        for index, node in enumerate(matched):
+            role = "primary" if index == 0 and staff_primary is None else "secondary"
+            existing = current.get(node.id)
+            if existing and existing.status == "confirmed":
+                continue
+            if existing and existing.source == "staff" and existing.status == "rejected":
+                continue
+            link = QuestionKnowledgeLink(
+                id=new_id("qkl"), tenant_id=tenant_id, student_id=student_id, homework_id=question.homework_id,
+                question_id=question.id, question_revision=question.revision, knowledge_id=node.id,
+                graph_version=graph.version, role=role, source="model", status="confirmed",
+                rationale=f"AI判定错题时识别到知识点：{labels[index] if index < len(labels) else node.name}",
+                actor_id=None, supersedes_id=existing.id if existing else None,
+                created_at=datetime.now(timezone.utc))
+            session.add(link)
+            current[node.id] = link
+            added += 1
+    return added
 
 
 def _candidates(session, graph_version, grade):

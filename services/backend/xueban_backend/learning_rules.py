@@ -1,11 +1,13 @@
-"""Pure, versioned rules: reviewed correction records -> evidence -> knowledge state.
+"""Pure, versioned rules: correction records -> evidence -> knowledge state.
 
 No I/O. The projector feeds full current records and stores the outputs, so a
 rebuild from scratch and an incremental run produce the same answer.
 
 Evidence rules (blueprint 02 section 4/5):
-* Only a decision confirmed by staff counts. Model candidates, unresolved cases
-  and decisions withdrawn by a later review, question or answer revision never do.
+* A usable staff decision or a model candidate with a scorable verdict counts.
+  The student-facing mistake review can start from the AI result; unresolved
+  cases and decisions withdrawn by a later review, question or answer revision
+  never do.
 * A staff decision made stale only because the learner submitted a correction
   remains a true fact about that earlier attempt.
 * A correction is never independent evidence. A first attempt is independent
@@ -42,16 +44,25 @@ def _key(payload: dict) -> str:
 
 
 def authoritative_decision(attempt_id: str, decisions: list[dict], stale_reasons: dict[str, str]) -> dict | None:
-    """Newest staff decision for this attempt, if it still stands."""
-    staff = [d for d in decisions if d["origin"] == "staff" and d["input_versions"]["attempt_id"] == attempt_id]
-    if not staff:
+    """Newest usable decision for this attempt, if it still stands.
+
+    AI candidates are deliberately accepted here for the student learning
+    surface. An ``unable_to_judge`` result is filtered later by ``RESULT``;
+    therefore the model is never turned into evidence when it could not make a
+    determination.
+    """
+    usable = [d for d in decisions
+              if d["input_versions"]["attempt_id"] == attempt_id
+              and ((d["origin"] == "staff" and d["validity"] in {"confirmed", "stale"})
+                   or (d["origin"] == "model" and d["validity"] == "candidate"))]
+    if not usable:
         return None
-    latest = max(staff, key=lambda d: (d["created_at"], d["id"]))
+    latest = max(usable, key=lambda d: (d["created_at"], d["id"]))
     if latest["validity"] == "confirmed":
         return latest
     if latest["validity"] == "stale" and stale_reasons.get(latest.get("invalidated_by_event_id")) == "new_attempt":
         return latest
-    return None
+    return latest if latest["origin"] == "model" else None
 
 
 def hints_seen_before(attempt: dict, hints: list[dict]) -> list[dict]:
@@ -117,7 +128,8 @@ def derive_evidence(*, cases, attempts, decisions, hints, questions, links, cond
                     "decision_id": decision["id"], "verdict": decision["verdict"], "event_type": event_type,
                     "result": link_result, "assistance_level": level,
                     "independent": independent and link_result != "unscorable",
-                    "item_family_id": family, "occurred_at": attempt["occurred_at"], "source_role": "sitting_teacher",
+                    "item_family_id": family, "occurred_at": attempt["occurred_at"],
+                    "source_role": "model" if decision["origin"] == "model" else "sitting_teacher",
                     "rule_version": RULE_VERSION,
                 }
                 document["source_key"] = _key({k: document[k] for k in (

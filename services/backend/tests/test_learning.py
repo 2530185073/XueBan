@@ -64,13 +64,15 @@ def test_published_graph_is_readable(flow):
     assert all(e["from_id"] in ids and e["to_id"] in ids for e in graph["edges"])
 
 
-def test_model_candidate_never_becomes_evidence(flow):
+def test_model_candidate_can_seed_student_evidence_without_teacher_confirmation(flow):
     case = reviewed(flow)
     teacher(flow)
     link(flow, case)
     learning(flow).drain()
-    assert evidence_count(flow) == 0
-    assert knowledge(flow)["states"] == []
+    assert evidence_count(flow) == 1
+    [state] = knowledge(flow)["states"]
+    assert state["knowledge_id"] == "kp-rational-add-sub"
+    assert state["learning_status"] == "needs_help_now"
 
 
 def test_staff_confirmed_error_with_confirmed_link_is_evidence_once(flow):

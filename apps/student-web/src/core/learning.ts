@@ -41,6 +41,19 @@ export interface MemoryList { student_id: string; items: Memory[]; notice: strin
 export interface VariantOffer { knowledge_id: string; name: string; learning_status: LearningStatus; available_items: number }
 export interface PreviewOffer { knowledge_ids: string[]; names: string[]; quiz_items_available: number }
 export interface OptionalActivities { gate: { open: boolean; reasons: string[]; remaining_minutes: number }; variants: VariantOffer[]; preview: PreviewOffer | null; notice: string }
+export interface VariantErrorQuestion {
+  case_id: string; question_id: string; question_text: string | null; homework_title: string | null
+  occurred_at: string; correct_answer: string | null; correction_method: string | null
+}
+export interface VariantErrorGroup {
+  knowledge_id: string; name: string; learning_status: LearningStatus; error_count: number
+  source_case_id: string; available_items: number; questions: VariantErrorQuestion[]
+}
+export interface VariantPracticeOverview {
+  student_id: string; projection: { pending: boolean; projected_at: string | null }
+  gate: { open: boolean; reasons: string[]; remaining_minutes: number }
+  groups: VariantErrorGroup[]; pending_count: number; notice: string
+}
 export interface PracticeItem {
   id: string; knowledge_id: string; stem_text: string; answer_kind: 'number' | 'choice' | 'text'; has_hint: boolean
   response?: { answer_text: string; result: PracticeResult; hint_used: boolean }; solution_text?: string
@@ -54,7 +67,7 @@ export interface PracticeSessionList { items: PracticeSession[] }
 export interface PracticeAnswer { item_id: string; result: PracticeResult; solution_text: string; session_status: PracticeStatus }
 export interface PracticeHint { item_id: string; hint_text: string }
 export type StartPractice =
-  | { purpose: 'variant'; willing: true; knowledge_id: string; count: number }
+  | { purpose: 'variant'; willing: true; knowledge_id: string; count: number; source_case_id?: string }
   | { purpose: 'preview'; willing: true; with_quiz: boolean }
 
 type Guard<T> = (value: unknown) => value is T
@@ -89,6 +102,13 @@ export const isMemoryList = shape<MemoryList>({ student_id: id, items: list(isMe
 const isVariant = shape<VariantOffer>({ knowledge_id: id, name: text, learning_status: status, available_items: count })
 const isPreview = shape<PreviewOffer>({ knowledge_ids: list(id, 20), names: list(text, 20), quiz_items_available: count })
 export const isOptionalActivities = shape<OptionalActivities>({ gate: shape({ open: v => typeof v === 'boolean', reasons: list(text, 20), remaining_minutes: count }), variants: list(isVariant, 100), preview: nullable(isPreview), notice: text })
+const isVariantQuestion = shape<VariantErrorQuestion>({ case_id: id, question_id: id, question_text: nullable(text), homework_title: nullable(text), occurred_at: date, correct_answer: nullable(text), correction_method: nullable(text) })
+const isVariantGroup = shape<VariantErrorGroup>({ knowledge_id: id, name: text, learning_status: status, error_count: count, source_case_id: id, available_items: count, questions: list(isVariantQuestion, 50) })
+export const isVariantPracticeOverview = shape<VariantPracticeOverview>({
+  student_id: id, projection: shape({ pending: v => typeof v === 'boolean', projected_at: nullable(date) }),
+  gate: shape({ open: v => typeof v === 'boolean', reasons: list(text, 20), remaining_minutes: count }),
+  groups: list(isVariantGroup, 100), pending_count: count, notice: text,
+})
 const isItem = shape<PracticeItem>({
   id, knowledge_id: id, stem_text: text, answer_kind: oneOf(['number', 'choice', 'text'] as const), has_hint: v => typeof v === 'boolean',
   response: optional(shape({ answer_text: text, result: oneOf(practiceResults), hint_used: v => typeof v === 'boolean' })), solution_text: optional(text),

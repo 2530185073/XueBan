@@ -1,16 +1,18 @@
-"""Voluntary practice: one-step variants and next-lesson preview with an optional mini quiz.
+"""Student practice: one-step variants and next-lesson preview with an optional mini quiz.
 
 Extra work defaults to zero. The server starts an activity only when school
 tasks are complete (photographed homework all resolved, or a staff
 confirmation), staff observed capacity and opened an extra-minute budget for
-today, and the child says yes for this activity. Unknown counts as not met and
-everything is re-checked at start. Leaving early or never starting creates no
-debt. Items come from a reviewed bank tagged by knowledge point; the model only
-drafts candidates. Answers are rule-graded and kept apart from knowledge state,
-so taking part can never make a child look weaker.
+today, and the child says yes for this activity. A student launched directly
+from an AI-identified mistake can start its variant immediately. Unknown counts
+as not met and everything is re-checked at start. Leaving early or never
+starting creates no debt. Items come from a reviewed bank tagged by knowledge
+point; answers are rule-graded and kept apart from knowledge state, so taking
+part can never make a child look weaker.
 """
 from datetime import datetime, timedelta, timezone
 from fractions import Fraction
+import hashlib
 import json
 import re
 from typing import Annotated, Literal
@@ -27,10 +29,13 @@ from .correction_models import Entity
 from .device_auth import utc
 from .errors import Problem
 from .governance import register_downstream_purger
-from .learning_models import (KnowledgeEdge, KnowledgeNode, LearningOutbox, OptionalWindow, PracticeItem, PracticeResponse, PracticeSession,
-                              StudentKnowledgeState, StudentLearningProfile)
+from .learning_models import (KnowledgeEdge, KnowledgeNode, LearningOutbox, LearningProjection, OptionalWindow,
+                              PracticeItem, PracticeResponse, PracticeSession, QuestionKnowledgeLink, StudentKnowledgeState,
+                              StudentLearningProfile)
 from .correction_core import remember_idempotent, replay_idempotent
-from .learning_projection import OptionalKey, enqueue, new_id, register_job_handler, require_published_graph
+from .learning_mapping import _match_node, auto_confirm_model_links
+from .learning_projection import (OptionalKey, enqueue, fingerprints, new_id, project_student, register_job_handler,
+                                   require_published_graph)
 from .learning_reports import SHANGHAI, local_day, register_report_section
 from .models import Homework, Student
 from .providers.prompts import Role
@@ -160,14 +165,17 @@ def _states(session, student_id):
                                                                 .where(StudentKnowledgeState.student_id == student_id))}
 
 
-def pick_items(session, tenant_id, student_id, knowledge_ids, count):
+def pick_items(session, tenant_id, student_id, knowledge_ids, count, source_stem=None):
     """Unseen reviewed items first, one per family, easier first; never repeat within a session."""
     seen = set(session.scalars(select(PracticeResponse.item_id).where(PracticeResponse.student_id == student_id)))
+    source_key = _normalize(source_stem) if source_stem else None
     pool = list(session.scalars(select(PracticeItem).where(PracticeItem.tenant_id == tenant_id, PracticeItem.status == "approved",
                                                            PracticeItem.knowledge_id.in_(knowledge_ids))
                                 .order_by(PracticeItem.difficulty, PracticeItem.created_at, PracticeItem.id)))
     chosen, families = [], set()
     for item in sorted(pool, key=lambda i: (i.id in seen, knowledge_ids.index(i.knowledge_id), i.difficulty)):
+        if source_key and _normalize(item.stem_text) == source_key:
+            continue
         if item.item_family_id in families:
             continue
         chosen.append(item)
@@ -175,6 +183,92 @@ def pick_items(session, tenant_id, student_id, knowledge_ids, count):
         if len(chosen) == count:
             break
     return chosen
+
+
+def _variant_error_overview(session, student, gate):
+    """Build student-facing clusters from the current AI verdicts.
+
+    This view is intentionally independent of the teacher review queue. A
+    wrong or partially correct AI result is useful for practice immediately;
+    topics that do not match the published graph are kept in a visible
+    fallback cluster instead of disappearing from the page.
+    """
+    graph = require_published_graph(session)
+    nodes = {node.id: node for node in session.scalars(select(KnowledgeNode).where(
+        KnowledgeNode.graph_version == graph.version, KnowledgeNode.node_type.in_(('concept', 'skill'))))}
+    node_list = list(nodes.values())
+    states = {row.knowledge_id: row.document for row in session.scalars(
+        select(StudentKnowledgeState).where(StudentKnowledgeState.student_id == student.id))}
+    projection = session.get(LearningProjection, student.id)
+    expected = fingerprints(session, [student.id]).get(student.id)
+    homework_ids = select(Homework.id).where(Homework.student_id == student.id, Homework.processing_blocked.is_(False))
+    rows = []
+    uncertain_count = 0
+    for case in session.scalars(select(Entity).where(Entity.homework_id.in_(homework_ids), Entity.kind == "case")):
+        decision = case.document.get("current_decision") or {}
+        verdict = decision.get("verdict")
+        if verdict == "unable_to_judge":
+            uncertain_count += 1
+            continue
+        if verdict not in ("incorrect", "partially_correct") or case.document.get("lifecycle", "active") != "active":
+            continue
+        question = session.get(Entity, case.document.get("question_id"))
+        homework = session.get(Homework, case.homework_id)
+        attempt = session.get(Entity, case.document.get("current_attempt_id"))
+        occurred_at = (attempt.document.get("occurred_at") if attempt else None) or (iso(homework.occurred_at) if homework else None)
+        labels = [value.strip() for value in decision.get("knowledge_points", [])
+                  if isinstance(value, str) and value.strip()]
+        links = list(session.scalars(select(QuestionKnowledgeLink).where(
+            QuestionKnowledgeLink.question_id == case.document.get("question_id"),
+            QuestionKnowledgeLink.status == "confirmed").order_by(
+                QuestionKnowledgeLink.created_at.desc(), QuestionKnowledgeLink.id.desc())))
+        primary_link = next((link for link in links if link.role == "primary" and link.knowledge_id in nodes), None)
+        node = nodes.get(primary_link.knowledge_id) if primary_link else next(
+            (candidate for label in labels if (candidate := _match_node(label, node_list))), None)
+        topic = labels[0] if labels else ((question.document.get("question_type") or "未标注题型") if question else "未标注题型")
+        if node is None:
+            key = "auto-topic-" + hashlib.sha256(topic.encode("utf-8")).hexdigest()[:16]
+            name = f"待匹配题型 · {topic[:24]}"
+        else:
+            key, name = node.id, node.name
+        rows.append((key, name, node, case, decision, question, homework, occurred_at))
+
+    # One card represents one original wrong question even if a rebuild left
+    # more than one historical evidence row for it.
+    groups = {}
+    for knowledge_id, name, node, case, decision, question, homework, occurred_at in sorted(
+            rows, key=lambda item: (item[7] or "", item[3].id), reverse=True):
+        group = groups.setdefault(knowledge_id, {"knowledge_id": knowledge_id, "name": name,
+                                                   "learning_status": states.get(knowledge_id, {}).get("learning_status", "needs_help_now"),
+                                                   "error_count": 0, "source_case_id": case.id, "questions": [],
+                                                   "available_items": 0})
+        if any(item["case_id"] == case.id for item in group["questions"]):
+            continue
+        group["error_count"] += 1
+        group["questions"].append({
+            "case_id": case.id, "question_id": case.document.get("question_id"),
+            "question_text": (question.document.get("stem_text") or "")[:240] if question else None,
+            "homework_title": homework.title if homework else None,
+            "occurred_at": occurred_at,
+            "correct_answer": decision.get("correct_answer"),
+            "correction_method": decision.get("correction_method"),
+        })
+
+    approved_items = list(session.scalars(select(PracticeItem).where(
+        PracticeItem.tenant_id == student.tenant_id, PracticeItem.status == "approved")))
+    for group in groups.values():
+        group["source_case_id"] = group["questions"][0]["case_id"]
+        source_key = _normalize(group["questions"][0]["question_text"] or "")
+        group["available_items"] = sum(1 for item in approved_items
+                                       if item.knowledge_id == group["knowledge_id"] and _normalize(item.stem_text) != source_key)
+
+    return {"student_id": student.id,
+            "projection": {"pending": bool(expected) and (projection is None or projection.source_fingerprint != expected),
+                           "projected_at": projection.projected_at.isoformat() if projection else None},
+            "gate": {"open": gate["open"], "reasons": gate["reasons"], "remaining_minutes": gate["remaining_minutes"]},
+            "groups": sorted(groups.values(), key=lambda item: (-item["error_count"], item["name"])),
+            "pending_count": uncertain_count,
+            "notice": "错题按 AI 本次判定直接归纳；能匹配知识图谱的题目会同步到对应知识点，暂时匹配不到的题目先保留在待匹配题型中。"}
 
 
 def preview_targets(session, student_id, knowledge_ids):
@@ -492,6 +586,17 @@ def install_practice(app, engine, cfg, database_session, current_actor):
                                "quiz_items_available": len(pick_items(session, student.tenant_id, student_id, current, MAX_ITEMS))}
         return body
 
+    @app.get("/v1/students/{student_id}/variant-practice", operation_id="getVariantPractice")
+    def variant_practice(student_id: str, actor: ActorDep, session: SessionDep):
+        """Return current AI mistake clusters for the student's practice page."""
+        student = require_student(session, actor, student_id)
+        # Existing jobs may have been completed before automatic graph linking
+        # was enabled. Backfill those links the first time this page is opened.
+        if auto_confirm_model_links(session, student.tenant_id, student.id):
+            project_student(session, student.tenant_id, student.id)
+            session.commit()
+        return _variant_error_overview(session, student, gate_status(session, student_id))
+
     @app.post("/v1/students/{student_id}/practice-sessions", status_code=201, operation_id="startPracticeSession")
     def start(student_id: str, payload: StartInput, actor: ActorDep, session: SessionDep, idempotency_key: OptionalKey = None):
         operation = f"POST /v1/students/{student_id}/practice-sessions"
@@ -508,14 +613,31 @@ def install_practice(app, engine, cfg, database_session, current_actor):
                 raise Problem(409, "conflict", "practice_active", "已有进行中的活动，请先完成或结束。")
         at = now()
         gate = gate_status(session, student_id, at)
-        if not gate["open"]:
+        direct_variant = payload.purpose == "variant" and payload.source_case_id is not None
+        if not gate["open"] and not direct_variant:
             session.commit()
             raise Problem(409, "conflict", "optional_gate_closed", "现在还不能开始额外活动：需要学校任务已完成、老师确认有余力并开放时间。")
         names = _names(session)
+        source_stem = None
+        source_case = None
+        if payload.source_case_id:
+            source_case = session.get(Entity, payload.source_case_id)
+            if source_case is None or source_case.kind != "case":
+                raise Problem(404, "not_found", "not_found", "来源错题不存在或不可访问。")
+            source_homework = session.get(Homework, source_case.homework_id)
+            if source_homework is None or source_homework.student_id != student_id:
+                raise Problem(404, "not_found", "not_found", "来源错题不存在或不可访问。")
+            source_question = session.get(Entity, source_case.document.get("question_id"))
+            source_stem = source_question.document.get("stem_text") if source_question else None
         if payload.purpose == "variant":
-            state = _states(session, student_id).get(payload.knowledge_id)
-            if state is None or state["learning_status"] not in NEEDS_PRACTICE:
-                raise Problem(409, "conflict", "practice_not_needed", "这个知识点目前没有需要额外练习的依据。")
+            if source_case is not None:
+                source_decision = source_case.document.get("current_decision") or {}
+                if source_decision.get("verdict") not in ("incorrect", "partially_correct"):
+                    raise Problem(409, "conflict", "practice_not_needed", "这道题当前没有可用于举一反三的错题判定。")
+            else:
+                state = _states(session, student_id).get(payload.knowledge_id)
+                if state is None or state["learning_status"] not in NEEDS_PRACTICE:
+                    raise Problem(409, "conflict", "practice_not_needed", "这个知识点目前没有需要额外练习的依据。")
             knowledge_ids, count = [payload.knowledge_id], payload.count
         else:
             profile = session.get(StudentLearningProfile, student_id)
@@ -523,14 +645,16 @@ def install_practice(app, engine, cfg, database_session, current_actor):
             if not knowledge_ids:
                 raise Problem(409, "conflict", "course_unknown", "还不知道下一课的内容，暂不提供预习。")
             count = MAX_ITEMS if payload.with_quiz else 0
-        items = pick_items(session, student.tenant_id, student_id, knowledge_ids, count) if count else []
+        items = pick_items(session, student.tenant_id, student_id, knowledge_ids, count, source_stem) if count else []
         if payload.purpose == "variant" and not items:
             raise Problem(409, "conflict", "no_reviewed_items", "这个知识点还没有老师审核过的练习题。")
         row = PracticeSession(id=new_id("practice"), tenant_id=student.tenant_id, student_id=student_id, purpose=payload.purpose,
                               knowledge_ids=knowledge_ids, source_case_id=payload.source_case_id, item_ids=[i.id for i in items],
                               hints_used=[], gate={**gate, "child_willing": {"value": True, "source": "student", "actor": actor.id,
-                                                                            "at": at.isoformat()}},
-                              status="active", started_at=at, budget_ends_at=at + timedelta(minutes=gate["remaining_minutes"]))
+                                                                            "at": at.isoformat()},
+                                     "direct_variant": direct_variant},
+                              status="active", started_at=at,
+                              budget_ends_at=at + timedelta(minutes=max(gate["remaining_minutes"], 10) if direct_variant else gate["remaining_minutes"]))
         session.add(row)
         session.flush()
         result = remember_idempotent(session, actor, student_id, operation, idempotency_key, payload.model_dump(mode="json"),

@@ -280,6 +280,15 @@ class CorrectionWorker:
             # Even 'correct' remains pending until an authorized person verifies it.
             next_progress = "paused" if case.document["progress"] == "paused" else ("pending" if doc["verdict"] == "correct" else "needs_correction")
             update_case(session, self.contracts, case, current_decision=doc, progress=next_progress)
+            # The student can use an AI-confirmed wrong answer immediately.
+            # If the returned knowledge-point names match the published graph,
+            # create the model link and rebuild that student's map in this
+            # same transaction. A later teacher review can supersede it.
+            if doc["verdict"] in ("incorrect", "partially_correct") and doc["knowledge_points"]:
+                from .learning_mapping import auto_confirm_model_links
+                from .learning_projection import project_student
+                if auto_confirm_model_links(session, homework.tenant_id, homework.student_id):
+                    project_student(session, homework.tenant_id, homework.student_id)
             return {"resource_type": "check", "resource_id": check.id}
         if task.kind == "hint":
             data = result.data

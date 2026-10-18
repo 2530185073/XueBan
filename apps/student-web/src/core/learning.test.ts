@@ -3,13 +3,14 @@ import { IDBFactory } from 'fake-indexeddb'
 import { StudentClient } from './student'
 import { DraftStore } from './store'
 import { StudentError } from './errors'
-import { isAgentContext, isKnowledgeDetail, isKnowledgeMap, isMemoryList, isOptionalActivities, isPracticeAnswer, isPracticeSession } from './learning'
-import { activities, context, detail, map, memory, session, state } from './learning.fixtures'
+import { isAgentContext, isKnowledgeDetail, isKnowledgeMap, isMemoryList, isOptionalActivities, isPracticeAnswer, isPracticeSession, isVariantPracticeOverview } from './learning'
+import { activities, context, detail, map, memory, session, state, variantOverview } from './learning.fixtures'
 
 describe('learning response guards', () => {
   it('accept the backend shapes', () => {
     expect(isKnowledgeMap(map)).toBe(true); expect(isKnowledgeDetail(detail)).toBe(true); expect(isAgentContext(context)).toBe(true)
     expect(isMemoryList({ student_id: 'student_one', items: [memory], notice: 'n' })).toBe(true); expect(isOptionalActivities(activities)).toBe(true)
+    expect(isVariantPracticeOverview(variantOverview)).toBe(true)
     expect(isOptionalActivities({ ...activities, gate: { open: false, reasons: ['no_extra_budget'], remaining_minutes: 0 }, variants: [], preview: null })).toBe(true)
     expect(isPracticeSession(session)).toBe(true)
     expect(isPracticeSession({ ...session, purpose: 'preview', items: [], hints_allowed: false, targets: [{ id: 'kp-x', name: '去括号', objective: null, prerequisites: [{ id: 'kp-y', name: '合并同类项', learning_status: 'consolidating' }] }] })).toBe(true)
@@ -23,6 +24,7 @@ describe('learning response guards', () => {
     expect(isAgentContext({ ...context, tips: [{ ...context.tips[0], kind: 'ranking' }] })).toBe(false)
     expect(isMemoryList({ student_id: 'student_one', items: [{ ...memory, category: 'personality' }], notice: 'n' })).toBe(false)
     expect(isOptionalActivities({ ...activities, gate: { open: 'true', reasons: [], remaining_minutes: 10 } })).toBe(false)
+    expect(isVariantPracticeOverview({ ...variantOverview, groups: [{ ...variantOverview.groups[0], learning_status: 'mastered' }] })).toBe(false)
     expect(isOptionalActivities({ ...activities, gate: { open: true, reasons: [], remaining_minutes: -1 } })).toBe(false)
     expect(isPracticeSession({ ...session, status: 'failed' })).toBe(false)
     expect(isPracticeSession({ ...session, items: [{ ...session.items[0], answer_kind: 'essay' }] })).toBe(false)

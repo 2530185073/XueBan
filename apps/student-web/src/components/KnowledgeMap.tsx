@@ -32,7 +32,7 @@ export function KnowledgeDetailView({ detail, onBack }: { detail: KnowledgeDetai
         <div className="evidence-meta"><time dateTime={e.occurred_at}>{dayLabel(e.occurred_at)}</time>{e.homework_title && <span>{e.homework_title}</span>}<span>{eventLabel(e.event_type)}</span></div>
         <p className="evidence-question">{e.question_text || '题目文字暂缺'}</p>
         <div className="evidence-tags"><span className="status-pill neutral">{resultLabels[e.result]}</span><span className="muted small">{assistanceLabel(e.assistance_level)}</span></div>
-      </li>)}</ol> : <p className="muted small">还没有老师核实过的作答记录。</p>}
+      </li>)}</ol> : <p className="muted small">还没有可用的作答记录。</p>}
     </div>
   </section>
 }
@@ -68,7 +68,7 @@ export function KnowledgeMapPage({ workspace, map, onRefresh }: { workspace: Wor
     return () => { live = false }
   }, [openId, client])
   return <section className="knowledge-page">
-    <div className="page-title-row"><div><span className="eyebrow">根据老师核实过的作业</span><h1>我的知识地图</h1><p>看看哪些地方在变熟练，哪些地方可以请老师再一起看看。</p></div>{!openId && <button className="button secondary" onClick={onRefresh}><RefreshCw size={17} /> 刷新地图</button>}</div>
+    <div className="page-title-row"><div><span className="eyebrow">根据 AI 判定与老师核实的作业</span><h1>我的知识地图</h1><p>看看哪些地方在变熟练，哪些地方可以继续练习。</p></div>{!openId && <button className="button secondary" onClick={onRefresh}><RefreshCw size={17} /> 刷新地图</button>}</div>
     {openId ? error ? <div className="inline-error" role="alert"><p>{error}</p><button className="text-button" onClick={() => setOpenId(null)}><ArrowLeft size={14} /> 回到知识地图</button></div>
       : detail?.node.id === openId ? <KnowledgeDetailView detail={detail} onBack={() => setOpenId(null)} />
       : <p className="muted small" role="status"><LoaderCircle className="spin" size={14} /> 正在打开这个知识点…</p>

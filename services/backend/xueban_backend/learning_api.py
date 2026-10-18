@@ -178,7 +178,7 @@ def install_learning(app, engine, cfg, database_session, current_actor):
                                "projected_at": projection.projected_at.isoformat() if projection else None,
                                "pending": bool(expected) and (projection is None or projection.source_fingerprint != expected)},
                 "states": items, "chapters": chapter_rollup([_node_dict(n) for n in nodes], states),
-                "notice": "状态只根据坐班老师已核实的作答计算；没有记录的知识点表示资料不足，不代表薄弱。"}
+                "notice": "状态会同步 AI 判定的错题与老师核实的作答；没有记录的知识点表示资料不足，不代表薄弱。"}
 
     @app.get("/v1/students/{student_id}/knowledge/{knowledge_id}", operation_id="getStudentKnowledgeNode")
     def knowledge_node(student_id: str, knowledge_id: str, actor: ActorDep, session: SessionDep,

@@ -8,7 +8,7 @@ import { homeworkPageIds } from './homeworkPages'
 import { valid } from './validation'
 import { bucketOfCase, countBuckets, firstUnresolved, isRetired, orderActiveCases, orderRowsByPhoto, retiredCases } from './cases'
 import { ObjectUrls } from './objectUrls'
-import { isAgentContext, isKnowledgeDetail, isKnowledgeMap, isMemory, isMemoryList, isOptionalActivities, isPracticeAnswer, isPracticeHint, isPracticeSession, isPracticeSessionList, MEMORY_CONTENT_MAX, MEMORY_CONTENT_MIN, PRACTICE_ANSWER_MAX, type AgentContext, type ExitReason, type KnowledgeDetail, type KnowledgeMap, type Memory, type MemoryList, type OptionalActivities, type PracticeAnswer, type PracticeHint, type PracticeSession, type StartPractice, type StudentMemoryCategory } from './learning'
+import { isAgentContext, isKnowledgeDetail, isKnowledgeMap, isMemory, isMemoryList, isOptionalActivities, isPracticeAnswer, isPracticeHint, isPracticeSession, isPracticeSessionList, isVariantPracticeOverview, MEMORY_CONTENT_MAX, MEMORY_CONTENT_MIN, PRACTICE_ANSWER_MAX, type AgentContext, type ExitReason, type KnowledgeDetail, type KnowledgeMap, type Memory, type MemoryList, type OptionalActivities, type PracticeAnswer, type PracticeHint, type PracticeSession, type StartPractice, type StudentMemoryCategory, type VariantPracticeOverview } from './learning'
 
 export const remoteDraftId = (id: string) => `remote_${id}`
 const encoded = encodeURIComponent
@@ -644,6 +644,7 @@ export class StudentClient {
   }
   async retractMemory(memoryId: string): Promise<Memory> { return (await this.learning(() => `/v1/memories/${encoded(memoryId)}/retract`, isMemory, {})).value }
   async optionalActivities(): Promise<OptionalActivities> { return (await this.learning(s => `/v1/students/${s}/optional-activities`, isOptionalActivities)).value }
+  async variantPractice(): Promise<VariantPracticeOverview> { return this.owned(await this.learning(s => `/v1/students/${s}/variant-practice`, isVariantPracticeOverview)) }
   async startPractice(request: StartPractice): Promise<PracticeSession> { return this.owned(await this.learning(s => `/v1/students/${s}/practice-sessions`, isPracticeSession, request)) }
   async practiceSession(sessionId: string): Promise<PracticeSession> { return this.owned(await this.learning(() => `/v1/practice-sessions/${encoded(sessionId)}`, isPracticeSession)) }
   /** The student's unfinished activity, if any (e.g. after a reload or an unconfirmed start). */

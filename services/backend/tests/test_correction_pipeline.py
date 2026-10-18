@@ -76,7 +76,7 @@ def checked(**changes):
     return {"verdict": "incorrect", "reason_code": None,
             "readback": {"stem_text": "计算(-2)²。", "answer_text": "-4", "answer_status": "present"},
             "recognition_consistent": True, "basis_summary": "负数平方的符号需要核对。",
-            "uncertainties": [], "correct_answer": "4", **changes}
+            "uncertainties": [], "knowledge_points": [], "correct_answer": "4", **changes}
 
 
 def decision(ctx, **changes):
@@ -347,7 +347,8 @@ def test_recognition_top_level_extra_fields_are_rejected_without_silent_unwrappi
 
 def test_check_is_candidate_and_can_be_converted_to_contract_decision():
     ctx = context()
-    with pipeline([checked()]) as flow:
+    requests = []
+    with pipeline([checked()], requests) as flow:
         result = flow.check(**ctx)
     data = deepcopy(result.data)
     assert data["verdict"] == "incorrect"
@@ -356,6 +357,7 @@ def test_check_is_candidate_and_can_be_converted_to_contract_decision():
     assert data["confirmed_by"] is data["confirmed_at"] is data["confirmation_source"] is None
     assert data["basis"][0]["kind"] == "model_hypothesis"
     assert data["input_versions"] == ctx["input_versions"]
+    assert requests[0]["max_tokens"] == 8192
     # Worker adds persistent identity/audit fields; internal readback stays out
     # of the public Decision shape rather than silently extending the contract.
     del data["uncertainties"], data["readback"]
@@ -383,7 +385,7 @@ def test_printed_visible_answers_are_readable_without_asserting_authentic_studen
     with pipeline(recognition_run(), requests) as flow:
         result = flow.recognize(images=(picture(),))
     assert result.data["items"][0]["recognition_status"] == "ready"
-    assert result.prompt_version == "photo-correction.v10"
+    assert result.prompt_version == "photo-correction.v12"
     prompt = requests[1]["messages"][0]["content"]
     assert "印刷或手写、材料来源或合成属性、作者和学生身份不可验证，不是数学不确定性" in prompt
 
@@ -437,24 +439,59 @@ def test_recognition_removes_only_explicit_field_labels_from_persisted_fields():
 
 
 @pytest.mark.parametrize("role", ["check", "recheck"])
-def test_explicit_readback_field_labels_do_not_create_false_recognition_conflicts(role):
+def test_second_pass_uses_first_pass_recognition_without_competing_readback(role):
     ctx = context()
     ctx["attempt"]["answer_text"] = "4"
     if role == "recheck":
         ctx["images"] = (picture(), picture("asset_new"))
         ctx["attempt"].update(asset_ids=["asset_new"], answer_regions=[region("asset_new")])
     output = checked(verdict="correct")
-    output["readback"].update(stem_text="Question: 计算(-2)²。", answer_text="Student answer: 4")
+    output.pop("readback")
+    output.pop("recognition_consistent")
     requests = []
     with pipeline([output], requests) as flow:
         result = getattr(flow, role)(**ctx)
     assert result.data["verdict"] == "correct"
     assert result.data["validity"] == "candidate"
-    assert result.data["readback"] == output["readback"]  # Original readback is auditable.
+    assert result.data["readback"]["stem_text"] == ctx["question"]["stem_text"]
+    assert result.data["readback"]["answer_text"] == "4"
     system = requests[0]["messages"][0]["content"]
-    assert "旧答案与当前答案不同是正常订正" in system
-    assert "不能拿旧答案来比较" in system
-    assert "当前作答图自身有多个无法确定取舍的答案" in system
+    assert "这是第二轮判题" in system
+    assert "不要重新抄写题干、选项或手写答案" in system
+    assert "不要输出 readback 或 recognition_consistent 字段" in system
+
+
+def test_repeated_choice_options_do_not_turn_a_judgeable_check_into_a_conflict():
+    ctx = context()
+    ctx["question"].update(
+        stem_text="下列说法正确的是。",
+        options=[{"label": "A", "text": "甲说法"}, {"label": "B", "text": "乙说法"}],
+    )
+    output = checked(verdict="correct", basis_summary="学生选择 B，答案与题意一致。")
+    output.pop("readback")
+    output.pop("recognition_consistent")
+    ctx["attempt"]["answer_text"] = "B"
+    requests = []
+    with pipeline([output], requests) as flow:
+        result = flow.check(**ctx)
+    assert result.data["verdict"] == "correct"
+    assert result.data["validity"] == "candidate"
+    sent = json.dumps(requests[0], ensure_ascii=False)
+    assert "甲说法" in sent and "乙说法" in sent
+
+
+def test_legacy_readback_mismatch_cannot_override_first_pass_judgment():
+    output = checked(verdict="incorrect", basis_summary="第一轮识别的学生答案与正确答案不一致。")
+    output["readback"].update(stem_text="另一道题", answer_text="另一个答案")
+    with pipeline([output]) as flow:
+        result = flow.check(**context())
+    assert result.data["verdict"] == "incorrect"
+    assert result.data["validity"] == "candidate"
+    assert result.data["readback"] == {
+        "stem_text": context()["question"]["stem_text"],
+        "answer_text": context()["attempt"]["answer_text"],
+        "answer_status": context()["attempt"]["answer_status"],
+    }
 
 
 @pytest.mark.parametrize("field,value,expected", [
@@ -479,20 +516,13 @@ def test_field_labels_never_make_distinct_math_equivalent(observed, expected):
     assert normalize_field_for_comparison("Student answer: " + observed, "answer_text") != normalize_field_for_comparison(expected, "answer_text")
 
 
-@pytest.mark.parametrize("case", ["missing_minus", "u_v", "overwritten_step", "not_ready", "superscript", "separated_digits"])
-def test_formula_and_handwriting_uncertainty_cannot_become_definite_correct(case):
+@pytest.mark.parametrize("case", ["u_v", "overwritten_step", "not_ready"])
+def test_recognized_answer_is_judged_in_second_pass(case):
     ctx = context()
     output = checked(verdict="correct")
-    if case == "missing_minus": output["readback"]["answer_text"] = "4"
     if case == "u_v": output["uncertainties"] = ["手写首字母可能是u，也可能是v。"]
     if case == "overwritten_step": output["uncertainties"] = ["中间项被涂改，不能依据最终答案补写。"]
     if case == "not_ready": ctx["attempt"]["recognition_status"] = "needs_revision"
-    if case == "superscript":
-        ctx["attempt"]["answer_text"] = "x²"
-        output["readback"]["answer_text"] = "x2"
-    if case == "separated_digits":
-        ctx["attempt"]["answer_text"] = "1 2"
-        output["readback"]["answer_text"] = "12"
     original_answer = ctx["attempt"]["answer_text"]
     with pipeline([output]) as flow:
         data = flow.check(**ctx).data
@@ -502,7 +532,6 @@ def test_formula_and_handwriting_uncertainty_cannot_become_definite_correct(case
         assert data["verdict"] == "unable_to_judge" and data["validity"] == "needs_review"
     assert data["first_error_region"] is None
     assert ctx["attempt"]["answer_text"] == original_answer
-    if case == "missing_minus": assert data["reason_code"] == "recognition_conflict"
 
 
 def test_blank_and_unreadable_answers_are_not_conflated():
