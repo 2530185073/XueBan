@@ -4,7 +4,7 @@ import { type CorrectionTarget } from './presentation'
 import type { Account, CaseDetail, CreateHelp, DraftSummary, DraftView, Hint, HomeworkDetail, HomeworkSession, HomeworkSummary, IdentityContext } from './core/types'
 
 const helpDefaults: Record<CreateHelp['kind'], string> = { question: '我需要老师帮我看看这道题。', recognition: '识别文字与照片不一致，请老师核对。', judgment: '这道题的判断我看不懂，请老师看看。', appeal: '我觉得这道题的判断可能不对，请老师重新看看。' }
-const helpNotices: Record<CreateHelp['kind'], string> = { question: '求助已提交，等坐班老师过来一起看。', recognition: '已请老师核对识别结果。', judgment: '已请老师看看这次判断。', appeal: '重查申请已提交。老师处理前，当前结果保持不变。' }
+const helpNotices: Record<CreateHelp['kind'], string> = { question: '求助已提交，可以先继续其他题。', recognition: '已反馈文字与照片不一致，老师会帮你核对。可以先继续其他题。', judgment: '已请老师看看这次判断，可以先继续其他题。', appeal: '重查申请已提交。老师处理前，当前结果保持不变，可以先继续其他题。' }
 
 export function useStudentWorkspace() {
   const [client] = useState(() => {

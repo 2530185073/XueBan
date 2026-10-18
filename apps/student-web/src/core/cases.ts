@@ -1,4 +1,5 @@
 import type { CaseBucket, CaseCounts, CaseDetail, CorrectionCase, Decision, RetiredCase } from './types'
+import { compareTimestamps, preciseTimestamp } from './chronology'
 
 const invalid = (d: Decision) => d.validity === 'stale' || d.validity === 'retracted'
 export const isRetired = (c: Pick<CorrectionCase, 'lifecycle'>) => c.lifecycle === 'superseded' || c.lifecycle === 'deletion_pending'
@@ -28,17 +29,34 @@ export const unresolved = (bucket: CaseBucket) => bucket === 'needs_correction' 
  * Active case IDs in homework order. A superseded case is replaced in place by
  * its active replacements; retired cases themselves never appear.
  */
-export function orderActiveCases(caseIds: string[], records: Map<string, CorrectionCase>): string[] {
+export function orderActiveCases(caseIds: string[], records: Map<string, CorrectionCase>, compare?: (a: CorrectionCase, b: CorrectionCase) => number): string[] {
   const out: string[] = [], seen = new Set<string>()
+  const sorted = (ids: string[]) => compare ? [...ids].sort((a, b) => { const left = records.get(a), right = records.get(b); return left && right ? compare(left, right) : a.localeCompare(b) }) : ids
   const visit = (id: string, depth: number) => {
     if (seen.has(id) || depth > 8) return
     const c = records.get(id); if (!c) return
     seen.add(id)
     if (!isRetired(c)) out.push(id)
-    else if (c.lifecycle === 'superseded') for (const next of c.replacement_case_ids) visit(next, depth + 1)
+    else if (c.lifecycle === 'superseded') for (const next of sorted(c.replacement_case_ids)) visit(next, depth + 1)
   }
-  for (const id of caseIds) visit(id, 0)
+  if (compare) {
+    // Repaired questions inherit their original question's place, even when the
+    // server also lists the replacement as a top-level case with a newer date.
+    const replacements = new Set([...records.values()].filter(c => c.lifecycle === 'superseded').flatMap(c => c.replacement_case_ids))
+    for (const id of sorted(caseIds.filter(id => !replacements.has(id)))) visit(id, 0)
+  }
+  for (const id of sorted(caseIds)) visit(id, 0)
   return out
+}
+
+/** Keep the provider's creation order; backend case IDs are random, not page order. */
+export function orderCasesByCreation(caseIds: string[], records: Map<string, CorrectionCase>, rows: CaseDetail[] = []): string[] {
+  const questions = new Map(rows.map(row => [row.case.id, row.question]))
+  return orderActiveCases(caseIds, records, (a, b) => {
+    const caseA = preciseTimestamp(a.created_at), caseB = preciseTimestamp(b.created_at)
+    return compareTimestamps(preciseTimestamp(questions.get(a.id)?.created_at) ?? caseA, preciseTimestamp(questions.get(b.id)?.created_at) ?? caseB)
+      || compareTimestamps(caseA, caseB) || a.id.localeCompare(b.id)
+  })
 }
 export function retiredCases(records: Map<string, CorrectionCase>): RetiredCase[] {
   return [...records.values()].filter(isRetired).map(c => ({ id: c.id, lifecycle: c.lifecycle as RetiredCase['lifecycle'], replacementCaseIds: [...c.replacement_case_ids] }))

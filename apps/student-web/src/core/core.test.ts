@@ -120,6 +120,81 @@ describe('student session and durable corrections', () => {
   })
 })
 
+/** Simulates a completed page job that atomically persisted all per-question results. */
+function wholePageSetup(states: (Pick<Decision, 'validity' | 'verdict'> | null)[]) {
+  const s = setup()
+  const rows: CaseDetail[] = states.map((state, index) => {
+    const suffix = String(index + 1), caseId = `case_page${suffix}`, questionId = `question_page${suffix}`, attemptId = `attempt_page${suffix}`
+    const q: CapturedQuestionRevision = { ...fixture<CapturedQuestionRevision>('question_revision_2'), question_id: questionId, homework_id: s.hw.id }
+    const a: Attempt = { ...fixture<Attempt>('correction_across_question_revision'), id: attemptId, case_id: caseId, question_id: questionId, parent_attempt_id: null, root_attempt_id: attemptId, asset_ids: ['asset_one'] }
+    const decision: Decision | null = state ? { ...fixture<Decision>('model_candidate'), id: `decision_page${suffix}`, case_id: caseId, check_id: `check_page${suffix}`, ...state, reason_code: state.validity === 'needs_review' ? 'recognition_conflict' : null, input_versions: { ...fixture<Decision>('model_candidate').input_versions, question_id: questionId, attempt_id: attemptId } } : null
+    const c: CorrectionCase = { ...fixture<CorrectionCase>('resolved_case'), id: caseId, scope: s.hw.scope, homework_id: s.hw.id, question_id: questionId, root_attempt_id: attemptId, current_attempt_id: attemptId, current_decision: decision, progress: 'pending', attempt_ids: [attemptId], check_ids: [], hint_ids: [], help_request_ids: [], review_ids: [] }
+    expect(valid('CorrectionCase', c), `case ${index}`).toBe(true)
+    expect(valid('Attempt', a), `attempt ${index}`).toBe(true)
+    expect(valid('CapturedQuestionRevision', q), `question ${index}`).toBe(true)
+    return { case: c, question: q, attempt: a }
+  })
+  const jobs = new Map<string, Job>()
+  s.route((path, init) => {
+    if (path === `/v1/homeworks/${s.hw.id}/recognitions`) { s.hw.case_ids = rows.map(row => row.case.id); s.hw.question_ids = rows.map(row => row.question.question_id) }
+    for (const row of rows) {
+      if (path === `/v1/cases/${row.case.id}`) return json(row.case)
+      if (path === `/v1/questions/${row.question.question_id}`) return json({ record: row.question, current_revision: row.question.revision, currently_effective: true })
+      if (path === `/v1/attempts/${row.attempt.id}`) return json({ record: row.attempt, current_revision: row.attempt.revision, currently_effective: true })
+      if (path === `/v1/cases/${row.case.id}/checks` && init.method === 'POST') {
+        const decision: Decision = { ...fixture<Decision>('model_candidate'), case_id: row.case.id, input_versions: { ...fixture<Decision>('model_candidate').input_versions, question_id: row.question.question_id, attempt_id: row.attempt.id, attempt_recognition_revision: row.attempt.recognition_revision } }
+        row.case.current_decision = decision
+        const job: Job = { ...s.job, id: `job_${row.case.id}`, kind: 'check', result: { resource_type: 'check', resource_id: decision.check_id! } }
+        jobs.set(job.id, job); return json({ job, created_resource: null }, 202)
+      }
+    }
+    const job = jobs.get(path.split('/').at(-1)!); if (path.startsWith('/v1/jobs/') && job) return json(job)
+  })
+  return { ...s, rows }
+}
+
+describe('whole-page persisted correction results', () => {
+  const results: Pick<Decision, 'validity' | 'verdict'>[] = [
+    { validity: 'candidate', verdict: 'correct' }, { validity: 'candidate', verdict: 'incorrect' },
+    { validity: 'needs_review', verdict: 'unable_to_judge' }, { validity: 'needs_review', verdict: 'correct' },
+  ]
+  it('uses ready candidate and needs_review results without starting per-question checks', async () => {
+    const s = wholePageSetup(results); await s.client.login('synthetic.student', 'synthetic password only'); const draft = await s.client.createDraft(photo.blob)
+    const result = await s.client.runDraft(draft.id)
+    expect(result.error).toBeNull(); expect(result.stage).toBe('complete'); expect(result.detail?.cases).toHaveLength(4)
+    expect(s.calls.filter(c => c.path.endsWith('/checks') && c.init.method === 'POST')).toHaveLength(0)
+    expect(s.calls.filter(c => c.path.endsWith('/recognitions'))).toHaveLength(1)
+    expect(result.detail?.cases.map(row => row.case.current_decision?.validity)).toEqual(results.map(state => state.validity))
+    expect(result.detail!.cases.map(decisionLabel)).toEqual(['AI 初判 · 正确', 'AI 初判 · 需要订正', '暂时看不准 · 可以先看其他题', '暂时看不准 · 可以先看其他题'])
+  })
+  it('keeps the photo and page decisions after a lost response, then resumes after reload without duplicate checks', async () => {
+    const s = wholePageSetup(results); await s.client.login('synthetic.student', 'synthetic password only'); const draft = await s.client.createDraft(photo.blob)
+    s.loseRecognition(); const failed = await s.client.runDraft(draft.id); expect(failed.stage).toBe('failed')
+    const scope = JSON.stringify(['http://localhost', 'actor_test', 'student_one'])
+    const saved = await s.store.draft(scope, draft.id)
+    expect(await saved.pages[0].photo.blob.text()).toBe('synthetic-image'); expect(saved.detail?.cases).toHaveLength(4)
+    const restored = new StudentClient(s.options); await restored.restore(); const opened = await restored.openHomework(s.hw.id)
+    const result = await restored.runDraft(opened.draftId!)
+    expect(result.stage).toBe('complete'); expect(result.detail?.cases[2].case.current_decision?.validity).toBe('needs_review')
+    const requests = s.calls.filter(c => c.path.endsWith('/recognitions'))
+    expect(requests).toHaveLength(2); expect(requests[1].init.headers).toEqual(requests[0].init.headers); expect(requests[1].init.body).toBe(requests[0].init.body)
+    expect(s.calls.filter(c => c.path.endsWith('/checks') && c.init.method === 'POST')).toHaveLength(0)
+    expect(s.calls.filter(c => c.init.method === 'PUT')).toHaveLength(1)
+    expect(await s.store.hasPending(scope, `${draft.id}:`)).toBe(false)
+  })
+  it.each(['missing', 'stale', 'retracted', 'old_recognition'] as const)('retains legacy checks for %s decisions while preserving completed page items', async state => {
+    const s = wholePageSetup([{ validity: 'needs_review', verdict: 'unable_to_judge' }, state === 'missing' ? null : { validity: 'candidate', verdict: 'correct' }])
+    const d = s.rows[1].case.current_decision
+    if (d && (state === 'stale' || state === 'retracted')) d.validity = state
+    if (d && state === 'old_recognition') d.input_versions.attempt_recognition_revision = 2
+    await s.client.login('synthetic.student', 'synthetic password only'); const draft = await s.client.createDraft(photo.blob)
+    const result = await s.client.runDraft(draft.id)
+    expect(result.error).toBeNull(); expect(result.stage).toBe('complete')
+    expect(s.calls.filter(c => c.path.endsWith('/checks') && c.init.method === 'POST').map(c => c.path)).toEqual(['/v1/cases/case_page2/checks'])
+    expect(result.detail?.cases[0].case.current_decision?.validity).toBe('needs_review')
+  })
+})
+
 function correctionSetup() {
   const s = setup(), c = fixture<CorrectionCase>('resolved_case'), q = fixture<CapturedQuestionRevision>('question_revision_2')
   let a = fixture<Attempt>('correction_across_question_revision')

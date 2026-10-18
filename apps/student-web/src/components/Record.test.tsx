@@ -18,7 +18,7 @@ describe('history page', () => {
   const html = renderToStaticMarkup(<HistoryPage workspace={workspace} onOpen={() => {}} onOpenDraft={() => {}} onNewWork={() => {}} />)
   it('groups by day with filters, per-photo counts and continue entries', () => {
     expect(html).toContain('今天'); expect(html).toContain('全部科目'); expect(html).toContain('未标注科目'); expect(html).toContain('数学')
-    for (const label of ['有待订正', '待老师核实', '已完成']) expect(html).toContain(label)
+    for (const label of ['有待订正', '有待核实', '已完成']) expect(html).toContain(label)
     expect(html).toContain('本次拍到 3 题：需订正 1，待核实 1，已确认正确 1'); expect(html).toContain('只统计本次拍到的题目')
     expect(html.match(/继续订正/g)?.length).toBeGreaterThanOrEqual(2); expect(html).toContain('老师已重新切分部分题目')
     expect(html).toContain('题目统计暂时读不到'); expect(html).toContain('aria-pressed="true"')

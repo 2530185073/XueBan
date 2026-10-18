@@ -6,13 +6,15 @@ import { editPhoto, normalizePhoto } from './photo'
 import { applyChange, checkBatch, checkSelection, isIdentity, movePage, pageBudget, removePage, type EditChange, type PageEdit } from './pages'
 import { homeworkPageIds } from './homeworkPages'
 import { valid } from './validation'
-import { bucketOfCase, countBuckets, firstUnresolved, isRetired, orderActiveCases, retiredCases } from './cases'
+import { bucketOfCase, countBuckets, firstUnresolved, isRetired, orderActiveCases, orderCasesByCreation, retiredCases } from './cases'
 import { ObjectUrls } from './objectUrls'
+import { compareCreated } from './chronology'
 import { isAgentContext, isKnowledgeDetail, isKnowledgeMap, isMemory, isMemoryList, isOptionalActivities, isPracticeAnswer, isPracticeHint, isPracticeSession, isPracticeSessionList, MEMORY_CONTENT_MAX, MEMORY_CONTENT_MIN, PRACTICE_ANSWER_MAX, type AgentContext, type ExitReason, type KnowledgeDetail, type KnowledgeMap, type Memory, type MemoryList, type OptionalActivities, type PracticeAnswer, type PracticeHint, type PracticeSession, type StartPractice, type StudentMemoryCategory } from './learning'
 
 export const remoteDraftId = (id: string) => `remote_${id}`
 const encoded = encodeURIComponent
 const active = (job: Job) => ['queued', 'running', 'retryable_failed'].includes(job.status)
+const latestRecognition = (jobs: Job[]) => jobs.filter(job => job.kind === 'recognize_homework').sort(compareCreated).at(-1)
 const matches = (v: InputVersions, row: CaseDetail) => v.question_id === row.case.question_id && v.question_revision === row.case.current_question_revision && v.attempt_id === row.case.current_attempt_id && v.attempt_recognition_revision === row.attempt.recognition_revision
 export function effectiveDecision(row: CaseDetail) { const d = row.case.current_decision; return !isRetired(row.case) && d && !['stale', 'retracted'].includes(d.validity) && matches(d.input_versions, row) ? d : null }
 /** Requests a student may raise on the current answer; an appeal needs a result to question. */
@@ -33,9 +35,9 @@ async function readable(blob: Blob, index: number) {
 }
 export function decisionLabel(row: CaseDetail): string {
   const d = effectiveDecision(row)
-  if (row.attempt.recognition_status !== 'ready') return '识别待核实 · 请重拍或请老师看'
+  if (row.attempt.recognition_status !== 'ready') return '作答待核实 · 先对照原图看看'
   if (!d) return '等待检查'
-  if (d.validity === 'needs_review' || d.verdict === 'unable_to_judge') return '暂时看不准 · 请老师一起看'
+  if (d.validity === 'needs_review' || d.verdict === 'unable_to_judge') return '暂时看不准 · 可以先看其他题'
   const text = { correct: '正确', incorrect: '需要订正', partially_correct: '部分需要订正', unanswered: '尚未作答' }[d.verdict]
   return `${d.validity === 'confirmed' && d.origin === 'staff' ? '老师确认' : 'AI 初判'} · ${text}`
 }
@@ -358,7 +360,8 @@ export class StudentClient {
     const records = await this.caseRecords(ctx, homework), cases: CaseDetail[] = [], jobs: Job[] = []
     for (const caseId of orderActiveCases(homework.case_ids, records)) cases.push(await this.rowFor(ctx, records.get(caseId)!))
     for (const id of homework.job_ids) jobs.push(await this.read<Job>(ctx, `/v1/jobs/${encoded(id)}`, 'Job'))
-    return { homework, cases, jobs, retired: retiredCases(records) }
+    const rows = new Map(cases.map(row => [row.case.id, row]))
+    return { homework, cases: orderCasesByCreation(homework.case_ids, records, cases).map(caseId => rows.get(caseId)!), jobs, retired: retiredCases(records) }
   }
   /** Read-only counts for the history list; never a whole-homework accuracy. */
   async homeworkSummary(homework: HomeworkSession): Promise<HomeworkSummary> { return this.summaryFor(await this.authorize(), homework) }
@@ -373,7 +376,7 @@ export class StudentClient {
   }
   private async summaryFor(ctx: Context, homework: HomeworkSession): Promise<HomeworkSummary> {
     if (homework.scope.student_id !== ctx.student) throw new StudentError('access_denied', 403)
-    const records = await this.caseRecords(ctx, homework), active = orderActiveCases(homework.case_ids, records).map(id => records.get(id)!)
+    const records = await this.caseRecords(ctx, homework), active = orderCasesByCreation(homework.case_ids, records).map(id => records.get(id)!)
     return { homeworkId: homework.id, revision: homework.revision, counts: countBuckets(active.map(bucketOfCase)), firstUnresolvedCaseId: firstUnresolved(active, bucketOfCase)?.id ?? null, retired: records.size - active.length }
   }
   /** Every attempt, check decision, shown hint, help request and review of one case. */
@@ -396,16 +399,18 @@ export class StudentClient {
     const ctx = await this.authorize(), detail = await this.detail(ctx, id), drafts = await this.store.drafts(ctx.scope)
     let d = drafts.find(d => d.homeworkId === id && !d.correction)
     if (!d) { const now = new Date().toISOString(); d = { format: DRAFT_FORMAT, id: remoteDraftId(id), scope: ctx.scope, title: detail.homework.title ?? '学校作业', stage: 'waiting', createdAt: detail.homework.created_at, updatedAt: now, homeworkId: id, error: null, pages: [], locked: true, detail, generation: 0, checkJobs: {} } }
-    const recognition = [...detail.jobs].reverse().find(j => j.kind === 'recognize_homework')
+    const recognition = latestRecognition(detail.jobs)
     // Do not bypass an uncertain local write by adopting a remote job. The
     // original journal must replay its own key/body before advancing.
     d.detail = detail
-    if (!d.pages.length) d.recognitionJobId ??= recognition?.id
+    const hasPendingWrite = await this.store.hasPending(ctx.scope, `${d.journalId ?? d.id}:`)
+    if (recognition && d.pages.every(page => page.uploaded) && !hasPendingWrite) d.recognitionJobId = recognition.id
     // Pages not yet received, or no recognition started yet, is unfinished work and never shown as complete.
     if (d.pages.some(page => !page.uploaded) || !recognition && !detail.cases.length) d.stage = d.stage === 'failed' ? 'failed' : 'waiting'
     else if (recognition?.status === 'failed') d.stage = 'failed'
     else if (detail.jobs.some(active)) d.stage = 'waiting'
     else d.stage = detail.cases.every(row => effectiveDecision(row) || row.attempt.recognition_status !== 'ready') ? 'complete' : 'waiting'
+    if (d.stage === 'complete' && !hasPendingWrite) d.error = null
     detail.draftId = d.id
     await this.save(ctx, d)
     return detail
@@ -526,7 +531,8 @@ export class StudentClient {
       hw = await this.read<HomeworkSession>(ctx, path, 'HomeworkSession')
       if (!d.recognitionJobId && (d.correction || !hw.case_ids.length)) {
         if (!d.pages.length && d.generation === 0) {
-          for (const jobId of [...hw.job_ids].reverse()) { const job = await this.read<Job>(ctx, `/v1/jobs/${encoded(jobId)}`, 'Job'); if (job.kind === 'recognize_homework') { d.recognitionJobId = job.id; break } }
+          const jobs = await mapLimit(hw.job_ids, 3, jobId => this.read<Job>(ctx, `/v1/jobs/${encoded(jobId)}`, 'Job'))
+          d.recognitionJobId = latestRecognition(jobs)?.id
         }
         if (!d.recognitionJobId) {
           d.stage = 'recognizing'; await this.save(ctx, d)
@@ -542,8 +548,15 @@ export class StudentClient {
         await this.save(ctx, d)
       }
       if (d.recognitionJobId) { d.stage = 'recognizing'; await this.save(ctx, d); this.jobSucceeded(await this.awaitJob(ctx, d.recognitionJobId)) }
-      d.detail = await this.detail(ctx, d.homeworkId); d.stage = 'checking'; await this.save(ctx, d)
-      const ids = d.correction ? [d.correction.caseId] : d.detail.cases.map(row => row.case.id)
+      d.detail = await this.detail(ctx, d.homeworkId)
+      // Whole-page processing already saves candidate and needs_review decisions.
+      // A pending review is a result, not a reason to launch another model check.
+      // Keep the old per-question path only for ready answers without a current result.
+      const rowsToCheck = d.correction ? [await this.caseDetail(ctx, d.correction.caseId)] : d.detail.cases
+      const pendingRows = rowsToCheck.filter(row => !effectiveDecision(row) && row.attempt.recognition_status === 'ready')
+      if (!pendingRows.length) { d.stage = 'complete'; await this.save(ctx, d); return this.view(d) }
+      d.stage = 'checking'; await this.save(ctx, d)
+      const ids = pendingRows.map(row => row.case.id)
       const failures: Job[] = []
       for (const caseId of ids) {
         let row: CaseDetail

@@ -2,7 +2,7 @@ import type { CaseCounts, Coverage, HomeworkSession, HomeworkSummary } from './c
 
 export const UNLABELED_SUBJECT = '未标注科目'
 export type StatusFilter = 'all' | 'needs_correction' | 'pending_review' | 'done'
-export const statusFilters: { value: StatusFilter; label: string }[] = [{ value: 'all', label: '全部' }, { value: 'needs_correction', label: '有待订正' }, { value: 'pending_review', label: '待老师核实' }, { value: 'done', label: '已完成' }]
+export const statusFilters: { value: StatusFilter; label: string }[] = [{ value: 'all', label: '全部' }, { value: 'needs_correction', label: '有待订正' }, { value: 'pending_review', label: '有待核实' }, { value: 'done', label: '已完成' }]
 export interface HistoryFilter { subject: string | null; status: StatusFilter }
 export interface DayGroup { key: string; label: string; items: HomeworkSession[] }
 
@@ -11,7 +11,7 @@ export function subjects(items: HomeworkSession[]): string[] {
   const all = [...new Set(items.map(subjectOf))]
   return all.filter(s => s !== UNLABELED_SUBJECT).sort((a, b) => a.localeCompare(b, 'zh-CN')).concat(all.includes(UNLABELED_SUBJECT) ? [UNLABELED_SUBJECT] : [])
 }
-/** Status tags for one summary; a homework can be both 有待订正 and 待老师核实. 已完成 needs at least one question. */
+/** Status tags for one summary; a homework can be both 有待订正 and 有待核实. 已完成 needs at least one question. */
 export function statusesOf(counts: CaseCounts): Exclude<StatusFilter, 'all'>[] {
   const out: Exclude<StatusFilter, 'all'>[] = []
   if (counts.needs_correction) out.push('needs_correction')

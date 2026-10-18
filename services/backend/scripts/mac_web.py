@@ -12,9 +12,9 @@ import webbrowser
 import httpx
 
 if __package__:
-    from .mac_local import BACKEND, REPO, alive, load, spawn, wait_ready
+    from .mac_local import BACKEND, REPO, alive, api_environment, load, spawn, wait_ready
 else:
-    from mac_local import BACKEND, REPO, alive, load, spawn, wait_ready
+    from mac_local import BACKEND, REPO, alive, api_environment, load, spawn, wait_ready
 
 
 def local_origin(value):
@@ -51,7 +51,7 @@ def restart_api(runtime, config, env):
             if alive(pid):
                 raise RuntimeError('API has not stopped; PID file retained')
         pidfile.unlink()
-    api_env = {key: value for key, value in env.items() if not key.startswith('ARK_')}
+    api_env = api_environment(env)
     spawn(runtime, 'api', [sys.executable, '-m', 'uvicorn', 'xueban_backend.app:create_app', '--factory',
           '--host', config['host'], '--port', str(config['api_port']), '--no-access-log'], api_env)
     wait_ready(runtime, config)

@@ -9,6 +9,7 @@ export function ResultsSummary({ rows, detail }: { rows: CaseDetail[]; detail: H
   const repaired = (detail?.retired ?? []).filter(c => c.lifecycle === 'superseded').length
   return <div className="results-summary" role="status">
     <p className="results-counts">{countsSentence(counts)}</p>
+    {counts.pending_review > 0 && <p className="muted small">待核实的题暂不判对错，可以先订正其他题，不必等整页一起确认。</p>}
     {note && <p className="muted small">{note}</p>}
     {repaired > 0 && <p className="muted small retired-note">老师已重新切分此题{repaired > 1 ? `（共 ${repaired} 处）` : ''}，原来的识别条目不再显示，下面是重新切分后的题目。</p>}
   </div>

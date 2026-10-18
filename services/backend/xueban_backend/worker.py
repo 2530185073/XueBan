@@ -6,13 +6,11 @@ marks it free, and never duplicates the corresponding business records.
 """
 import argparse
 import base64
-import re
 import sys
 from copy import deepcopy
 from dataclasses import asdict
 from datetime import timedelta
 import time
-import unicodedata
 
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session
@@ -217,7 +215,8 @@ class CorrectionWorker:
             return apply_repair(session, self.contracts, task, homework, result)
         if task.kind == "recognize_homework":
             for item in result.data["items"]:
-                self._new_question(session, homework, task, item)
+                question, attempt, case = self._new_question(session, homework, task, item)
+                self._apply_page_assessment(session, task, homework, result, item, question, attempt, case)
             coverage = deepcopy(result.data["coverage"])
             if not result.data["items"]:
                 coverage["collection_scope"] = "unknown"
@@ -231,22 +230,46 @@ class CorrectionWorker:
             case = get_entity(session, task.inputs["case_id"], "case")
             if case.document["lifecycle"] != "active" or case.document["current_attempt_id"] != attempt.id or case.document["current_question_revision"] != task.inputs["question_revision"] or attempt.document["recognition_status"] != "pending":
                 return None
-            # A new correction photo must isolate its target. Multiple items cannot
-            # silently be attached to an unrelated parent attempt.
             items = result.data["items"]
-            item = items[0] if len(items) == 1 else None
             question = get_entity(session, task.inputs["question_id"], "question")
+            if question.revision != task.inputs["question_revision"]:
+                return None
             def normalized_stem(value):
                 return normalize_field_for_comparison(value, "stem_text") or ""
             def normalized_label(value):
-                return re.sub(r"\s+", " ", unicodedata.normalize("NFC", value or "")).strip()
-            target = normalized_stem(question.document["stem_text"])
+                # Use the same typography-only label normalization as the
+                # independent page readers; blank indices remain distinct.
+                from .providers.whole_page import canonical_label
+                return canonical_label(value or "")
             original_label = (question.annotations or {}).get("label")
-            same_stem_questions = [row for row in session.scalars(select(Entity).where(Entity.homework_id == homework.id, Entity.kind == "question")) if row.document["lifecycle"] == "active" and normalized_stem(row.document["stem_text"]) == target]
-            # Labels are free-form model text. A unique complete stem is sufficient;
-            # ambiguous shared stems additionally require the same subquestion label.
-            same_label = len(same_stem_questions) <= 1 or bool(original_label and item and normalized_label(item["label"]) == normalized_label(original_label))
-            same_question = bool(item and target and normalized_stem(item["stem_text"]) == target and same_label)
+            active_questions = [row for row in session.scalars(select(Entity).where(Entity.homework_id == homework.id, Entity.kind == "question")) if row.document["lifecycle"] == "active"]
+            def question_item(row):
+                return {"stem_text": row.document["stem_text"], "label": (row.annotations or {}).get("label") or ""}
+            # A whole-page correction can contain unrelated questions. Bind only a
+            # unique full-stem match; shared stems additionally need the original
+            # subquestion label. Neither array position nor a label alone is proof.
+            matching = []
+            for item in items:
+                if isinstance(item.get("assessment"), dict):
+                    # Multimodel readers can include the printed item label in
+                    # the stem. Strip only that label's decoration, then require
+                    # complete equality; substring overlap is not target proof.
+                    from .providers.whole_page import normalize_page_stem
+                    normalize = normalize_page_stem
+                else:
+                    # Preserve the legacy recognizer's stricter matching rules.
+                    normalize = lambda value: normalized_stem(value["stem_text"])
+                target = normalize(question_item(question))
+                if not target or normalize(item) != target:
+                    continue
+                shared_stem = sum(normalize(question_item(row)) == target for row in active_questions) > 1
+                if shared_stem and not (original_label and normalized_label(item["label"]) == normalized_label(original_label)):
+                    continue
+                matching.append(item)
+            if len(matching) > 1:
+                matching = [item for item in matching if original_label and normalized_label(item["label"]) == normalized_label(original_label)]
+            item = matching[0] if len(matching) == 1 else None
+            same_question = item is not None
             ready = same_question and item.get("recognition_status") == "ready"
             # A single visible problem may still be the wrong problem. Keep its
             # candidate in audit, but do not silently bind its answer to this case.
@@ -254,6 +277,8 @@ class CorrectionWorker:
             save_entity(session, self.contracts, homework.id, "attempt", doc, row=attempt)
             attempt.annotations = {"answer_status": item["answer_status"] if same_question else "unclear", "target_binding": "matched_stem" if same_question else "needs_staff"}
             update_case(session, self.contracts, case, progress="paused" if case.document["progress"] == "paused" else "pending")
+            if same_question:
+                self._apply_page_assessment(session, task, homework, result, item, question, attempt, case)
             return {"resource_type": "attempt", "resource_id": attempt.id}
         case = get_entity(session, task.inputs["case_id"], "case")
         versions = task.inputs["input_versions"]
@@ -296,7 +321,67 @@ class CorrectionWorker:
         attempt_row = save_entity(session, self.contracts, homework.id, "attempt", attempt)
         attempt_row.annotations = {"answer_status": item["answer_status"]}
         case = {"id": case_id, "revision": 1, "scope": {"tenant_id": homework.tenant_id, "campus_id": homework.campus_id, "student_id": homework.student_id}, "homework_id": homework.id, "question_id": question_id, "current_question_revision": 1, "root_attempt_id": attempt_id, "current_attempt_id": attempt_id, "progress": "pending", "current_decision": None, "attempt_ids": [attempt_id], "check_ids": [], "hint_ids": [], "help_request_ids": [], "review_ids": [], "created_at": timestamp, "updated_at": timestamp, "lifecycle": "active", "replacement_case_ids": []}
-        save_entity(session, self.contracts, homework.id, "case", case)
+        case_row = save_entity(session, self.contracts, homework.id, "case", case)
+        return question_row, attempt_row, case_row
+
+    def _apply_page_assessment(self, session, task, homework, result, item, question, attempt, case):
+        """Persist a page decision without an additional billed per-question job.
+
+        Page inference remains an AI candidate. Private verification details stay
+        in annotations and the task execution ledger, never masquerading as a
+        staff review or granting learning mastery. Legacy recognizers can omit
+        assessment and continue through the explicit check/recheck path.
+        """
+        assessment = item.get("assessment")
+        if assessment is None:
+            return
+        if not isinstance(assessment, dict):
+            raise ProviderError("invalid_output")
+        verification = assessment.get("verification") or {}
+        verdict = assessment.get("verdict", "unable_to_judge")
+        reason = assessment.get("reason_code")
+        summary = assessment.get("basis_summary") or "整页模型判断尚待核实。"
+        reasons = {"unclear_image", "incomplete_question", "unsupported_type", "recognition_conflict", "verification_conflict", "insufficient_process", "needs_staff", "other"}
+        if reason not in reasons:
+            reason = None
+        if verdict not in {"correct", "incorrect", "partially_correct", "unanswered", "unable_to_judge"}:
+            verdict, reason = "unable_to_judge", "verification_conflict"
+        if attempt.document["recognition_status"] != "ready" or item.get("answer_status") == "unclear":
+            verdict, reason = "unable_to_judge", "recognition_conflict"
+            summary = "本次作答识读仍有疑问，请核对原图后再判断。"
+        elif assessment.get("uncertainties") or verification.get("status") not in {"matched", "reviewed"} or verification.get("independent_readback") is not True:
+            verdict, reason = "unable_to_judge", "verification_conflict"
+            summary = "模型对本题的独立核对尚未达成可靠一致，暂不判断对错。"
+        if verdict == "unable_to_judge":
+            reason = reason or "verification_conflict"
+        # Include the original question source and the CURRENT answer assets in
+        # the same fingerprint used by subsequent checks and staff reviews.
+        ids = list(dict.fromkeys([r["asset_id"] for r in question.document["regions"]] + attempt.document["asset_ids"]))
+        assets = assets_for(session, homework.id, ids)
+        versions = input_versions(case, question, attempt, assets)
+        check_id, decision_id = new_id("check"), new_id("decision")
+        timestamp = iso()
+        check = {"id": check_id, "revision": 1, "job_id": task.id, "case_id": case.id, "input_versions": versions,
+                 "model_version": result.metadata.model or result.metadata.requested_model, "rule_version": None,
+                 "prompt_version": result.prompt_version, "decision_ids": [decision_id], "created_at": timestamp}
+        check_row = save_entity(session, self.contracts, homework.id, "check", check)
+        trace = {"source": "whole_page_assessment", "recognition_job_id": task.id,
+                 "recognition_asset_ids": list(task.inputs["asset_ids"]), "label": item["label"],
+                 "assessment": deepcopy(assessment)}
+        check_row.annotations = deepcopy(trace)
+        decision = {"id": decision_id, "revision": 1, "case_id": case.id, "check_id": check_id,
+                    "input_versions": versions, "origin": "model", "validity": "needs_review" if verdict == "unable_to_judge" else "candidate",
+                    "verdict": verdict, "reason_code": reason,
+                    "basis": [{"kind": "model_hypothesis", "summary": summary[:2000], "source_ref": task.id, "regions": []}],
+                    "first_error_region": None, "confirmation_source": None, "confirmed_by": None, "confirmed_at": None,
+                    "replaces_decision_id": (case.document["current_decision"] or {}).get("id"),
+                    "invalidated_by_event_id": None, "created_at": timestamp}
+        decision_row = save_entity(session, self.contracts, homework.id, "decision", decision)
+        decision_row.annotations = deepcopy(trace)
+        if case.document["current_decision"] is not None:
+            invalidate(session, self.contracts, case, "new_page_decision")
+        progress = "paused" if case.document["progress"] == "paused" else ("pending" if verdict in {"correct", "unable_to_judge"} else "needs_correction")
+        update_case(session, self.contracts, case, check_ids=case.document["check_ids"] + [check_id], current_decision=decision, progress=progress)
 
 
 def run_round(*runners) -> bool:

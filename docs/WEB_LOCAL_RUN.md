@@ -51,6 +51,27 @@ services/backend/.venv/bin/python services/backend/scripts/mac_local.py admin \
 
 点击上传、提示、检查或再检会实际调用已配置的模型，可能产生接口费用。浏览器本身不运行假判题，也不要求填写模型密钥。
 
+## 整页多模型核对（可选开启）
+
+设置 `CORRECTION_MODE=multimodel` 后，每页由主模型批改与另一模型独立识读并行处理；两路不预先交换答案。有分歧时按页请求第三模型独立复核。服务器在同一个持久任务中保存题目、原作答和候选判断，网页直接显示整页结果，不再为已有结果的每道题追加检查请求。待核实只影响对应题目，学生可以先看其他题。
+
+本机配置保留原 Ark 私有文件，另指定 OpenAI 兼容网关私有文件；它必须是权限 `0600` 的普通文件，内容为 `ZYAI_BASE_URL=https://api.zyai.online/v1` 和 `ZYAI_API_KEY=...`。密钥仅给 Worker，不给网页构建或公开 API 进程。
+
+```sh
+services/backend/.venv/bin/python services/backend/scripts/mac_local.py configure-models \
+  --mode multimodel --gateway-config "$HOME/.config/xueban/zyai.env" \
+  --readback-model kimi-k3 --review-model gpt-6-astra
+
+services/backend/.venv/bin/python services/backend/scripts/mac_local.py stop
+services/backend/.venv/bin/python services/backend/scripts/mac_web.py
+```
+
+配置命令仅保存私有文件路径与模型开关，不复制密钥，不改变账号或历史记录。它为本地 Worker 设置至少 600 秒租约，覆盖有界的双读与复核阶段。切换模式后必须重启 Worker；已经运行的进程不会自动加载新代码或配置。回到原单模型路径使用 `configure-models --mode single`，再重启服务。
+
+模型结果仍有 `candidate` 和 `needs_review` 的区别：识读一致不等于人工确认或知识点掌握。原图、每次调用的候选与用量、分歧、当前作答版本都保留审计；网关不可用或复核超时不会伪装成多模型通过。正常作答和订正照片仍绑定原学员账号。坐班老师的原有人工切分修订入口保留。
+
+当前默认组合为 DeepSeek 批改、Kimi 独立只读、Astra 处理分歧。`matched` 表示原作答识读一致，数学结论主要来自主模型；不是所有题都经过两个数学模型判定。每页主判、只读、复核的输出上限分别为 24576、12288、16384 tokens，每次请求总时限 118 秒；复核仅在有分歧的页触发，每次最多四页并行，不自动发起付费重试。失败可在网页明确重试，未知用量不按零费用记账。
+
 ## 开发与部署结构
 
 学生端源码在 `apps/student-web`。构建后由 FastAPI 的 `/learn/` 提供静态资源，API 在同源 `/v1/`；图片通过短期授权票据下载为 Blob，模型密钥不进入构建。网页不加载第三方脚本或外部字体，不缓存私人API到Service Worker。
@@ -70,4 +91,4 @@ npm run build
 
 这是本地联网开发版，不是公网部署或正式学生试点。网页能否正常运行、模型是否返回候选、整页分题与纠错是否准确是不同检查项；切换到网页不会自动修复当前模型的多空合并、读回不一致或坐标偏移问题。质量记录继续以 [VALIDATION](../VALIDATION.md) 为准。
 
-浏览器关闭后不承诺持续执行客户端协调；已受理的服务端任务会继续，重新打开后恢复查询。拍照入口由浏览器和设备提供，Mac文件选择通过不等于安卓/苹果平板实机拍照验收。正式使用前仍需质量评测、身份运营、删除与恢复、坐班联合流程及现场设备验证。
+多模型模式下，整页上传并受理后，识读、核验与候选保存均在服务端任务中继续执行，浏览器重新打开后恢复查询；尚未上传成功的照片仍需客户端恢复。原单模型兼容路径仍有客户端逐题协调。拍照入口由浏览器和设备提供，Mac文件选择通过不等于安卓/苹果平板实机拍照验收。正式使用前仍需质量评测、身份运营、删除与恢复、坐班联合流程及现场设备验证。

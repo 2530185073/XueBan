@@ -194,6 +194,9 @@ class CorrectionPipeline:
     def from_env(cls, environ: Mapping[str, str] | None = None):
         """Read only explicitly named environment values; never open .env files."""
         env = os.environ if environ is None else environ
+        if env.get("CORRECTION_MODE", "single") == "multimodel":
+            from .whole_page import WholePageCorrectionPipeline
+            return WholePageCorrectionPipeline.from_env(env)
         return cls(ArkClient(ArkSettings(
             base_url=env.get("ARK_BASE_URL", ""), api_key=env.get("ARK_API_KEY", ""),
             model=env.get("ARK_MODEL", MODEL_ID), max_attempts=1,
