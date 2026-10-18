@@ -21,7 +21,7 @@ from jsonschema.exceptions import ValidationError
 from .ark import ArkClient, ArkSettings, Metadata, MODEL_ID, OutputDiagnostic, ProviderError, Usage
 
 
-PROMPT_VERSION = "photo-correction.v8"
+PROMPT_VERSION = "photo-correction.v9"
 ID_PATTERN = r"^[a-z][a-z0-9_-]{2,63}$"
 REASONS = ["unclear_image", "incomplete_question", "unsupported_type", "recognition_conflict",
            "verification_conflict", "insufficient_process", "needs_staff", "other"]
@@ -90,7 +90,7 @@ RECOGNITION_PROMPT = (
     "按照 task_input.layout_units 逐项识别，严格一项对应一道已经划分好的题目，不要重新合并或拆分。"
     "每个 layout_index 必须最多输出一次；如果题区看不清，也要保留该 layout_index 并使用空值或 unclear。\n"
     "1. layout_index 是 task_input.layout_units 中的序号，从 0 开始；page 是对应原始照片序号。\n"
-    "2. stem_text 抄这一题完整可理解的题干，包括解题需要的已知条件、选项和所有填空位置；answer_text 抄学生写下的作答原文。\n"
+    "2. stem_text 只抄这一题完整可理解的题干和解题需要的已知条件；不要把选择题的 A/B/C/D 选项正文写进 stem_text，选项正文只放进 options；保留题干中的填空位置；answer_text 抄学生写下的作答原文。\n"
     "3. question_type 选择题型；options 保存属于当前题目的选项；blank_count 记录当前题目需要填写的空数。\n"
     "4. 只抄写，不解题、不批改，不补全学生没写或看不清的内容。\n"
     "5. answer_status：有作答 present，没写 blank（answer_text 为 null），看不清 unclear。\n"
@@ -105,6 +105,7 @@ CHECK_SCHEMA = _object({
     "basis_summary": _text(2000), "uncertainties": UNCERTAINTIES,
     "knowledge_points": {"type": "array", "items": _text(80), "maxItems": 3, "uniqueItems": True},
     "correction_method": _text(1000, nullable=True),
+    "correct_answer": _text(1200, nullable=True),
 }, optional=("knowledge_points", "correction_method"))
 VERSIONS_SCHEMA = _object({
     "question_id": {"type": "string", "pattern": ID_PATTERN},
@@ -350,6 +351,9 @@ class CorrectionPipeline:
             raise
         except (ValueError, KeyError, TypeError) as error:
             raise _SemanticOutputError("invalid_layout", ("items",)) from error
+        items.sort(key=lambda item: (item["page"], item["region"]["y"], item["region"]["x"], item["index"]))
+        for index, item in enumerate(items):
+            item["index"] = index
         return items
 
     def recognize(self, *, images: tuple[PipelineImage, ...]) -> PipelineResult:
@@ -412,7 +416,11 @@ class CorrectionPipeline:
                 if ((item["answer_status"] == "present" and item["answer_text"] is None)
                         or (item["answer_status"] == "blank" and item["answer_text"] is not None)):
                     raise _SemanticOutputError("answer_status_conflict", ("items", layout_index, "answer_text"))
-                ready = bool(item["stem_text"] and not item["uncertainties"] and item["answer_status"] != "unclear")
+                # An uncertainty is shown as a star beside the result. It does
+                # not block a usable transcription when the stem and answer
+                # are readable; only missing/unclear core fields require a
+                # recognition revision.
+                ready = bool(item["stem_text"] and item["answer_status"] != "unclear")
                 item["recognition_status"] = "ready" if ready else "needs_revision"
                 items.append(item)
         except (ValueError, KeyError, TypeError) as error:
@@ -488,7 +496,8 @@ class CorrectionPipeline:
             "若当前作答图自身有多个无法确定取舍的答案、真实涂改歧义或题目对应不明，仍必须保留 uncertainties。"
             "然后独立计算或核对本题，输出简短依据摘要，不输出思维链。"
             "另外输出 knowledge_points，最多 3 个本题直接考查的知识点名称；输出 correction_method，"
-            "只给错题或部分正确题的简短改正方法，不写完整标准答案；无法确定时可为 null。"
+            "只给错题或部分正确题的简短改正方法；输出 correct_answer，错题或部分正确题必须给出学生可直接核对的正确答案，"
+            "可包含必要的关键结果或最短步骤，正确题可为 null，确实无法从题目得到答案时才为 null。"
             "uncertainties 只记录会影响当前题干/作答辨认或数学结论的具体歧义。"
             "作答是印刷还是手写、材料是否合成、无法证实作者或学生身份，都不能单独作为不能判题的理由。"
             "若题目只要求终答且条件充分，即使没有写计算过程，也应独立核算可见终答并判断；"
@@ -517,7 +526,7 @@ class CorrectionPipeline:
         elif not normalize_field_for_comparison(observation["stem_text"], "stem_text"):
             verdict, reason = "unable_to_judge", "incomplete_question"
         elif (observation["answer_status"] == "unclear"
-              or attempt.get("recognition_status") != "ready" or uncertainties):
+              or attempt.get("recognition_status") != "ready"):
             verdict, reason = "unable_to_judge", "unclear_image"
         elif verdict == "unanswered" and observation["answer_status"] != "blank":
             verdict, reason = "unable_to_judge", "recognition_conflict"
@@ -535,6 +544,7 @@ class CorrectionPipeline:
                        "regions": answer_regions or question_regions}],
             "knowledge_points": list(raw.get("knowledge_points", [])),
             "correction_method": raw.get("correction_method"),
+            "correct_answer": raw.get("correct_answer"),
             "first_error_region": None,
             "confirmation_source": None, "confirmed_by": None, "confirmed_at": None,
             "uncertainties": uncertainties, "readback": deepcopy(raw["readback"]),

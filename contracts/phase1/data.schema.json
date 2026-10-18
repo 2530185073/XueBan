@@ -477,6 +477,11 @@
           "type": "string",
           "pattern": "^[a-z][a-z0-9_-]{2,63}$"
         },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
         "stem_text": {
           "anyOf": [
             {
@@ -921,6 +926,18 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 1000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "correct_answer": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1200
             },
             {
               "type": "null"

@@ -76,7 +76,7 @@ def checked(**changes):
     return {"verdict": "incorrect", "reason_code": None,
             "readback": {"stem_text": "计算(-2)²。", "answer_text": "-4", "answer_status": "present"},
             "recognition_consistent": True, "basis_summary": "负数平方的符号需要核对。",
-            "uncertainties": [], **changes}
+            "uncertainties": [], "correct_answer": "4", **changes}
 
 
 def decision(ctx, **changes):
@@ -243,6 +243,28 @@ def test_recognition_uses_layout_regions_and_ties_each_question_to_its_page():
     assert "layout_units" in requests[1]["messages"][1]["content"][0]["text"]
 
 
+def test_recognition_orders_questions_by_photo_position_and_preserves_labels():
+    data = recognition()
+    second = deepcopy(data["items"][0])
+    second.update(layout_index=1, label="2", stem_text="第二题。", answer_text="2")
+    data["items"] = [data["items"][0], second]
+    layout_data = {"items": [
+        {"page": 1, "label": "2", "x": 0, "y": 80, "width": 1, "height": 1, "uncertainties": []},
+        {"page": 1, "label": "1", "x": 0, "y": 10, "width": 1, "height": 1, "uncertainties": []},
+    ]}
+    data["items"][0]["layout_index"] = 0
+    data["items"][0]["label"] = "1"
+    data["items"][0]["stem_text"] = "第一题。"
+    data["items"][1]["layout_index"] = 1
+    requests = []
+    with pipeline([layout_data, data], requests) as flow:
+        result = flow.recognize(images=(PipelineImage("asset_original", PNG, 1, 100),))
+    assert [item["label"] for item in result.data["items"]] == ["1", "2"]
+    assert [item["stem_text"] for item in result.data["items"]] == ["第一题。", "第二题。"]
+    layout_payload = json.loads(requests[1]["messages"][1]["content"][0]["text"])
+    assert [item["label"] for item in layout_payload["task_input"]["layout_units"]] == ["1", "2"]
+
+
 def test_page_beyond_the_sent_photos_fails_closed():
     with pipeline([layout(page=2)]) as flow, pytest.raises(ProviderError, match="^invalid_output$") as failure:
         flow.recognize(images=(picture(),))
@@ -250,12 +272,12 @@ def test_page_beyond_the_sent_photos_fails_closed():
     assert (diagnostic.rule, diagnostic.path) == ("unknown_asset", ("items", 0, "page"))
 
 
-def test_unclear_transcription_is_kept_for_review_rather_than_dropped():
+def test_unclear_transcription_is_kept_and_can_be_starred_without_blocking_the_row():
     data = recognition()
     data["items"][0]["uncertainties"] = ["第二个数字可能是 4 也可能是 9。"]
     with pipeline(recognition_run(data)) as flow:
         item = flow.recognize(images=(picture(),)).data["items"][0]
-    assert item["recognition_status"] == "needs_revision"
+    assert item["recognition_status"] == "ready"
     assert item["regions"] == [region()]
 
 
@@ -329,6 +351,7 @@ def test_check_is_candidate_and_can_be_converted_to_contract_decision():
         result = flow.check(**ctx)
     data = deepcopy(result.data)
     assert data["verdict"] == "incorrect"
+    assert data["correct_answer"] == "4"
     assert data["validity"] == "candidate" and data["origin"] == "model"
     assert data["confirmed_by"] is data["confirmed_at"] is data["confirmation_source"] is None
     assert data["basis"][0]["kind"] == "model_hypothesis"
@@ -360,7 +383,7 @@ def test_printed_visible_answers_are_readable_without_asserting_authentic_studen
     with pipeline(recognition_run(), requests) as flow:
         result = flow.recognize(images=(picture(),))
     assert result.data["items"][0]["recognition_status"] == "ready"
-    assert result.prompt_version == "photo-correction.v8"
+    assert result.prompt_version == "photo-correction.v9"
     prompt = requests[1]["messages"][0]["content"]
     assert "印刷或手写、材料来源或合成属性、作者和学生身份不可验证，不是数学不确定性" in prompt
 
@@ -473,7 +496,10 @@ def test_formula_and_handwriting_uncertainty_cannot_become_definite_correct(case
     original_answer = ctx["attempt"]["answer_text"]
     with pipeline([output]) as flow:
         data = flow.check(**ctx).data
-    assert data["verdict"] == "unable_to_judge" and data["validity"] == "needs_review"
+    if case in {"u_v", "overwritten_step"}:
+        assert data["verdict"] == "correct" and data["validity"] == "candidate"
+    else:
+        assert data["verdict"] == "unable_to_judge" and data["validity"] == "needs_review"
     assert data["first_error_region"] is None
     assert ctx["attempt"]["answer_text"] == original_answer
     if case == "missing_minus": assert data["reason_code"] == "recognition_conflict"
@@ -679,8 +705,8 @@ def test_nonblocking_claim_in_returned_uncertainties_is_not_silently_removed(war
                      uncertainties=[warning])
     with pipeline([output]) as flow:
         result = flow.check(**context())
-    assert result.data["verdict"] == "unable_to_judge"
-    assert result.data["validity"] == "needs_review"
+    assert result.data["verdict"] == "correct"
+    assert result.data["validity"] == "candidate"
     assert result.data["uncertainties"] == output["uncertainties"]
 
 

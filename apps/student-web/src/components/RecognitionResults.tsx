@@ -3,7 +3,7 @@ import { Camera, Check, ChevronDown, CircleAlert, CircleX, Lightbulb } from 'luc
 import type { CaseDetail } from '../core/types'
 import type { Workspace } from '../useStudentWorkspace'
 import { effectiveDecision } from '../core'
-import { studentResultState, type StudentResultState } from '../presentation'
+import { studentResultState, studentResultUncertain, type StudentResultState } from '../presentation'
 import { ResultsSummary } from './ResultsSummary'
 
 interface RecognitionResultsProps {
@@ -49,8 +49,7 @@ function ResultIcon({ state }: { state: StudentResultState }) {
 function QuestionCard({ row, index, open, onToggle }: { row: CaseDetail; index: number; open: boolean; onToggle: () => void }) {
   const state = studentResultState(row)
   const decision = effectiveDecision(row)
-  const uncertain = state === 'uncertain'
-  const options = row.question.options ?? []
+  const uncertain = studentResultUncertain(row)
   const method = decision?.correction_method?.trim() || fallbackMethod(row)
   const points = decision?.knowledge_points ?? []
   const uncertainties = [...new Set([
@@ -60,22 +59,25 @@ function QuestionCard({ row, index, open, onToggle }: { row: CaseDetail; index: 
   ])]
   return <article className={`recognition-card ${state} ${open ? 'open' : ''}`}>
     <button className="recognition-card-head" type="button" aria-expanded={open} onClick={onToggle}>
-      <span className="recognition-index">{index + 1}</span>
-      <span className="recognition-card-title">{row.question.stem_text || '题干待核实'}{uncertain && <span className="uncertain-star" aria-label="AI识别不确定">*</span>}</span>
-      <span className={`recognition-status ${state}`}><ResultIcon state={state} />{stateLabels[state]}</span>
+      <span className="recognition-index">{row.question.label || index + 1}</span>
+      <span className="recognition-card-title">{row.question.stem_text || '题干待核实'}</span>
+      <span className={`recognition-status ${state}`}>{uncertain && <sup className="result-star" aria-label="AI识别不确定">*</sup>}<ResultIcon state={state} />{stateLabels[state]}</span>
       <ChevronDown className="recognition-chevron" size={19} aria-hidden="true" />
     </button>
     {open && <div className="recognition-card-body">
       <div className="recognition-question-block">
         <span className="recognition-label">题目</span>
         <p>{row.question.stem_text || '题干暂未读清。'}</p>
-        {options.length > 0 && <ul className="recognition-options" aria-label="题目选项">{options.map(option => <li key={`${option.label}:${option.text}`}><b>{option.label}</b><span>{option.text}</span></li>)}</ul>}
         {!!row.question.blank_count && <span className="blank-note">填空题 · {row.question.blank_count} 个空</span>}
       </div>
       <div className={`recognition-answer ${state}`}>
         <span className="recognition-label">我的作答</span>
         <p>{answerText(row)}</p>
       </div>
+      {state === 'incorrect' && <div className="recognition-correct-answer">
+        <span className="recognition-label">正确答案</span>
+        <p>{decision?.correct_answer?.trim() || '暂未生成正确答案，请重新识别或请老师核对。'}</p>
+      </div>}
       <div className="recognition-learning">
         <div className="recognition-learning-row"><span>知识点</span><div className="knowledge-tags">{points.length ? points.map(point => <span key={point}>{point}</span>) : <em>暂未识别</em>}</div></div>
         {(state === 'incorrect' || uncertain) && <div className="recognition-learning-row correction-method"><span><Lightbulb size={15} />改正方法</span><p>{method || '请重新读题，逐步检查题目条件、运算符号和最终作答。'}</p></div>}
@@ -89,7 +91,7 @@ export function RecognitionResults({ rows, workspace, onNext }: RecognitionResul
   const [openId, setOpenId] = useState<string | null>(null)
   return <div className="recognition-results">
     <ResultsSummary rows={rows} detail={null} compact />
-    <p className="recognition-legend">点击题目查看选项、作答、知识点和改正方法，题目末尾的 * 表示 AI 识别不确定。</p>
+    <p className="recognition-legend">按照片中的题号排列。点击题目查看作答、正确答案、知识点和改正方法，正确/错误右上角的 * 表示 AI 识别存在不确定。</p>
     <div className="recognition-card-list" aria-label="本次识别的题目">{rows.map((row, index) => <QuestionCard key={row.case.id} row={row} index={index} open={openId === row.case.id} onToggle={() => setOpenId(current => current === row.case.id ? null : row.case.id)} />)}</div>
     <div className="next-capture-wrap"><button className="button primary next-capture" type="button" disabled={!!workspace.busy} onClick={onNext}><Camera size={18} />拍下一题</button></div>
   </div>

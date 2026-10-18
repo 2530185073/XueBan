@@ -3,23 +3,31 @@ import type { CaseDetail, DraftStage, DraftSummary, DraftView } from './core/typ
 export type Tone = 'neutral' | 'green' | 'red' | 'amber'
 export type StudentResultState = 'correct' | 'incorrect' | 'uncertain'
 
-/** Compact student-facing state: uncertain results are never counted as right or wrong. */
-export function studentResultState(row: CaseDetail): StudentResultState {
+function currentStudentDecision(row: CaseDetail) {
   const candidate = row.case.current_decision
-  const decision = candidate && row.case.lifecycle === 'active' && !['stale', 'retracted'].includes(candidate.validity)
+  return candidate && row.case.lifecycle === 'active' && !['stale', 'retracted'].includes(candidate.validity)
     && candidate.input_versions.question_id === row.case.question_id
     && candidate.input_versions.attempt_id === row.case.current_attempt_id
     && candidate.input_versions.question_revision === row.case.current_question_revision
     && candidate.input_versions.attempt_recognition_revision === row.attempt.recognition_revision ? candidate : null
-  const uncertain = row.attempt.recognition_status !== 'ready'
+}
+
+/** A star marks evidence uncertainty without turning a usable verdict into a pending bucket. */
+export function studentResultUncertain(row: CaseDetail): boolean {
+  const decision = currentStudentDecision(row)
+  return row.attempt.recognition_status !== 'ready'
     || !!row.question.recognition_uncertainties?.length
     || !!row.attempt.recognition_uncertainties?.length
     || !decision
-    || decision.validity === 'needs_review'
     || decision.verdict === 'unable_to_judge'
     || !!decision.uncertainties?.length
-  if (uncertain) return 'uncertain'
-  return decision.verdict === 'correct' ? 'correct' : decision.verdict === 'incorrect' || decision.verdict === 'partially_correct' ? 'incorrect' : 'uncertain'
+}
+
+/** Compact student-facing state: usable model verdicts are shown as right/wrong even when starred. */
+export function studentResultState(row: CaseDetail): StudentResultState {
+  const decision = currentStudentDecision(row)
+  if (!decision || row.attempt.recognition_status !== 'ready' || decision.verdict === 'unable_to_judge') return 'uncertain'
+  return decision?.verdict === 'correct' ? 'correct' : decision?.verdict === 'incorrect' || decision?.verdict === 'partially_correct' || decision?.verdict === 'unanswered' ? 'incorrect' : 'uncertain'
 }
 
 export function casePresentation(row: CaseDetail): { label: string; tone: Tone; note: string } {

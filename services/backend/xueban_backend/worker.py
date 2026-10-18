@@ -267,9 +267,10 @@ class CorrectionWorker:
             doc = {key: candidate[key] for key in ("verdict", "reason_code", "basis", "first_error_region")}
             doc.update(knowledge_points=list(candidate.get("knowledge_points", [])),
                        correction_method=candidate.get("correction_method"),
+                       correct_answer=candidate.get("correct_answer"),
                        uncertainties=list(candidate.get("uncertainties", [])))
             if attempt.document["recognition_status"] != "ready":
-                doc.update(verdict="unable_to_judge", reason_code="recognition_conflict", first_error_region=None, basis=[{"kind": "model_hypothesis", "summary": "本次作答识别或目标题对应尚待核实，不能据此判断对错。", "source_ref": None, "regions": []}])
+                doc.update(verdict="unable_to_judge", reason_code="recognition_conflict", correct_answer=None, first_error_region=None, basis=[{"kind": "model_hypothesis", "summary": "本次作答识别或目标题对应尚待核实，不能据此判断对错。", "source_ref": None, "regions": []}])
             doc.update(id=new_id("decision"), revision=1, case_id=case.id, check_id=check.id, input_versions=versions, origin="model", validity="needs_review" if doc["verdict"] == "unable_to_judge" else "candidate", confirmation_source=None, confirmed_by=None, confirmed_at=None, replaces_decision_id=(case.document["current_decision"] or {}).get("id"), invalidated_by_event_id=None, created_at=iso())
             save_entity(session, self.contracts, homework.id, "decision", doc)
             cdoc = {**check.document, "revision": check.revision + 1, "model_version": result.metadata.model or result.metadata.requested_model, "prompt_version": result.prompt_version, "decision_ids": [doc["id"]]}
@@ -291,7 +292,7 @@ class CorrectionWorker:
     def _new_question(self, session, homework, task, item):
         question_id, case_id, attempt_id = new_id("question"), new_id("case"), new_id("attempt")
         timestamp = iso()
-        question = {"question_id": question_id, "revision": 1, "homework_id": homework.id, "stem_text": item["stem_text"], "question_type": item.get("question_type", "unknown"), "options": list(item.get("options", [])), "blank_count": item.get("blank_count", 0), "recognition_uncertainties": list(item.get("uncertainties", [])), "regions": item["regions"], "source": "recognizer", "source_actor_id": None, "bank_question_id": None, "knowledge_point_ids": None, "created_at": timestamp, "lifecycle": "active", "replacement_question_ids": []}
+        question = {"question_id": question_id, "revision": 1, "homework_id": homework.id, "label": item["label"], "stem_text": item["stem_text"], "question_type": item.get("question_type", "unknown"), "options": list(item.get("options", [])), "blank_count": item.get("blank_count", 0), "recognition_uncertainties": list(item.get("uncertainties", [])), "regions": item["regions"], "source": "recognizer", "source_actor_id": None, "bank_question_id": None, "knowledge_point_ids": None, "created_at": timestamp, "lifecycle": "active", "replacement_question_ids": []}
         question_row = save_entity(session, self.contracts, homework.id, "question", question)
         question_row.annotations = {"label": item["label"]}
         ids = list(dict.fromkeys([r["asset_id"] for r in item["regions"]] + [r["asset_id"] for r in item["answer_regions"]]))
