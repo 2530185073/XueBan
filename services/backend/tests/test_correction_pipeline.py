@@ -383,7 +383,7 @@ def test_printed_visible_answers_are_readable_without_asserting_authentic_studen
     with pipeline(recognition_run(), requests) as flow:
         result = flow.recognize(images=(picture(),))
     assert result.data["items"][0]["recognition_status"] == "ready"
-    assert result.prompt_version == "photo-correction.v9"
+    assert result.prompt_version == "photo-correction.v10"
     prompt = requests[1]["messages"][0]["content"]
     assert "印刷或手写、材料来源或合成属性、作者和学生身份不可验证，不是数学不确定性" in prompt
 

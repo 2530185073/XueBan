@@ -21,7 +21,7 @@ from jsonschema.exceptions import ValidationError
 from .ark import ArkClient, ArkSettings, Metadata, MODEL_ID, OutputDiagnostic, ProviderError, Usage
 
 
-PROMPT_VERSION = "photo-correction.v9"
+PROMPT_VERSION = "photo-correction.v10"
 ID_PATTERN = r"^[a-z][a-z0-9_-]{2,63}$"
 REASONS = ["unclear_image", "incomplete_question", "unsupported_type", "recognition_conflict",
            "verification_conflict", "insufficient_process", "needs_staff", "other"]
@@ -92,8 +92,8 @@ RECOGNITION_PROMPT = (
     "1. layout_index 是 task_input.layout_units 中的序号，从 0 开始；page 是对应原始照片序号。\n"
     "2. stem_text 只抄这一题完整可理解的题干和解题需要的已知条件；不要把选择题的 A/B/C/D 选项正文写进 stem_text，选项正文只放进 options；保留题干中的填空位置；answer_text 抄学生写下的作答原文。\n"
     "3. question_type 选择题型；options 保存属于当前题目的选项；blank_count 记录当前题目需要填写的空数。\n"
-    "4. 只抄写，不解题、不批改，不补全学生没写或看不清的内容。\n"
-    "5. answer_status：有作答 present，没写 blank（answer_text 为 null），看不清 unclear。\n"
+    "4. 只抄写，不解题、不批改，不补全学生没写或看不清的内容。多空题按照片中的顺序逐空抄写 answer_text；能读出的手写内容必须保留，不能因为其中一两个空被红笔批改、圈画或遮挡就把整道题清空。\n"
+    "5. answer_status：只要这道题有任何可靠可读的学生手写内容就用 present；只有确认整道题没有作答才用 blank（answer_text 为 null）；只有整道题的作答区域都无法辨认才用 unclear。局部无法辨认时，在 answer_text 对应位置写“（无法辨认）”，并在 uncertainties 说明具体小空，不要把部分可读内容改成 null。红笔批改痕迹不是学生答案，除非确实遮住字迹，否则不要据此否定旁边可读的黑色手写内容。\n"
     "6. 看不清题干、作答、选项或题目边界的地方写进 uncertainties，说明是哪里。\n"
     "输出示例：" + json.dumps(RECOGNITION_EXAMPLE, ensure_ascii=False)
 )
