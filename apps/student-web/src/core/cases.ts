@@ -40,6 +40,31 @@ export function orderActiveCases(caseIds: string[], records: Map<string, Correct
   for (const id of caseIds) visit(id, 0)
   return out
 }
+
+/**
+ * The server's case IDs are storage identifiers, so their lexical order is
+ * unrelated to where a question appears in the photographed page. Sort the
+ * fully read rows by the first question region after the original pages have
+ * been put in page order.
+ */
+export function orderRowsByPhoto(rows: CaseDetail[], assetIds: string[]): CaseDetail[] {
+  const pageOrder = new Map(assetIds.map((id, index) => [id, index]))
+  return rows.map((row, originalIndex) => {
+    const region = [...row.question.regions].sort((a, b) => {
+      const pageA = pageOrder.get(a.asset_id) ?? Number.MAX_SAFE_INTEGER
+      const pageB = pageOrder.get(b.asset_id) ?? Number.MAX_SAFE_INTEGER
+      return pageA - pageB || a.y - b.y || a.x - b.x
+    })[0]
+    return {
+      row,
+      originalIndex,
+      position: region
+        ? [pageOrder.get(region.asset_id) ?? Number.MAX_SAFE_INTEGER, region.y, region.x]
+        : [Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER],
+    }
+  }).sort((a, b) => a.position[0] - b.position[0] || a.position[1] - b.position[1] || a.position[2] - b.position[2] || a.originalIndex - b.originalIndex).map(item => item.row)
+}
+
 export function retiredCases(records: Map<string, CorrectionCase>): RetiredCase[] {
   return [...records.values()].filter(isRetired).map(c => ({ id: c.id, lifecycle: c.lifecycle as RetiredCase['lifecycle'], replacementCaseIds: [...c.replacement_case_ids] }))
 }

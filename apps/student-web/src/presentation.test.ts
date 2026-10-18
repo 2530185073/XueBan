@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { CaseDetail, DraftView } from './core/types'
-import { casePresentation, correctionTarget, dateLabel, preferredCase, replacementTarget, stageLabels } from './presentation'
+import { casePresentation, correctionTarget, dateLabel, preferredCase, replacementTarget, stageLabels, studentQuestionText } from './presentation'
 
 const sample = () => ({ case: { question_id: 'question_test', current_attempt_id: 'attempt_test', current_question_revision: 2, current_decision: { origin: 'model', validity: 'candidate', verdict: 'correct', input_versions: { question_id: 'question_test', attempt_id: 'attempt_test', question_revision: 2, attempt_recognition_revision: 1 } } }, attempt: { recognition_status: 'ready', recognition_revision: 1 } }) as CaseDetail
 
 describe('student-facing evidence states', () => {
+  it('uses clean question text without the printed source label', () => {
+    expect(studentQuestionText('三、习作：点亮家乡名片。', '三、习作')).toBe('点亮家乡名片。')
+    expect(studentQuestionText('3. 短文为了说明古人改错字的方法。', '3')).toBe('短文为了说明古人改错字的方法。')
+  })
   it('labels AI candidate as preliminary and staff confirmation separately', () => { const row = sample(); expect(casePresentation(row).label).toBe('初判正确'); row.case.current_decision!.origin = 'staff'; row.case.current_decision!.validity = 'confirmed'; expect(casePresentation(row).label).toBe('老师确认正确') })
   it('never treats needs_review or unreadable answers as correct', () => { const row = sample(); row.case.current_decision!.validity = 'needs_review'; expect(casePresentation(row).tone).toBe('amber'); row.attempt.recognition_status = 'needs_revision'; expect(casePresentation(row).label).toBe('识别待核实'); expect(casePresentation(row).note).toContain('还没有检查') })
   it('hides decisions tied to an older answer or input revision', () => { const row = sample(); row.case.current_decision!.input_versions.attempt_id = 'attempt_previous'; expect(casePresentation(row).label).toBe('结果待更新'); const revision = sample(); revision.attempt.recognition_revision = 2; expect(casePresentation(revision).label).toBe('结果待更新'); const other = sample(); other.case.current_decision!.input_versions.question_id = 'question_other'; expect(casePresentation(other).label).toBe('结果待更新') })

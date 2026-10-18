@@ -3,6 +3,17 @@ import type { CaseDetail, DraftStage, DraftSummary, DraftView } from './core/typ
 export type Tone = 'neutral' | 'green' | 'red' | 'amber'
 export type StudentResultState = 'correct' | 'incorrect' | 'uncertain'
 
+/** Remove the printed source label from the student-facing copy. */
+export function studentQuestionText(stem: string | null, label?: string) {
+  const value = stem?.trim() ?? ''
+  if (!value) return ''
+  if (label?.trim() && value.startsWith(label.trim())) {
+    const remainder = value.slice(label.trim().length).replace(/^[\s、,，.．:：)）-]+/, '').trim()
+    if (remainder) return remainder
+  }
+  return value.replace(/^\s*(?:\d+|[一二三四五六七八九十百]+)\s*[、.．)）]\s*/, '').trim()
+}
+
 function currentStudentDecision(row: CaseDetail) {
   const candidate = row.case.current_decision
   return candidate && row.case.lifecycle === 'active' && !['stale', 'retracted'].includes(candidate.validity)

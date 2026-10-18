@@ -48,6 +48,12 @@ def homework_json(row: Homework) -> dict:
     from .correction_models import Asset, Entity, Task
     session = object_session(row)
     entities = session.scalars(select(Entity).where(Entity.homework_id == row.id).order_by(Entity.id)).all() if session else []
+    assets = session.scalars(select(Asset).where(Asset.homework_id == row.id)).all() if session else []
+    assets.sort(key=lambda asset: (
+        asset.document.get("page_index", 0),
+        asset.document.get("created_at", ""),
+        asset.id,
+    ))
     return {
         "id": row.id,
         "revision": row.revision,
@@ -57,7 +63,7 @@ def homework_json(row: Homework) -> dict:
         "created_at": utc_string(row.created_at),
         "occurred_at": utc_string(row.occurred_at),
         "coverage": row.coverage_json or {"collection_scope": row.collection_scope, "unrecognized_regions": [], "note": None},
-        "asset_ids": list(session.scalars(select(Asset.id).where(Asset.homework_id == row.id).order_by(Asset.id))) if session else [],
+        "asset_ids": [asset.id for asset in assets],
         "question_ids": [entity.id for entity in entities if entity.kind == "question"],
         "case_ids": [entity.id for entity in entities if entity.kind == "case"],
         "job_ids": list(session.scalars(select(Task.id).where(Task.homework_id == row.id).order_by(Task.id))) if session else [],

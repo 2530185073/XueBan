@@ -1,7 +1,7 @@
 export type * from './types'
 export { StudentError, safeError } from './errors'
 export { createStudentClient, StudentClient, remoteDraftId, effectiveDecision, decisionLabel, canAppeal, openHelp } from './student'
-export { bucketOfCase, bucketOfRow, countBuckets, firstUnresolved, orderActiveCases, unresolved } from './cases'
+export { bucketOfCase, bucketOfRow, countBuckets, firstUnresolved, orderActiveCases, orderRowsByPhoto, unresolved } from './cases'
 export { LOCAL_TTL_MS } from './store'
 export { ACCEPTED_TYPES, LIMITS_TEXT, MAX_BATCH_BYTES, MAX_PAGES, MAX_PAGE_BYTES, mib, pageLabel, type Crop, type EditChange } from './pages'
 export * from './learning'

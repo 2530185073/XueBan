@@ -3,7 +3,7 @@ import { Camera, Check, ChevronDown, CircleAlert, CircleX, Lightbulb } from 'luc
 import type { CaseDetail } from '../core/types'
 import type { Workspace } from '../useStudentWorkspace'
 import { effectiveDecision } from '../core'
-import { studentResultState, studentResultUncertain, type StudentResultState } from '../presentation'
+import { studentQuestionText, studentResultState, studentResultUncertain, type StudentResultState } from '../presentation'
 import { ResultsSummary } from './ResultsSummary'
 
 interface RecognitionResultsProps {
@@ -52,6 +52,7 @@ function QuestionCard({ row, index, open, onToggle }: { row: CaseDetail; index: 
   const uncertain = studentResultUncertain(row)
   const method = decision?.correction_method?.trim() || fallbackMethod(row)
   const points = decision?.knowledge_points ?? []
+  const stemText = studentQuestionText(row.question.stem_text, row.question.label)
   const uncertainties = [...new Set([
     ...(row.question.recognition_uncertainties ?? []),
     ...(row.attempt.recognition_uncertainties ?? []),
@@ -59,15 +60,15 @@ function QuestionCard({ row, index, open, onToggle }: { row: CaseDetail; index: 
   ])]
   return <article className={`recognition-card ${state} ${open ? 'open' : ''}`}>
     <button className="recognition-card-head" type="button" aria-expanded={open} onClick={onToggle}>
-      <span className="recognition-index">{row.question.label || index + 1}</span>
-      <span className="recognition-card-title">{row.question.stem_text || '题干待核实'}</span>
+      <span className="recognition-index">{index + 1}</span>
+      <span className="recognition-card-title">{stemText || '题干待核实'}</span>
       <span className={`recognition-status ${state}`}>{uncertain && <sup className="result-star" aria-label="AI识别不确定">*</sup>}<ResultIcon state={state} />{stateLabels[state]}</span>
       <ChevronDown className="recognition-chevron" size={19} aria-hidden="true" />
     </button>
     {open && <div className="recognition-card-body">
       <div className="recognition-question-block">
         <span className="recognition-label">题目</span>
-        <p>{row.question.stem_text || '题干暂未读清。'}</p>
+        <p>{stemText || '题干暂未读清。'}</p>
         {!!row.question.blank_count && <span className="blank-note">填空题 · {row.question.blank_count} 个空</span>}
       </div>
       <div className={`recognition-answer ${state}`}>

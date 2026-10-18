@@ -6,7 +6,7 @@ import { editPhoto, normalizePhoto } from './photo'
 import { applyChange, checkBatch, checkSelection, isIdentity, movePage, pageBudget, removePage, type EditChange, type PageEdit } from './pages'
 import { homeworkPageIds } from './homeworkPages'
 import { valid } from './validation'
-import { bucketOfCase, countBuckets, firstUnresolved, isRetired, orderActiveCases, retiredCases } from './cases'
+import { bucketOfCase, countBuckets, firstUnresolved, isRetired, orderActiveCases, orderRowsByPhoto, retiredCases } from './cases'
 import { ObjectUrls } from './objectUrls'
 import { isAgentContext, isKnowledgeDetail, isKnowledgeMap, isMemory, isMemoryList, isOptionalActivities, isPracticeAnswer, isPracticeHint, isPracticeSession, isPracticeSessionList, MEMORY_CONTENT_MAX, MEMORY_CONTENT_MIN, PRACTICE_ANSWER_MAX, type AgentContext, type ExitReason, type KnowledgeDetail, type KnowledgeMap, type Memory, type MemoryList, type OptionalActivities, type PracticeAnswer, type PracticeHint, type PracticeSession, type StartPractice, type StudentMemoryCategory } from './learning'
 
@@ -358,7 +358,7 @@ export class StudentClient {
     const records = await this.caseRecords(ctx, homework), cases: CaseDetail[] = [], jobs: Job[] = []
     for (const caseId of orderActiveCases(homework.case_ids, records)) cases.push(await this.rowFor(ctx, records.get(caseId)!))
     for (const id of homework.job_ids) jobs.push(await this.read<Job>(ctx, `/v1/jobs/${encoded(id)}`, 'Job'))
-    return { homework, cases, jobs, retired: retiredCases(records) }
+    return { homework, cases: orderRowsByPhoto(cases, homework.asset_ids), jobs, retired: retiredCases(records) }
   }
   /** Read-only counts for the history list; never a whole-homework accuracy. */
   async homeworkSummary(homework: HomeworkSession): Promise<HomeworkSummary> { return this.summaryFor(await this.authorize(), homework) }
