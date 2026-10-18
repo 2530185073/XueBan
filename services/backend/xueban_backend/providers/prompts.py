@@ -2,6 +2,7 @@ from enum import StrEnum
 
 
 class Role(StrEnum):
+    LAYOUT = "layout"
     RECOGNITION = "recognition"
     CHECK = "check"
     HINT = "hint"
@@ -26,6 +27,7 @@ JUDGMENT_PROMPT = """数学证据充分时，应正常给出候选 correct、inc
 """
 
 ROLE_PROMPTS = {
+    Role.LAYOUT: "只定位当前照片中的完整题目单元，输出题目区域和题号；不要抄题、解题或判题。一个题目单元包含题干、必要条件、选项或填空位置以及学生作答区域。",
     Role.RECOGNITION: "识别当前照片中的题目和学生原始作答。区分题干、手写作答与教师标记；保留无法辨认的区域，不替学生补答案。只输出识别结构，不输出判题结论或 verdict 字段。",
     Role.CHECK: "独立核算给定题目与当前作答，按证据给出候选正确或错误结论；具体疑点保留待核实。候选判断不等于人工 confirmed。\n" + JUDGMENT_PROMPT,
     Role.HINT: "围绕当前疑似错误给出与请求层级相符的简短提示，帮助学生自己订正。不要默认直接给出完整答案，不增加无关练习。",

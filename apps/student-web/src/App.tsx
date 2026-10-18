@@ -1,16 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, BookOpen, Camera, Check, ChevronRight, Clock3, History, ImagePlus, KeyRound, Leaf, LoaderCircle, LogOut, Map as MapIcon, Plus, RefreshCw, SlidersHorizontal, WifiOff, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, BookOpen, Camera, Check, Clock3, History, ImagePlus, KeyRound, Leaf, LoaderCircle, LogOut, Map as MapIcon, Plus, RefreshCw, SlidersHorizontal, WifiOff, X } from 'lucide-react'
 import { useStudentWorkspace } from './useStudentWorkspace'
-import { casePresentation, correctionTarget as toCorrectionTarget, dateLabel, preferredCase, replacementTarget, stageLabels, uploadState, type CorrectionTarget } from './presentation'
+import { dateLabel, preferredCase, replacementTarget, stageLabels, uploadState, type CorrectionTarget } from './presentation'
 import { ACCEPTED_TYPES, LIMITS_TEXT, MAX_PAGES } from './core'
 import { PhotoPanel } from './components/PhotoPanel'
 import { DraftPages } from './components/DraftPages'
 import { ResumeDrafts } from './components/ResumeDrafts'
-import { QuestionDetail } from './components/QuestionDetail'
 import { LoginForm, PasswordForm } from './components/AccountForms'
 import { AdminConsole } from './admin/AdminConsole'
 import { HistoryPage } from './components/HistoryPage'
-import { ResultsSummary } from './components/ResultsSummary'
+import { RecognitionResults } from './components/RecognitionResults'
 import { KnowledgeMapPage, useKnowledgeMap } from './components/KnowledgeMap'
 import { PreferencesPage } from './components/Preferences'
 import { OptionalActivityCard } from './components/OptionalActivities'
@@ -63,6 +62,7 @@ export default function App() {
     input.addEventListener('cancel', cancelled); return () => input.removeEventListener('cancel', cancelled)
   })
   const newWork = () => { workspace.newWork(); setSelectedCaseId(null); setPage('work') }
+  const nextQuestion = () => { newWork(); choosePhoto(true) }
   const pending = draft && ['creating', 'uploading', 'recognizing', 'checking', 'waiting'].includes(draft.stage)
 
   return <div className="app-shell">
@@ -78,9 +78,9 @@ export default function App() {
           {(pending || workspace.busy === '正在检查作业') && <div className="processing" role="status"><LoaderCircle className="spin" size={22} /><div><strong>{draft ? stageLabels[draft.stage] : '正在检查作业'}</strong><p>{draft && draft.pageCount > 1 && draft.uploadedCount < draft.pageCount ? `已上传 ${draft.uploadedCount} / ${draft.pageCount} 页。` : ''}原图和进度会保留，不必重复提交。</p></div></div>}
           {draft?.error && <div className="inline-error"><strong>这次还没有完成</strong><p>{draft.error.message}</p>{draft.pageCount > 0 && <span className={`status-pill ${uploadState(draft).tone}`}>{uploadState(draft).label}</span>}</div>}
           {draft && !workspace.busy && ['failed', 'waiting', 'creating', 'uploading', 'recognizing', 'checking'].includes(draft.stage) && <button className="button secondary full" disabled={!workspace.online} onClick={() => void workspace.run()}><RefreshCw size={16} /> 继续未完成的检查</button>}
-          {rows.length > 0 ? <><ResultsSummary rows={rows} detail={detail} /><div className="question-list" aria-label="已识别题目">{rows.map((row, index) => { const result = casePresentation(row); return <button key={row.case.id} className={`question-item ${selected?.case.id === row.case.id ? 'selected' : ''}`} aria-current={selected?.case.id === row.case.id ? 'true' : undefined} onClick={() => setSelectedCaseId(row.case.id)}><span className="question-index">{String(index + 1).padStart(2, '0')}</span><span className="question-title">{row.question.stem_text || '题干待核实'}<small>识别条目 {index + 1}</small></span><span className={`status-pill ${result.tone}`}>{result.label}</span><ChevronRight size={16} /></button> })}</div>{selected && <QuestionDetail key={`${selected.case.id}:${selected.attempt.id}`} row={selected} workspace={workspace} onCorrection={() => choosePhoto(false, toCorrectionTarget(selected))} />}</> : !pending && <div className="result-empty"><ScanNote /><h3>还没有可查看的逐题结果</h3><p>{detail?.homework.coverage.note || '未读清的地方不会被当成正确。可以重新拍清楚，或请老师一起核实。'}</p><div className="hint-actions">{detail && !detail.cases.length && workspace.draft?.homeworkId && !workspace.draft.correction && <button className="button primary" disabled={!!workspace.busy} onClick={() => void workspace.rerecognize()}><RefreshCw size={17} /> 重新识别这张照片</button>}<button className="button secondary" disabled={!!workspace.busy} onClick={() => choosePhoto()}><Camera size={17} /> 再拍清楚一点</button></div></div>}
+          {rows.length > 0 ? <RecognitionResults rows={rows} workspace={workspace} onNext={nextQuestion} /> : !pending && <div className="result-empty"><ScanNote /><h3>还没有可查看的逐题结果</h3><p>{detail?.homework.coverage.note || '未读清的地方不会被当成正确。可以重新拍清楚，或请老师一起核实。'}</p><div className="hint-actions">{detail && !detail.cases.length && workspace.draft?.homeworkId && !workspace.draft.correction && <button className="button primary" disabled={!!workspace.busy} onClick={() => void workspace.rerecognize()}><RefreshCw size={17} /> 重新识别这张照片</button>}<button className="button secondary" disabled={!!workspace.busy} onClick={() => choosePhoto()}><Camera size={17} /> 再拍清楚一点</button></div></div>}
         </>}</div></div></section>}
-        {page === 'work' && <OptionalActivityCard workspace={workspace} onStarted={startPractice} />}
+        {page === 'work' && !detail && <OptionalActivityCard workspace={workspace} onStarted={startPractice} />}
       </>}
       {workspace.busy && <div className="activity-indicator" role="status"><LoaderCircle className="spin" size={16} /><span>{workspace.busy}</span></div>}
     </main><footer className="footer"><span>学伴 <span className="footer-dot">·</span> 陪你完成自己的作业</span><span>AI 初判供参考，拿不准时请老师一起看。</span></footer>

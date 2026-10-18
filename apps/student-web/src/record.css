@@ -113,6 +113,59 @@ del.timeline-title,.timeline-item.invalid .timeline-text{color:#8d9488;font-weig
   .results-summary{padding:16px 17px 10px}
 }
 
+/* Compact student result cards: the student sees the answer first, while
+   help, appeal and correction history remain available to staff workflows. */
+.compact-results-summary{padding:18px 23px 8px}
+.compact-results-summary .results-counts{font-size:16px;color:var(--ink);font-weight:600}
+.recognition-results{padding:0 18px 24px}
+.recognition-legend{padding:0 5px 13px;color:var(--muted);font-size:12px;line-height:1.7}
+.recognition-card-list{display:flex;flex-direction:column;gap:9px}
+.recognition-card{border:1px solid #dfe4d5;border-radius:8px;background:#fffdf7;overflow:hidden;transition:border-color .18s ease,box-shadow .18s ease}
+.recognition-card.open{border-color:#aebea0;box-shadow:0 4px 13px rgba(31,57,43,.07)}
+.recognition-card-head{width:100%;min-height:62px;display:grid;grid-template-columns:34px minmax(0,1fr) auto 22px;align-items:center;gap:10px;border:0;background:transparent;color:var(--ink);padding:10px 13px;text-align:left;cursor:pointer}
+.recognition-card-head:hover{background:#f6f8ef}
+.recognition-card-head:focus-visible{outline:3px solid #a8bc8e;outline-offset:-3px}
+.recognition-index{width:29px;height:29px;border-radius:50%;display:grid;place-items:center;background:#e8eee0;color:#31533f;font-size:13px;font-weight:700}
+.recognition-card-title{min-width:0;font-size:14px;line-height:1.55;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.uncertain-star{color:#b77b36;font-weight:800;margin-left:3px}
+.recognition-status{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:5px 8px;font-size:11px;font-weight:600;white-space:nowrap}
+.recognition-status.correct{color:#2c6842;background:#e7f2e5}
+.recognition-status.incorrect{color:#a54b3b;background:#fae8e2}
+.recognition-status.uncertain{color:#8a672d;background:#f7eedb}
+.recognition-chevron{color:#8b9584;transition:transform .18s ease}
+.recognition-card.open .recognition-chevron{transform:rotate(180deg)}
+.recognition-card-body{border-top:1px solid #e4e7dc;padding:16px 17px 18px;display:flex;flex-direction:column;gap:13px}
+.recognition-question-block{color:var(--ink)}
+.recognition-question-block>p,.recognition-answer>p{white-space:pre-wrap;overflow-wrap:anywhere;font-size:15px;line-height:1.8;margin:4px 0 0}
+.recognition-label{display:block;font-size:11px;color:#71806c;letter-spacing:.05em}
+.recognition-options{list-style:none;margin:10px 0 0;padding:9px 11px;border-radius:6px;background:#f5f7ef;display:flex;flex-direction:column;gap:7px}
+.recognition-options li{display:grid;grid-template-columns:25px minmax(0,1fr);gap:6px;font-size:13px;line-height:1.6}
+.recognition-options b{color:#537053}
+.blank-note{display:inline-block;margin-top:9px;padding:3px 8px;border-radius:4px;background:#f3eee2;color:#78694d;font-size:11px}
+.recognition-answer{border-radius:7px;padding:11px 13px;border-left:4px solid #9aa892;background:#f4f5ed}
+.recognition-answer.correct{border-left-color:#4d9662;background:#edf6eb;color:#285b3c}
+.recognition-answer.incorrect{border-left-color:#c46550;background:#fff0eb;color:#914333}
+.recognition-answer.uncertain{border-left-color:#c29a50;background:#fff7e7;color:#795b2b}
+.recognition-learning{border-top:1px solid #e7e9df;padding-top:11px;display:flex;flex-direction:column;gap:10px}
+.recognition-learning-row{display:grid;grid-template-columns:74px minmax(0,1fr);gap:12px;align-items:start;font-size:12px;line-height:1.7}
+.recognition-learning-row>span{color:#71806c;display:inline-flex;align-items:center;gap:4px}
+.knowledge-tags{display:flex;gap:6px;flex-wrap:wrap}
+.knowledge-tags span{padding:3px 8px;border-radius:4px;background:#eaf0e5;color:#42644b}
+.knowledge-tags em{font-style:normal;color:#8a9586}
+.correction-method p{margin:0;color:#7a4c3b;line-height:1.75}
+.recognition-uncertainty{margin:0;padding:8px 10px;border-radius:5px;background:#fff7e7;color:#876a36;font-size:11px;line-height:1.7}
+.next-capture-wrap{padding:19px 4px 0}
+.next-capture{width:100%;min-height:48px;justify-content:center}
+@media(max-width:760px){
+  .recognition-results{padding-left:10px;padding-right:10px}
+  .compact-results-summary{padding-left:7px;padding-right:7px}
+  .recognition-card-head{grid-template-columns:30px minmax(0,1fr) 22px;gap:8px;padding:10px}
+  .recognition-status{grid-column:2;margin-top:2px;justify-self:start}
+  .recognition-chevron{grid-column:3;grid-row:1 / span 2}
+  .recognition-card-title{font-size:13px}
+  .recognition-card-body{padding:14px 13px 16px}
+}
+
 /* Multi-page capture, page viewer and local-draft resume. */
 .draft-pages .panel-heading .status-pill,.photo-panel .panel-heading>.status-pill{margin-left:auto}
 .crop-overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}

@@ -1,6 +1,27 @@
 import type { CaseDetail, DraftStage, DraftSummary, DraftView } from './core/types'
 
 export type Tone = 'neutral' | 'green' | 'red' | 'amber'
+export type StudentResultState = 'correct' | 'incorrect' | 'uncertain'
+
+/** Compact student-facing state: uncertain results are never counted as right or wrong. */
+export function studentResultState(row: CaseDetail): StudentResultState {
+  const candidate = row.case.current_decision
+  const decision = candidate && row.case.lifecycle === 'active' && !['stale', 'retracted'].includes(candidate.validity)
+    && candidate.input_versions.question_id === row.case.question_id
+    && candidate.input_versions.attempt_id === row.case.current_attempt_id
+    && candidate.input_versions.question_revision === row.case.current_question_revision
+    && candidate.input_versions.attempt_recognition_revision === row.attempt.recognition_revision ? candidate : null
+  const uncertain = row.attempt.recognition_status !== 'ready'
+    || !!row.question.recognition_uncertainties?.length
+    || !!row.attempt.recognition_uncertainties?.length
+    || !decision
+    || decision.validity === 'needs_review'
+    || decision.verdict === 'unable_to_judge'
+    || !!decision.uncertainties?.length
+  if (uncertain) return 'uncertain'
+  return decision.verdict === 'correct' ? 'correct' : decision.verdict === 'incorrect' || decision.verdict === 'partially_correct' ? 'incorrect' : 'uncertain'
+}
+
 export function casePresentation(row: CaseDetail): { label: string; tone: Tone; note: string } {
   if (row.attempt.recognition_status === 'needs_revision' || row.attempt.recognition_status === 'failed') return { label: '识别待核实', tone: 'amber', note: '这道题还没有检查。请拍清题干和作答，或请老师一起看。' }
   if (row.attempt.recognition_status !== 'ready') return { label: '正在读题', tone: 'neutral', note: '正在读取题目和你的作答。' }

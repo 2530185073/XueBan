@@ -342,7 +342,7 @@ def install_correction(app, engine, cfg, database_session, current_actor):
         invalidate(session, contracts, case, "staff_review")
         new_decision = None
         if payload["action"] in {"confirm", "replace", "manual_initial"}:
-            new_decision = {"id": new_id("decision"), "revision": 1, "case_id": case.id, "check_id": None, "input_versions": versions, "origin": "staff", "validity": "confirmed", "verdict": payload["verdict"], "reason_code": None, "basis": payload["basis"], "first_error_region": None, "confirmation_source": "staff_review", "confirmed_by": actor.id, "confirmed_at": iso(), "replaces_decision_id": current["id"] if current else None, "invalidated_by_event_id": None, "created_at": iso()}
+            new_decision = {"id": new_id("decision"), "revision": 1, "case_id": case.id, "check_id": None, "input_versions": versions, "origin": "staff", "validity": "confirmed", "verdict": payload["verdict"], "reason_code": None, "basis": payload["basis"], "knowledge_points": list(current.get("knowledge_points", [])) if current else [], "correction_method": current.get("correction_method") if current else None, "uncertainties": list(current.get("uncertainties", [])) if current else [], "first_error_region": None, "confirmation_source": "staff_review", "confirmed_by": actor.id, "confirmed_at": iso(), "replaces_decision_id": current["id"] if current else None, "invalidated_by_event_id": None, "created_at": iso()}
             save_entity(session, contracts, homework.id, "decision", new_decision)
         doc = {"id": new_id("review"), "case_id": case.id, "target_decision_id": payload["target_decision_id"], "target_decision_revision": payload["target_decision_revision"], "action": payload["action"], "new_decision_id": new_decision["id"] if new_decision else None, "reason": payload["reason"], "reviewer_id": actor.id, "created_at": iso()}
         save_entity(session, contracts, homework.id, "review", doc)
@@ -371,7 +371,7 @@ def install_correction(app, engine, cfg, database_session, current_actor):
         validate_regions(session, homework, payload["answer_regions"])
         if any(r["asset_id"] not in attempt.document["asset_ids"] for r in payload["answer_regions"]):
             raise Problem(422, "validation", "invalid_region", "答案区域必须属于该次作答图片。")
-        doc = {**attempt.document, "revision": attempt.revision + 1, "recognition_revision": attempt.document["recognition_revision"] + 1, "answer_text": payload["answer_text"], "answer_regions": payload["answer_regions"], "recognition_status": "ready"}
+        doc = {**attempt.document, "revision": attempt.revision + 1, "recognition_revision": attempt.document["recognition_revision"] + 1, "answer_text": payload["answer_text"], "answer_regions": payload["answer_regions"], "answer_status": "present" if payload["answer_text"] else "unclear", "recognition_uncertainties": [], "recognition_status": "ready"}
         save_entity(session, contracts, homework.id, "attempt", doc, row=attempt)
         attempt.annotations = {"answer_status": "present" if payload["answer_text"] else "unclear"}
         case = get_entity(session, attempt.document["case_id"], "case")

@@ -250,7 +250,7 @@ class CorrectionWorker:
             ready = same_question and item.get("recognition_status") == "ready"
             # A single visible problem may still be the wrong problem. Keep its
             # candidate in audit, but do not silently bind its answer to this case.
-            doc = {**attempt.document, "revision": attempt.revision + 1, "recognition_revision": attempt.document["recognition_revision"] + 1, "answer_text": item["answer_text"] if same_question else None, "answer_regions": item["answer_regions"] if same_question else [], "recognition_status": "ready" if ready else "needs_revision"}
+            doc = {**attempt.document, "revision": attempt.revision + 1, "recognition_revision": attempt.document["recognition_revision"] + 1, "answer_text": item["answer_text"] if same_question else None, "answer_regions": item["answer_regions"] if same_question else [], "answer_status": item["answer_status"] if same_question else "unclear", "recognition_uncertainties": list(item.get("uncertainties", [])) if same_question else ["订正照片与目标题目未能可靠对应。"], "recognition_status": "ready" if ready else "needs_revision"}
             save_entity(session, self.contracts, homework.id, "attempt", doc, row=attempt)
             attempt.annotations = {"answer_status": item["answer_status"] if same_question else "unclear", "target_binding": "matched_stem" if same_question else "needs_staff"}
             update_case(session, self.contracts, case, progress="paused" if case.document["progress"] == "paused" else "pending")
@@ -265,6 +265,9 @@ class CorrectionWorker:
             check = get_entity(session, task.inputs["check_id"], "check")
             candidate = result.data
             doc = {key: candidate[key] for key in ("verdict", "reason_code", "basis", "first_error_region")}
+            doc.update(knowledge_points=list(candidate.get("knowledge_points", [])),
+                       correction_method=candidate.get("correction_method"),
+                       uncertainties=list(candidate.get("uncertainties", [])))
             if attempt.document["recognition_status"] != "ready":
                 doc.update(verdict="unable_to_judge", reason_code="recognition_conflict", first_error_region=None, basis=[{"kind": "model_hypothesis", "summary": "本次作答识别或目标题对应尚待核实，不能据此判断对错。", "source_ref": None, "regions": []}])
             doc.update(id=new_id("decision"), revision=1, case_id=case.id, check_id=check.id, input_versions=versions, origin="model", validity="needs_review" if doc["verdict"] == "unable_to_judge" else "candidate", confirmation_source=None, confirmed_by=None, confirmed_at=None, replaces_decision_id=(case.document["current_decision"] or {}).get("id"), invalidated_by_event_id=None, created_at=iso())
@@ -288,11 +291,11 @@ class CorrectionWorker:
     def _new_question(self, session, homework, task, item):
         question_id, case_id, attempt_id = new_id("question"), new_id("case"), new_id("attempt")
         timestamp = iso()
-        question = {"question_id": question_id, "revision": 1, "homework_id": homework.id, "stem_text": item["stem_text"], "regions": item["regions"], "source": "recognizer", "source_actor_id": None, "bank_question_id": None, "knowledge_point_ids": None, "created_at": timestamp, "lifecycle": "active", "replacement_question_ids": []}
+        question = {"question_id": question_id, "revision": 1, "homework_id": homework.id, "stem_text": item["stem_text"], "question_type": item.get("question_type", "unknown"), "options": list(item.get("options", [])), "blank_count": item.get("blank_count", 0), "recognition_uncertainties": list(item.get("uncertainties", [])), "regions": item["regions"], "source": "recognizer", "source_actor_id": None, "bank_question_id": None, "knowledge_point_ids": None, "created_at": timestamp, "lifecycle": "active", "replacement_question_ids": []}
         question_row = save_entity(session, self.contracts, homework.id, "question", question)
         question_row.annotations = {"label": item["label"]}
         ids = list(dict.fromkeys([r["asset_id"] for r in item["regions"]] + [r["asset_id"] for r in item["answer_regions"]]))
-        attempt = {"id": attempt_id, "revision": 1, "case_id": case_id, "question_id": question_id, "captured_question_revision": 1, "parent_attempt_id": None, "root_attempt_id": attempt_id, "asset_ids": ids, "recognition_revision": 1, "answer_text": item["answer_text"], "answer_regions": item["answer_regions"], "recognition_status": item.get("recognition_status", "needs_revision"), "help_condition": "unknown", "occurred_at": iso(homework.occurred_at), "created_at": timestamp}
+        attempt = {"id": attempt_id, "revision": 1, "case_id": case_id, "question_id": question_id, "captured_question_revision": 1, "parent_attempt_id": None, "root_attempt_id": attempt_id, "asset_ids": ids, "recognition_revision": 1, "answer_text": item["answer_text"], "answer_regions": item["answer_regions"], "answer_status": item["answer_status"], "recognition_uncertainties": list(item.get("uncertainties", [])), "recognition_status": item.get("recognition_status", "needs_revision"), "help_condition": "unknown", "occurred_at": iso(homework.occurred_at), "created_at": timestamp}
         attempt_row = save_entity(session, self.contracts, homework.id, "attempt", attempt)
         attempt_row.annotations = {"answer_status": item["answer_status"]}
         case = {"id": case_id, "revision": 1, "scope": {"tenant_id": homework.tenant_id, "campus_id": homework.campus_id, "student_id": homework.student_id}, "homework_id": homework.id, "question_id": question_id, "current_question_revision": 1, "root_attempt_id": attempt_id, "current_attempt_id": attempt_id, "progress": "pending", "current_decision": None, "attempt_ids": [attempt_id], "check_ids": [], "hint_ids": [], "help_request_ids": [], "review_ids": [], "created_at": timestamp, "updated_at": timestamp, "lifecycle": "active", "replacement_case_ids": []}

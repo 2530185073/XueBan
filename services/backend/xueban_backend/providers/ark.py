@@ -68,10 +68,11 @@ class OutputDiagnostic:
 
 # Do not derive names from the response or schema: either may contain private text.
 _DIAGNOSTIC_FIELDS = frozenset({
-    "items", "coverage", "asset_id", "label", "stem_text", "answer_text",
+    "items", "coverage", "layout_index", "page", "asset_id", "label", "stem_text", "answer_text",
     "answer_status", "regions", "answer_regions", "uncertainties", "x", "y",
     "width", "height", "coordinate_space", "collection_scope",
-    "unrecognized_regions", "note", "verdict", "reason_code", "readback",
+    "unrecognized_regions", "note", "question_type", "options", "blank_count",
+    "knowledge_points", "correction_method", "verdict", "reason_code", "readback",
     "recognition_consistent", "basis_summary", "first_error_region",
     "guidance_code", "focus_region", "choices", "finish_reason", "message", "content",
 })

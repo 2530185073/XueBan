@@ -489,6 +489,57 @@
             }
           ]
         },
+        "question_type": {
+          "type": "string",
+          "enum": [
+            "single_choice",
+            "multiple_choice",
+            "fill_blank",
+            "calculation",
+            "application",
+            "proof",
+            "unknown"
+          ]
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 20
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1200
+              }
+            },
+            "required": [
+              "label",
+              "text"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 12
+        },
+        "blank_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 32
+        },
+        "recognition_uncertainties": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 600
+          },
+          "maxItems": 20,
+          "uniqueItems": true
+        },
         "regions": {
           "type": "array",
           "items": {
@@ -641,6 +692,24 @@
           "items": {
             "$ref": "data.schema.json#/$defs/Region"
           }
+        },
+        "answer_status": {
+          "type": "string",
+          "enum": [
+            "present",
+            "blank",
+            "unclear"
+          ]
+        },
+        "recognition_uncertainties": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 600
+          },
+          "maxItems": 20,
+          "uniqueItems": true
         },
         "recognition_status": {
           "type": "string",
@@ -835,6 +904,38 @@
               "type": "null"
             }
           ]
+        },
+        "knowledge_points": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "maxItems": 3,
+          "uniqueItems": true
+        },
+        "correction_method": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "uncertainties": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 600
+          },
+          "maxItems": 20,
+          "uniqueItems": true
         },
         "basis": {
           "type": "array",

@@ -39,8 +39,37 @@ def context():
 
 
 def recognition():
-    return {"items": [{"page": 1, "label": "1", "stem_text": "计算(-2)²。",
+    return {"items": [{"layout_index": 0, "page": 1, "label": "1", "stem_text": "计算(-2)²。",
                        "answer_text": "-4", "answer_status": "present", "uncertainties": []}]}
+
+
+def layout(*, page=1, label="1", width=1, height=1):
+    return {"items": [{"page": page, "label": label, "x": 0, "y": 0, "width": width, "height": height,
+                        "uncertainties": []}]}
+
+
+def recognition_run(data=None, layout_data=None):
+    data = data or recognition()
+    if layout_data is not None:
+        return [layout_data, data]
+    per_page = {}
+    for item in data["items"]:
+        per_page[item["page"]] = per_page.get(item["page"], 0) + 1
+    offsets = {}
+    regions = []
+    previous_key = None
+    for index, item in enumerate(data["items"]):
+        page = item["page"]
+        width = 1 / per_page[page]
+        x = offsets.get(page, 0) * width
+        offsets[page] = offsets.get(page, 0) + 1
+        regions.append({"page": page, "label": item["label"], "x": x, "y": 0,
+                        "width": width, "height": 1, "uncertainties": []})
+        key = (item.get("page"), item.get("label"), item.get("stem_text"), item.get("answer_text"))
+        if key != previous_key:
+            item["layout_index"] = index
+        previous_key = key
+    return [{"items": regions}, data]
 
 
 def checked(**changes):
@@ -94,7 +123,9 @@ def test_credential_echo_never_leaves_pipeline_but_paid_attempt_survives(role, e
         output = {"guidance_code": "sign", "uncertainties": [echo]}
     else:
         output = checked(basis_summary=echo)
-    with pipeline([httpx.Response(429), output], max_attempts=2) as flow:
+    responses = ([httpx.Response(429), layout(), output] if role == "recognition"
+                 else [httpx.Response(429), output])
+    with pipeline(responses, max_attempts=2) as flow:
         with pytest.raises(ProviderError, match="^provider_credential_echo$") as failure:
             if role == "recognition":
                 flow.recognize(images=(picture(),))
@@ -103,10 +134,10 @@ def test_credential_echo_never_leaves_pipeline_but_paid_attempt_survives(role, e
                 flow.hint(**ctx, decision=decision(ctx), level="direction")
             else:
                 getattr(flow, role)(**context())
-    assert len(failure.value.attempts) == 2
+    assert len(failure.value.attempts) == (3 if role == "recognition" else 2)
     assert failure.value.attempts[0].code == "upstream_rate_limited"
-    assert failure.value.attempts[1].code == "provider_credential_echo"
-    assert failure.value.attempts[1].usage.total_tokens == 130
+    assert failure.value.attempts[-1].code == "provider_credential_echo"
+    assert failure.value.attempts[-1].usage.total_tokens == 130
     assert all(attempt.charge_status == "unknown" for attempt in failure.value.attempts)
     persisted = json.dumps([asdict(a) for a in failure.value.attempts]) + str(failure.value)
     assert SECRET not in persisted and escaped not in persisted
@@ -154,23 +185,33 @@ def test_metadata_credential_echo_is_rejected_even_if_candidate_is_safe():
 
 def test_recognition_splits_each_blank_and_preserves_raw_answer_not_expected_answer():
     data = recognition()
-    second = deepcopy(data["items"][0])
-    second.update(label="1 第二空", answer_text=None, answer_status="blank")
-    data["items"].append(second)
+    data["items"][0].update(blank_count=2)
     requests = []
-    with pipeline([data], requests) as flow:
+    with pipeline(recognition_run(data), requests) as flow:
         result = flow.recognize(images=(picture(),))
-    assert len(result.data["items"]) == 2
+    assert len(result.data["items"]) == 1
     assert result.data["items"][0]["answer_text"] == "-4"  # Actual wrong answer must survive OCR.
-    assert result.data["items"][1]["answer_status"] == "blank"
+    assert result.data["items"][0]["blank_count"] == 2
     assert all(i["recognition_status"] == "ready" for i in result.data["items"])
     assert result.data["coverage"]["collection_scope"] == "partial"
     assert result.status == "candidate"
-    assert result.metadata.usage.total_tokens == 130
-    body = requests[0]
+    assert result.metadata.usage.total_tokens == 260
+    assert len(requests) == 2
+    body = requests[1]
     assert body["model"] == "deepseek-v4-1-flash-260910"
     assert body["response_format"] == {"type": "json_object"}
     assert body["messages"][1]["content"][1]["image_url"]["url"] == PNG
+
+
+def test_recognition_allows_numbering_restart_when_stems_differ():
+    data = recognition()
+    second = deepcopy(data["items"][0])
+    second.update(label="1", stem_text="显微镜的使用。", answer_text="正确")
+    data["items"].append(second)
+    with pipeline(recognition_run(data)) as flow:
+        result = flow.recognize(images=(picture(),))
+    assert [item["label"] for item in result.data["items"]] == ["1", "1"]
+    assert [item["stem_text"] for item in result.data["items"]] == ["计算(-2)²。", "显微镜的使用。"]
 
 
 def test_unreadable_page_is_explicit_empty_recognition_not_all_correct():
@@ -182,28 +223,28 @@ def test_unreadable_page_is_explicit_empty_recognition_not_all_correct():
     assert "verdict" not in result.data
 
 
-def test_recognition_asks_for_no_positions_and_ties_each_question_to_its_whole_page():
+def test_recognition_uses_layout_regions_and_ties_each_question_to_its_page():
     data = recognition()
-    data["items"].append({**deepcopy(data["items"][0]), "page": 2, "label": "2"})
     requests = []
     images = (PipelineImage("asset_first", PNG, 30, 20), PipelineImage("asset_second", PNG, 40, 50))
-    with pipeline([data], requests) as flow:
+    layout_data = {"items": [{"page": 1, "label": "1", "x": 0, "y": 0, "width": 30, "height": 20, "uncertainties": []},
+                              {"page": 2, "label": "2", "x": 0, "y": 0, "width": 40, "height": 50, "uncertainties": []}]}
+    data["items"][0]["layout_index"] = 0
+    data["items"].append({**deepcopy(data["items"][0]), "layout_index": 1, "page": 2, "label": "2"})
+    with pipeline([layout_data, data], requests) as flow:
         result = flow.recognize(images=images)
     first, second = result.data["items"]
     assert first["asset_id"] == "asset_first" and second["asset_id"] == "asset_second"
     assert first["regions"] == [region("asset_first", width=30, height=20)]
     assert second["regions"] == [region("asset_second", width=40, height=50)]
     assert first["answer_regions"] == second["answer_regions"] == []
-    assert len(requests) == 1 and len(result.metadata.attempts) == 1
-    prompt = requests[0]["messages"][0]["content"]
-    assert "按原样完整抄下来" in prompt
-    assert "regions" not in prompt and "像素" not in prompt
+    assert len(requests) == 2 and len(result.metadata.attempts) == 2
+    assert "只定位当前照片中的完整题目单元" in requests[0]["messages"][0]["content"]
+    assert "layout_units" in requests[1]["messages"][1]["content"][0]["text"]
 
 
 def test_page_beyond_the_sent_photos_fails_closed():
-    data = recognition()
-    data["items"][0]["page"] = 2
-    with pipeline([data]) as flow, pytest.raises(ProviderError, match="^invalid_output$") as failure:
+    with pipeline([layout(page=2)]) as flow, pytest.raises(ProviderError, match="^invalid_output$") as failure:
         flow.recognize(images=(picture(),))
     diagnostic = failure.value.attempts[-1].diagnostic
     assert (diagnostic.rule, diagnostic.path) == ("unknown_asset", ("items", 0, "page"))
@@ -212,7 +253,7 @@ def test_page_beyond_the_sent_photos_fails_closed():
 def test_unclear_transcription_is_kept_for_review_rather_than_dropped():
     data = recognition()
     data["items"][0]["uncertainties"] = ["第二个数字可能是 4 也可能是 9。"]
-    with pipeline([data]) as flow:
+    with pipeline(recognition_run(data)) as flow:
         item = flow.recognize(images=(picture(),)).data["items"][0]
     assert item["recognition_status"] == "needs_revision"
     assert item["regions"] == [region()]
@@ -226,14 +267,14 @@ def test_invalid_recognition_preserves_billable_attempt_and_fails_closed(change)
     if change == "blank_with_text": data["items"][0]["answer_status"] = "blank"
     if change == "confirmed": data["items"][0]["confirmed"] = True
     if change == "model_regions": data["items"][0]["regions"] = [region()]
-    with pipeline([data]) as flow, pytest.raises(ProviderError, match="^invalid_output$") as failure:
+    with pipeline(recognition_run(data)) as flow, pytest.raises(ProviderError, match="^invalid_output$") as failure:
         flow.recognize(images=(picture(),))
     assert failure.value.attempts[-1].usage.total_tokens == 130
     assert failure.value.attempts[-1].code == "invalid_output"
     assert failure.value.attempts[-1].charge_status == "unknown"
     assert SECRET not in str(failure.value)
     expected = {
-        "duplicate_blank": ("candidate_semantics", "duplicate_label", ("items", 1, "label")),
+        "duplicate_blank": ("candidate_semantics", "duplicate_layout_unit", ("items", 1, "layout_index")),
         "present_without_text": ("candidate_semantics", "answer_status_conflict", ("items", 0, "answer_text")),
         "blank_with_text": ("candidate_semantics", "answer_status_conflict", ("items", 0, "answer_text")),
         "confirmed": ("candidate_schema", "additionalProperties", ("items", 0)),
@@ -251,12 +292,12 @@ def test_independent_expression_targets_remain_separate_with_shared_conditions()
     second.update(label="6 求值目标二", stem_text="已知 a=2,b=3，求 a-b。", answer_text="-1")
     data["items"].append(second)
     requests = []
-    with pipeline([data], requests) as flow:
+    with pipeline(recognition_run(data), requests) as flow:
         result = flow.recognize(images=(picture(),))
     assert [i["answer_text"] for i in result.data["items"]] == ["6", "-1"]
     assert all(i["stem_text"].startswith("已知 a=2,b=3") for i in result.data["items"])
-    system = requests[0]["messages"][0]["content"]
-    assert "每个小问、每个填空单独一项" in system
+    system = requests[1]["messages"][0]["content"]
+    assert "完整可理解的题干" in system
     assert "不输出判题结论" in system
     assert "候选 correct、incorrect" not in system
     assert "unable_to_judge" not in system
@@ -268,14 +309,14 @@ def test_recognition_top_level_extra_fields_are_rejected_without_silent_unwrappi
     data = recognition()
     data[extra_key] = {"text": "synthetic-private-extra-value"}
     requests = []
-    with pipeline([data], requests) as flow, pytest.raises(ProviderError, match="^invalid_output$") as failure:
+    with pipeline(recognition_run(data), requests) as flow, pytest.raises(ProviderError, match="^invalid_output$") as failure:
         flow.recognize(images=(picture(),))
-    assert len(requests) == 1
+    assert len(requests) == 2
     diagnostic = failure.value.attempts[-1].diagnostic
     assert (diagnostic.layer, diagnostic.rule, diagnostic.path) == ("candidate_schema", "additionalProperties", ())
     assert "synthetic-private-extra-value" not in json.dumps(asdict(failure.value.attempts[-1]))
     assert failure.value.attempts[-1].usage.total_tokens == 130
-    system = requests[0]["messages"][0]["content"]
+    system = requests[1]["messages"][0]["content"]
     example, _ = json.JSONDecoder().raw_decode(system.split("输出示例：", 1)[1])
     from xueban_backend.providers.correction_pipeline import RECOGNITION_SCHEMA
     Draft202012Validator(RECOGNITION_SCHEMA).validate(example)
@@ -316,11 +357,11 @@ def test_correct_answers_are_not_assumed_wrong():
 
 def test_printed_visible_answers_are_readable_without_asserting_authentic_student_identity():
     requests = []
-    with pipeline([recognition()], requests) as flow:
+    with pipeline(recognition_run(), requests) as flow:
         result = flow.recognize(images=(picture(),))
     assert result.data["items"][0]["recognition_status"] == "ready"
-    assert result.prompt_version == "photo-correction.v7"
-    prompt = requests[0]["messages"][0]["content"]
+    assert result.prompt_version == "photo-correction.v8"
+    prompt = requests[1]["messages"][0]["content"]
     assert "印刷或手写、材料来源或合成属性、作者和学生身份不可验证，不是数学不确定性" in prompt
 
 
@@ -364,7 +405,7 @@ def test_authorized_question_revision_can_reassess_same_original_attempt():
 def test_recognition_removes_only_explicit_field_labels_from_persisted_fields():
     output = recognition()
     output["items"][0].update(stem_text="Question: 计算(-2)²。", answer_text="Student answer: -4")
-    with pipeline([output]) as flow:
+    with pipeline(recognition_run(output)) as flow:
         item = flow.recognize(images=(picture(),)).data["items"][0]
     assert item["label"] == "1"
     assert item["stem_text"] == "计算(-2)²。"
@@ -559,7 +600,7 @@ def test_model_origin_cannot_be_accepted_as_confirmed_hint_source():
 @pytest.mark.parametrize("kind,code", [("truncated", "incomplete_output"), ("rate_limited", "upstream_rate_limited"),
                                        ("malformed", "invalid_output"), ("timeout", "upstream_timeout")])
 def test_technical_failures_never_return_empty_recognition_or_a_verdict(kind, code):
-    if kind == "truncated": response = httpx.Response(200, json=envelope(recognition(), finish="length"))
+    if kind == "truncated": response = httpx.Response(200, json=envelope(layout(), finish="length"))
     if kind == "rate_limited": response = httpx.Response(429, text=SECRET)
     if kind == "malformed": response = httpx.Response(200, json=envelope({"items": "bad"}))
     if kind == "timeout": response = httpx.ReadTimeout(SECRET)
@@ -571,9 +612,9 @@ def test_technical_failures_never_return_empty_recognition_or_a_verdict(kind, co
 
 
 def test_rate_limit_retry_records_both_attempts():
-    with pipeline([httpx.Response(429), recognition()], max_attempts=2) as flow:
+    with pipeline([httpx.Response(429), layout(), recognition()], max_attempts=2) as flow:
         result = flow.recognize(images=(picture(),))
-    assert [a.status_code for a in result.metadata.attempts] == [429, 200]
+    assert [a.status_code for a in result.metadata.attempts] == [429, 200, 200]
 
 
 def test_injected_image_text_is_evidence_not_instructions_and_repr_hides_content():
@@ -602,7 +643,8 @@ def test_trusted_task_policy_is_system_and_all_photo_candidate_data_is_user_json
     if role == "hint":
         output = {"guidance_code": "sign", "uncertainties": []}
     requests = []
-    with pipeline([output], requests) as flow:
+    responses = recognition_run(output) if role == "recognition" else [output]
+    with pipeline(responses, requests) as flow:
         if role == "recognition":
             flow.recognize(images=(picture(),))
         elif role == "hint":
