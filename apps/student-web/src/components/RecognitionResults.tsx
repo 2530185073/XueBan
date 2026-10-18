@@ -92,7 +92,7 @@ export function RecognitionResults({ rows, workspace, onNext }: RecognitionResul
   const [openId, setOpenId] = useState<string | null>(null)
   return <div className="recognition-results">
     <ResultsSummary rows={rows} detail={null} compact />
-    <p className="recognition-legend">按照片中的题号排列。点击题目查看作答、正确答案、知识点和改正方法，正确/错误右上角的 * 表示 AI 识别存在不确定。</p>
+    <p className="recognition-legend">按照片中的位置排列，序号连续显示。点击题目查看作答、正确答案、知识点和改正方法，正确/错误右上角的 * 表示 AI 识别存在不确定。</p>
     <div className="recognition-card-list" aria-label="本次识别的题目">{rows.map((row, index) => <QuestionCard key={row.case.id} row={row} index={index} open={openId === row.case.id} onToggle={() => setOpenId(current => current === row.case.id ? null : row.case.id)} />)}</div>
     <div className="next-capture-wrap"><button className="button primary next-capture" type="button" disabled={!!workspace.busy} onClick={onNext}><Camera size={18} />拍下一题</button></div>
   </div>
