@@ -216,16 +216,12 @@ class CorrectionWorker:
         if task.kind == "repair_layout":
             return apply_repair(session, self.contracts, task, homework, result)
         if task.kind == "recognize_homework":
-            # Unknown-located items remain in private audit, never get invented boxes.
-            located = [item for item in result.data["items"] if item["regions"] and item.get("location_status", "located") == "located"]
-            for item in located:
+            for item in result.data["items"]:
                 self._new_question(session, homework, task, item)
             coverage = deepcopy(result.data["coverage"])
-            if len(located) != len(result.data["items"]) or not located:
+            if not result.data["items"]:
                 coverage["collection_scope"] = "unknown"
-                total, missing = len(result.data["items"]), len(result.data["items"]) - len(located)
-                coverage["note"] = (f"读出 {total} 道题，其中 {missing} 道没能在照片上定位，这些题暂不出结果；可以重试识别、重新拍摄，或请坐班老师核实。"
-                                    if total else "这张照片没有读出可核对的题目，请重新拍摄清楚，或请坐班老师核实。")
+                coverage["note"] = "这张照片没有读出可核对的题目，可以重新识别、重新拍摄清楚，或请坐班老师核实。"
             self.contracts.validate("Coverage", coverage)
             homework.coverage_json = coverage
             homework.revision += 1

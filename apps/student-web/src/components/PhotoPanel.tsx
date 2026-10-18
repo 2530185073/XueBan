@@ -75,7 +75,8 @@ export function PhotoPanel({ workspace, row, draft, detail, onReplacePage }: { w
     const keys = (event: KeyboardEvent) => { if (event.key === 'Escape') setExpanded(false); else if (event.key === 'ArrowLeft') select(index - 1); else if (event.key === 'ArrowRight') select(index + 1) }
     window.addEventListener('keydown', keys); return () => window.removeEventListener('keydown', keys)
   })
-  const regions = row && assetId ? [...row.question.regions, ...row.attempt.answer_regions].filter(region => region.asset_id === assetId) : []
+  // A region spanning the whole photo only says which page the question is on.
+  const regions = row && assetId ? [...row.question.regions, ...row.attempt.answer_regions].filter(region => region.asset_id === assetId && !(region.x === 0 && region.y === 0 && region.width >= size.width && region.height >= size.height)) : []
   const waiting = !hasLocalPages && !!detail && serverPages === null && !sources.length
   const picture = url ? <div className="photo-image-wrap"><img src={url} alt={`${current?.label ?? '作业照片'}${row ? '，这次作答对应的照片' : ''}`} onLoad={event => setSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} />{size.width > 0 && regions.length > 0 && <svg className="photo-regions" viewBox={`0 0 ${size.width} ${size.height}`} aria-hidden="true">{regions.map((region, i) => <rect key={i} x={region.x} y={region.y} width={region.width} height={region.height} rx="4" />)}</svg>}</div> : null
   const local = current?.localId != null

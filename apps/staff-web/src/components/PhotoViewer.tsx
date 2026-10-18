@@ -44,6 +44,8 @@ export default function PhotoViewer({ assets, labels, assetId, onAsset, loadImag
   const aligned = state === 'ready' && aspectMatches(natural, size)
   const drawable = !!drawing && aligned && (!drawing.allowedAssets || drawing.allowedAssets.includes(asset.id))
   const on = (regions: Region[]) => regions.filter(region => region.asset_id === asset.id)
+  // A recognized region spanning the whole photo only says which page the question is on.
+  const located = (regions: Region[]) => on(regions).filter(region => !(region.x === 0 && region.y === 0 && region.width >= size.width && region.height >= size.height))
   const stroke = Math.max(2, asset.width / 300)
   const font = Math.max(14, asset.width / 38)
   const point = (event: PointerEvent<SVGSVGElement>) => toOriginal(event.clientX, event.clientY, svg.current!.getBoundingClientRect(), size)
@@ -80,9 +82,9 @@ export default function PhotoViewer({ assets, labels, assetId, onAsset, loadImag
         onLoad={event => { setNatural({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }); setState('ready') }} onError={() => setState('failed')} />}
       {state === 'ready' && <svg ref={svg} className={`region-overlay ${drawable ? 'drawing' : ''}`} viewBox={`0 0 ${asset.width} ${asset.height}`} preserveAspectRatio="none" role="img" aria-label={drawable ? '原图框选区域：按住拖动画框' : '题区与答案区'}
         onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => { origin.current = null; setDrag(null) }}>
-        {layers.others.flatMap((other, i) => on(other.regions).map((region, j) => <g key={`o${i}-${j}`}><rect className="other-region" x={region.x} y={region.y} width={region.width} height={region.height} strokeWidth={stroke} />{label(region, other.label, 'region-label muted')}</g>))}
-        {showQuestion && on(layers.question).map((region, i) => <g key={`q${i}`}><rect className="question-region" x={region.x} y={region.y} width={region.width} height={region.height} strokeWidth={stroke} />{label(region, '题区', 'region-label')}</g>)}
-        {showAnswer && on(layers.answer).map((region, i) => <g key={`a${i}`}><rect className="answer-region" x={region.x} y={region.y} width={region.width} height={region.height} strokeWidth={stroke} />{label(region, '答案', 'region-label answer')}</g>)}
+        {layers.others.flatMap((other, i) => located(other.regions).map((region, j) => <g key={`o${i}-${j}`}><rect className="other-region" x={region.x} y={region.y} width={region.width} height={region.height} strokeWidth={stroke} />{label(region, other.label, 'region-label muted')}</g>))}
+        {showQuestion && located(layers.question).map((region, i) => <g key={`q${i}`}><rect className="question-region" x={region.x} y={region.y} width={region.width} height={region.height} strokeWidth={stroke} />{label(region, '题区', 'region-label')}</g>)}
+        {showAnswer && located(layers.answer).map((region, i) => <g key={`a${i}`}><rect className="answer-region" x={region.x} y={region.y} width={region.width} height={region.height} strokeWidth={stroke} />{label(region, '答案', 'region-label answer')}</g>)}
         {layers.drafts.flatMap((draft, i) => on(draft.regions).map((region, j) => <g key={`d${i}-${j}`}><rect className={`draft-region ${draft.active ? 'active' : ''}`} x={region.x} y={region.y} width={region.width} height={region.height} strokeWidth={stroke * 1.4} />{label(region, draft.label, 'region-label draft')}</g>))}
         {preview && <rect className="draft-region active preview" x={preview.x} y={preview.y} width={preview.width} height={preview.height} strokeWidth={stroke * 1.4} />}
       </svg>}

@@ -76,9 +76,9 @@ with CorrectionPipeline.from_env() as pipeline:
 
 `question` 至少含 `question_id/revision/stem_text/regions`，`label` 可选；`attempt` 至少含 `id/question_id/captured_question_revision/recognition_revision/answer_text/answer_regions/recognition_status/asset_ids`。`answer_status` 可显式为 `present/blank/unclear`；省略时非空文字按 present、null 按 unclear，不能把未识别当空白。`input_versions` 使用完整契约字段。来源内容版本必须一致；仅 `case_revision_at_submission` 改变不会使提示失效。Worker 仍须在调用前授权并在落库／展示前再次校验当前版本、作答指针和来源有效性；此组件不能查询数据库完成这些检查。
 
-识别项包含 `label/asset_id/stem_text/answer_text/answer_status/regions/answer_regions/uncertainties`，并由代码补充 `recognition_status=ready|needs_revision`、`location_status=located|unknown`。原始笔迹与题干分开；空白、看不清、涂改分别记录，不用标准解法补笔迹。没有像素框时保留空数组，不能造全页框。契约 `CapturedQuestionRevision.regions` 要求至少一个真实框，因此 Worker 应先保留未定位识别候选，待核实后才能建立该记录。`coverage` 仅为 partial／unknown，模型不负责声明整页无漏题；空 items 也不表示整页正确。
+识别项包含 `label/asset_id/stem_text/answer_text/answer_status/regions/answer_regions/uncertainties`，并由代码补充 `recognition_status=ready|needs_revision`。原始笔迹与题干分开；空白、看不清、涂改分别记录，不用标准解法补笔迹。`coverage` 仅为 partial／unknown，模型不负责声明整页无漏题；空 items 也不表示整页正确。
 
-区域严格使用对应资产的 `original_pixels`，拒绝未知资产、负数、零尺寸、越界、把旧作答图位置用于新作答等情况。图片尺寸必须与实际发送的图像像素一致；旋转或缩放需要由上游维护资产版本与坐标关系。边界校验只能证明框在图内，不能证明模型框到了正确题目。
+区域严格使用对应资产的 `original_pixels`，拒绝未知资产、负数、零尺寸、越界、把旧作答图位置用于新作答等情况。图片尺寸必须与实际发送的图像像素一致；旋转或缩放需要由上游维护资产版本与坐标关系。
 
 检查和再检必须同时读取原图与识别候选，返回独立 `readback`。只做保守字符规范化，不把上标消成普通数字、不删去内部数字间隔、不做数学等价转换；读回的题干／答案不一致、字迹不确定或识别未就绪时，结果强制为 `unable_to_judge`、`validity=needs_review`。否则也只得到候选；`origin=model`、确认字段恒为 null，依据类型为 `model_hypothesis`。`readback` 和 `uncertainties` 是内部审计扩展，不能原样塞入禁止额外字段的公共 Decision；由 Worker 分开保存。模型摘要也不应直接展示为给孩子的答案或长篇解释。
 
@@ -91,6 +91,8 @@ with CorrectionPipeline.from_env() as pipeline:
 `photo-correction.v5` 将判题结论要求限定为 check/recheck；recognition 只读题与作答，同题号多个独立求值目标也须分项并保留共享条件。拆分仍是模型候选，`coverage=partial/unknown` 不表示整页已无遗漏。
 
 `photo-correction.v6` 进一步明确识别输出的顶层只能是 `items` 与 `coverage`，提供合法空结构示例，并区分模型字段与服务端计算的状态字段。不得添加状态/元数据或包装层；服务端仍拒绝所有契约外字段，不以删字段、自动解包或修补 JSON 代替校验。JSON mode 无法保证 Schema 遵循，这些提示改善仍需整页实测验证。
+
+`photo-correction.v7` 不再让模型定位题目。识别改为简短提示词，只按原样抄录每个小问/填空的 `page`（第几张图）、`label`、题干、学生作答、`answer_status` 和 `uncertainties`；服务端把 `page` 换成 `asset_id`，题区记为整张图（只表示题目在哪一页，不代表位置），`answer_regions` 为空，每道读出的题都建立题目记录。check/recheck 不再返回 `first_error_region`，hint 不再返回 `focus_region`，二者恒为 null；模型输入只给题干/作答所在图片的 ID，不给坐标。两个网页不绘制整页大小的框。老师在工作台手动框选的区域仍照常保存和显示。
 
 输出失败在 `attempts[].diagnostic` 保存层级（外层 JSON/响应结构、候选 JSON/Schema/业务语义）、规则码和已知字段路径；数组只记录索引，未知字段替换为 `*`。不保存校验错误原文、实例值、Schema 值或响应正文。Worker 现有调用账本会保留这些诊断与 usage/请求 ID，外部失败码和候选/人工确认边界不变。部署前未记录诊断的旧失败不能凭后来一次成功重放倒推出原因；诊断也不等于自动重试授权。
 

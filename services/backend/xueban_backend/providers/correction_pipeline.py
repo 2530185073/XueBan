@@ -2,7 +2,9 @@
 
 The worker supplies authorized, decoded original images and immutable snapshots.
 Model observations remain provisional even when their JSON and mathematics look
-plausible. Unknown coordinates are never replaced by an invented full-page box.
+plausible. The model only transcribes; it is never asked for pixel positions.
+A recognized question is tied to its whole page, which records which photo it
+is on and makes no claim about where on that photo it is.
 """
 
 from copy import deepcopy
@@ -19,7 +21,7 @@ from jsonschema.exceptions import ValidationError
 from .ark import ArkClient, ArkSettings, Metadata, MODEL_ID, OutputDiagnostic, ProviderError
 
 
-PROMPT_VERSION = "photo-correction.v6"
+PROMPT_VERSION = "photo-correction.v7"
 ID_PATTERN = r"^[a-z][a-z0-9_-]{2,63}$"
 REASONS = ["unclear_image", "incomplete_question", "unsupported_type", "recognition_conflict",
            "verification_conflict", "insufficient_process", "needs_staff", "other"]
@@ -46,27 +48,29 @@ REGIONS = {"type": "array", "items": REGION_SCHEMA, "maxItems": 16}
 UNCERTAINTIES = {"type": "array", "items": _text(600), "maxItems": 20, "uniqueItems": True}
 ANSWER_STATUS = {"enum": ["present", "blank", "unclear"]}
 ITEM_SCHEMA = _object({
-    "asset_id": {"type": "string", "pattern": ID_PATTERN}, "label": _text(120),
+    "page": {"type": "integer", "minimum": 1, "maximum": 4}, "label": _text(120),
     "stem_text": _text(nullable=True), "answer_text": _text(nullable=True),
-    "answer_status": ANSWER_STATUS, "regions": REGIONS, "answer_regions": REGIONS,
-    "uncertainties": UNCERTAINTIES,
+    "answer_status": ANSWER_STATUS, "uncertainties": UNCERTAINTIES,
 })
-COVERAGE_SCHEMA = _object({
-    # A model cannot establish that every answer on the page has been captured.
-    "collection_scope": {"enum": ["partial", "unknown"]},
-    "unrecognized_regions": REGIONS, "note": _text(1000, nullable=True),
-})
-RECOGNITION_SCHEMA = _object({
-    "items": {"type": "array", "items": ITEM_SCHEMA, "maxItems": 80},
-    "coverage": COVERAGE_SCHEMA,
-})
+RECOGNITION_SCHEMA = _object({"items": {"type": "array", "items": ITEM_SCHEMA, "maxItems": 80}})
+RECOGNITION_EXAMPLE = {"items": [{"page": 1, "label": "3(2)", "stem_text": "计算：(-2)² + 1", "answer_text": "-3",
+                                  "answer_status": "present", "uncertainties": []}]}
+RECOGNITION_PROMPT = (
+    "把图片上的每一道题按原样完整抄下来。\n"
+    "1. 每个小问、每个填空单独一项；label 写题号，例如 3(2)、5 第二空。\n"
+    "2. stem_text 抄题干原文，包括解题需要的已知条件；answer_text 抄学生写下的作答原文。\n"
+    "3. 只抄写，不解题、不批改，不补全学生没写或看不清的内容。\n"
+    "4. answer_status：有作答 present，没写 blank（answer_text 为 null），看不清 unclear。\n"
+    "5. page 是这道题所在图片的序号，从 1 开始。\n"
+    "6. 看不清或拿不准的地方写进 uncertainties，说明是哪里。\n"
+    "输出示例：" + json.dumps(RECOGNITION_EXAMPLE, ensure_ascii=False)
+)
 READBACK_SCHEMA = _object({"stem_text": _text(nullable=True), "answer_text": _text(nullable=True),
                            "answer_status": ANSWER_STATUS})
 CHECK_SCHEMA = _object({
     "verdict": {"enum": VERDICTS}, "reason_code": {"enum": [None, *REASONS]},
     "readback": READBACK_SCHEMA, "recognition_consistent": {"type": "boolean"},
     "basis_summary": _text(2000), "uncertainties": UNCERTAINTIES,
-    "first_error_region": {"anyOf": [REGION_SCHEMA, {"type": "null"}]},
 })
 VERSIONS_SCHEMA = _object({
     "question_id": {"type": "string", "pattern": ID_PATTERN},
@@ -92,9 +96,7 @@ HINTS = {
     "steps": ("请从上一处确定的步骤开始，检查下一步变化。", "每次只做一个运算，保留中间步骤，再核对相邻两行是否等价。"),
     "staff": ("这处还需要核实，请坐班老师一起看原图。", "这处还需要核实，请坐班老师一起看原图。"),
 }
-HINT_SCHEMA = _object({"guidance_code": {"enum": list(HINTS)},
-                       "focus_region": {"anyOf": [REGION_SCHEMA, {"type": "null"}]},
-                       "uncertainties": UNCERTAINTIES})
+HINT_SCHEMA = _object({"guidance_code": {"enum": list(HINTS)}, "uncertainties": UNCERTAINTIES})
 
 
 @dataclass(frozen=True)
@@ -264,107 +266,42 @@ class CorrectionPipeline:
         return result
 
     @staticmethod
-    def _mostly_unlocated(data):
-        items = data["items"]
-        return bool(items) and 2 * sum(1 for i in items if i["location_status"] != "located") > len(items)
-
-    @staticmethod
-    def _ledger(result, attempts, latency_ms):
-        """Keep every billable call in the ledger, whichever candidate is used."""
-        return replace(result, metadata=replace(result.metadata, attempts=attempts, latency_ms=latency_ms))
+    def page_region(image):
+        return {"asset_id": image.asset_id, "x": 0, "y": 0, "width": image.width_px, "height": image.height_px,
+                "coordinate_space": "original_pixels"}
 
     def recognize(self, *, images: tuple[PipelineImage, ...]) -> PipelineResult:
         images = self._images(images)
-        first = self._recognize_once(images)
-        if not self._mostly_unlocated(first.data):
-            return first
-        # A question record needs a real position on the photo. When the model read the page but left
-        # most positions out, ask once more and keep whichever answer locates more questions.
-        try:
-            second = self._recognize_once(images, "上一次输出读出了题目，但大多数题没有给出位置。"
-                                          "这一次请为每道能在图上看到的题给出题干 regions 与作答 answer_regions 的原图像素框；"
-                                          "只有确实无法在图上找到的题才留空数组，仍不能用全页框代替。")
-        except ProviderError as failure:
-            return self._ledger(first, (*first.metadata.attempts, *failure.attempts), first.metadata.latency_ms + failure.latency_ms)
-        located = lambda r: sum(1 for i in r.data["items"] if i["location_status"] == "located")  # noqa: E731
-        chosen = second if located(second) > located(first) else first
-        return self._ledger(chosen, (*first.metadata.attempts, *second.metadata.attempts),
-                            first.metadata.latency_ms + second.metadata.latency_ms)
-
-    def _recognize_once(self, images, retry_note=""):
-        result = self._call("recognition", images,
-            "输出格式：最外层必须直接包含 items 和 coverage 两个键，且只能有这两个键。"
-            "不添加 status、candidate、metadata、顶层 uncertainties，也不使用 data、result 或 response 包装。"
-            "coverage 只含 collection_scope、unrecognized_regions、note 三个键。"
-            "每个 items 元素只含 asset_id、label、stem_text、answer_text、answer_status、regions、answer_regions、uncertainties 八个键；"
-            "不添加 recognition_status 或 location_status，这些状态由服务端计算。"
-            '空结构示例：{"items":[],"coverage":{"collection_scope":"unknown","unrecognized_regions":[],"note":null}}。'
-            "这个示例只说明字段结构，不表示照片无题；必须把实际可辨认的题目逐项放进 items。"
-            "无法辨认的内容按 Schema 使用 null、空数组或 uncertainties，不另增字段。"
-            "逐个可见小问、每一个独立填空拆为一项，label 必须包含完整题号和空位名称，在同图内唯一。"
-            "同一题号要求多个表达式分别求值时，每个求值目标也各拆为独立 item，不限于带填空线的题；"
-            "每项保留解题必需的共享条件，label 标明具体小问或求值目标，不将多个目标的作答合并到一项。"
-            "题号只放 label，不混入 stem_text 或 answer_text。Question:、题目:、Student answer:、学生作答:"
-            "等明确字段标签不是数学内容，应去掉标签但保留后面的全部题干或作答。"
-            "不要删改数学符号、括号、指数、数字间隔；无法区分题号和数学内容时保留歧义，不自行删数。"
-            "只忠实抄录，不求解、不批改、不根据标准答案补齐学生字迹。stem_text 是题干（含共享已知条件），"
-            "answer_text 是当前可见学生作答；涂改被覆盖内容不能猜写。不要将邻题的答案当作本题涂改。"
-            "作答可以是印刷或手写，只按可见内容识别。页眉、页脚、来源或作者声明不是题目或作答，"
-            "除非本身是本题需要的条件，否则不要拆为题目或混入题干。"
-            "uncertainties 只记录影响分题绑定、题干/作答读取或位置真实性的具体歧义。"
-            "材料是否合成、是不是某个真实学生书写、无法证实来源或作者身份，不在本角色核验范围，"
-            "不能仅据这些属性填写 uncertainties，也不能声称已验证身份或来源。"
-            "看不清时保留 null 或可见片段，并在 uncertainties 明确写出；blank 只用于确实没有作答，"
-            "无法辨认必须为 unclear。present 必须有非空 answer_text；blank 的 answer_text 必须为 null。"
-            "每项用 asset_id 绑定图片。regions 是题干区域，answer_regions 是本空作答区域；坐标必须为"
-            "该原图实际像素坐标，不能猜测；无法定位就返回空数组，不能用全页框冒充定位。"
-            "coverage 记录未识别处，不能声明整页已无遗漏；若整页看不清，返回空 items 并说明。" + retry_note,
-            RECOGNITION_SCHEMA, thinking=False)
-        data = deepcopy(result.data)
-        inside = lambda r: r["asset_id"] not in images or (  # noqa: E731  (foreign assets fail below)
-            r["x"] + r["width"] <= images[r["asset_id"]].width_px and r["y"] + r["height"] <= images[r["asset_id"]].height_px)
+        pages = list(images.values())
+        result = self._call("recognition", images, RECOGNITION_PROMPT, RECOGNITION_SCHEMA, thinking=False)
+        items = []
         try:
             seen = set()
-            # One impossible box must not discard every other question on the page: drop it, keep the
-            # item for human review, never stretch or clip it into a location the model did not report.
-            unrecognized = data["coverage"]["unrecognized_regions"]
-            data["coverage"]["unrecognized_regions"] = [r for r in unrecognized if inside(r)]
-            if len(data["coverage"]["unrecognized_regions"]) != len(unrecognized) and not data["coverage"]["note"]:
-                data["coverage"]["note"] = "部分未识别区域的位置超出图片范围，已舍弃；不能视为整页已无遗漏。"
-            self._regions(data["coverage"]["unrecognized_regions"], images, path=("coverage", "unrecognized_regions"))
-            for item in data["items"]:
-                kept = {name: [r for r in item[name] if inside(r)] for name in ("regions", "answer_regions")}
-                if any(len(kept[name]) != len(item[name]) for name in kept):
-                    item.update(kept)
-                    note = "模型给出的位置超出图片范围，已舍弃，需核实题目或作答位置。"
-                    if note not in item["uncertainties"]:
-                        item["uncertainties"] = [*item["uncertainties"], note][-20:]
-            for index, item in enumerate(data["items"]):
-                for field_name in ("stem_text", "answer_text"):
-                    item[field_name] = _strip_field_label(item[field_name], field_name)
+            for index, raw in enumerate(result.data["items"]):
+                if raw["page"] > len(pages):
+                    raise _SemanticOutputError("unknown_asset", ("items", index, "page"))
+                page = pages[raw["page"] - 1]
+                item = {"asset_id": page.asset_id, "label": raw["label"],
+                        "stem_text": _strip_field_label(raw["stem_text"], "stem_text"),
+                        "answer_text": _strip_field_label(raw["answer_text"], "answer_text"),
+                        "answer_status": raw["answer_status"], "uncertainties": list(raw["uncertainties"]),
+                        "regions": [self.page_region(page)], "answer_regions": []}
                 key = (item["asset_id"], item["label"])
-                if item["asset_id"] not in images:
-                    raise _SemanticOutputError("unknown_asset", ("items", index, "asset_id"))
                 if key in seen:
                     raise _SemanticOutputError("duplicate_label", ("items", index, "label"))
                 seen.add(key)
-                for field_name in ("regions", "answer_regions"):
-                    self._regions(item[field_name], images, path=("items", index, field_name))
-                    if any(r["asset_id"] != item["asset_id"] for r in item[field_name]):
-                        raise _SemanticOutputError("asset_mismatch", ("items", index, field_name))
                 if ((item["answer_status"] == "present" and item["answer_text"] is None)
                         or (item["answer_status"] == "blank" and item["answer_text"] is not None)):
                     raise _SemanticOutputError("answer_status_conflict", ("items", index, "answer_text"))
-                item["location_status"] = "located" if item["regions"] else "unknown"
-                ready = bool(item["stem_text"] and item["regions"] and not item["uncertainties"] and item["answer_status"] != "unclear")
+                ready = bool(item["stem_text"] and not item["uncertainties"] and item["answer_status"] != "unclear")
                 item["recognition_status"] = "ready" if ready else "needs_revision"
-            if not data["items"] and not data["coverage"]["note"]:
-                data["coverage"]["note"] = "未取得可核读题目，不能视为无错作业。"
-            elif any(i["location_status"] == "unknown" for i in data["items"]) and not data["coverage"]["note"]:
-                data["coverage"]["note"] = "存在无法定位的题目候选，须核实位置后建立题目记录。"
+                items.append(item)
         except (ValueError, KeyError, TypeError) as error:
             self._failed_output(result, error)
-        return PipelineResult(data, result.metadata)
+        # A model cannot establish that every answer on the page has been captured.
+        coverage = {"collection_scope": "partial" if items else "unknown", "unrecognized_regions": [],
+                    "note": None if items else "未取得可核读题目，不能视为无错作业。"}
+        return PipelineResult({"items": items, "coverage": coverage}, result.metadata)
 
     def _context(self, images, question, attempt, input_versions):
         images = self._images(images)
@@ -406,14 +343,14 @@ class CorrectionPipeline:
     def _check(self, role, images, question, attempt, input_versions):
         images, observation, question_regions, answer_regions = self._context(images, question, attempt, input_versions)
         payload = {"question_label": question.get("label"), "provisional_transcription": observation,
-                   "question_regions": question_regions, "answer_regions": answer_regions,
+                   "question_asset_ids": list(dict.fromkeys(r["asset_id"] for r in question_regions)),
                    "attempt_asset_ids": attempt["asset_ids"]}
         result = self._call(role, images,
             "只核验指定小问及当前作答。先重新看原图，readback 忠实记录本次题干和学生笔迹，"
             "readback 与识别使用同一字段规则：题号和明确的 Question:/题目:/Student answer:/学生作答:"
             "字段标签不属于题干或答案；去掉明确标签，保留全部数学内容，不删数学符号、括号或指数。"
             "不可把独立算出的正确解法写成学生答案。图片中不同解法可以正确，不要默认每题有错。"
-            "原题所在图片用于题干，attempt_asset_ids 指向本次作答；订正再检不得使用旧图上的作答。"
+            "question_asset_ids 是原题所在图片，用于题干；attempt_asset_ids 指向本次作答；订正再检不得使用旧图上的作答。"
             "本次 readback.answer_text 只从 attempt_asset_ids 指定的当前作答图片读取。"
             "不在该列表的图片，其作答、涂改和批注都不能作为本次作答，仅可读取指定题干与条件。"
             "旧答案与当前答案不同是正常订正，不是 recognition_conflict，也不能仅因二者不同写 uncertainties。"
@@ -423,20 +360,15 @@ class CorrectionPipeline:
             "uncertainties 只记录会影响当前题干/作答辨认或数学结论的具体歧义。"
             "作答是印刷还是手写、材料是否合成、无法证实作者或学生身份，都不能单独作为不能判题的理由。"
             "若题目只要求终答且条件充分，即使没有写计算过程，也应独立核算可见终答并判断；"
-            "不能凭空补步骤，没有可定位的错误步骤时 first_error_region 可为 null。"
+            "不能凭空补步骤。"
             "若题目明确要求证明或过程，而缺失内容确实影响该要求的判断，则保留不足和不确定，"
             "不得用终答正确替代过程要求。"
             "若题干、符号、作答或题目明确要求的必要步骤存在影响判断的缺失，或原图与候选冲突，"
             "明确 uncertainties 与 unable_to_judge；"
-            "不能根据题意把 u 猜成 v、补负号或根据最终答案补涂改步骤。first_error_region 仅在"
-            "确实定位到错误证据时给原图像素框，否则为 null；正确或无法判断不能画错误框。",
+            "不能根据题意把 u 猜成 v、补负号或根据最终答案补涂改步骤。",
             CHECK_SCHEMA, data=payload)
         raw = result.data
         try:
-            if raw["first_error_region"] is not None:
-                self._regions([raw["first_error_region"]], images, path=("first_error_region",), is_collection=False)
-                if raw["first_error_region"]["asset_id"] not in attempt["asset_ids"]:
-                    raise _SemanticOutputError("asset_mismatch", ("first_error_region", "asset_id"))
             if ((raw["readback"]["answer_status"] == "present" and raw["readback"]["answer_text"] is None)
                     or (raw["readback"]["answer_status"] == "blank" and raw["readback"]["answer_text"] is not None)):
                 raise _SemanticOutputError("answer_status_conflict", ("readback", "answer_text"))
@@ -469,14 +401,14 @@ class CorrectionPipeline:
             "verdict": verdict, "reason_code": reason,
             "basis": [{"kind": "model_hypothesis", "summary": raw["basis_summary"], "source_ref": None,
                        "regions": answer_regions or question_regions}],
-            "first_error_region": deepcopy(raw["first_error_region"]) if verdict in ("incorrect", "partially_correct") else None,
+            "first_error_region": None,
             "confirmation_source": None, "confirmed_by": None, "confirmed_at": None,
             "uncertainties": uncertainties, "readback": deepcopy(raw["readback"]),
         }
         return PipelineResult(data, result.metadata)
 
     def hint(self, *, images, question, attempt, input_versions, decision, level) -> PipelineResult:
-        images, observation, question_regions, answer_regions = self._context(images, question, attempt, input_versions)
+        images, observation, _, _ = self._context(images, question, attempt, input_versions)
         try:
             _validate(VERSIONS_SCHEMA, decision["input_versions"])
             # Aggregate CAS is audit context, not a content input. A hint request
@@ -492,7 +424,6 @@ class CorrectionPipeline:
                 raise ValueError()
         except (ValueError, TypeError, KeyError):
             raise ProviderError("invalid_input") from None
-        focus = None
         metadata = Metadata(self.client.settings.model, None, None, None, None, 0, ())
         if (level == "staff_handoff" or decision["validity"] == "needs_review"
                 or decision["verdict"] == "unable_to_judge"
@@ -506,24 +437,14 @@ class CorrectionPipeline:
                 "只为当前小问选择一个最必要的提示类型。不要输出答案、标准解法或自由文本；"
                 "guidance_code 含义：question读题、sign符号、operation运算关系、distribution分配律、"
                 "fraction分数、units单位、substitution代入、diagram图形、steps相邻步骤、staff需要坐班核实。"
-                "实质证据不足或有争议选 staff。focus_region 必须定位于本次作答图，不确定用 null。",
-                HINT_SCHEMA, data={"observation": observation, "question_regions": question_regions,
-                                   "answer_regions": answer_regions, "level": level}, thinking=False)
+                "实质证据不足或有争议选 staff。",
+                HINT_SCHEMA, data={"observation": observation, "level": level}, thinking=False)
             metadata = result.metadata
-            code, focus = result.data["guidance_code"], result.data["focus_region"]
-            try:
-                if focus is not None:
-                    self._regions([focus], images, path=("focus_region",), is_collection=False)
-                    if focus["asset_id"] not in attempt["asset_ids"]:
-                        raise _SemanticOutputError("asset_mismatch", ("focus_region", "asset_id"))
-            except (ValueError, KeyError, TypeError) as error:
-                self._failed_output(result, error)
-            if result.data["uncertainties"]:
-                code, focus = "staff", None
+            code = "staff" if result.data["uncertainties"] else result.data["guidance_code"]
         handoff = code == "staff"
         data = {"level": "staff_handoff" if handoff else level,
                 "content": HINTS[code][1 if level == "key_step" else 0],
                 "exposes_answer": False, "source_is_provisional": decision["validity"] != "confirmed",
                 "source_decision_id": decision["id"], "source_decision_revision": decision["revision"],
-                "requires_staff": handoff, "focus_region": focus, "input_versions": deepcopy(input_versions)}
+                "requires_staff": handoff, "focus_region": None, "input_versions": deepcopy(input_versions)}
         return PipelineResult(data, metadata)

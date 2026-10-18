@@ -36,7 +36,7 @@ class SyntheticPipeline:
         self.verdict = "incorrect"
         self.error = None
         self.callback = None
-        self.unknown_location = False
+        self.empty = False
         self.stem = "1 + 1 = ?"
         self.label = "1"
         self.extra_item_label = None
@@ -49,7 +49,8 @@ class SyntheticPipeline:
             raise self.error
         image = images[0]
         region = {"asset_id": image.asset_id, "x": 1, "y": 1, "width": min(100, image.width_px - 1), "height": min(60, image.height_px - 1), "coordinate_space": "original_pixels"}
-        result = PipelineResult({"items": [{"asset_id": image.asset_id, "label": self.label, "stem_text": self.stem, "answer_text": "3", "answer_status": "present", "regions": [] if self.unknown_location else [region], "answer_regions": [] if self.unknown_location else [region], "recognition_status": "ready", "location_status": "unknown" if self.unknown_location else "located", "uncertainties": []}], "coverage": {"collection_scope": "partial", "unrecognized_regions": [], "note": None}}, self.metadata)
+        items = [] if self.empty else [{"asset_id": image.asset_id, "label": self.label, "stem_text": self.stem, "answer_text": "3", "answer_status": "present", "regions": [region], "answer_regions": [region], "recognition_status": "ready", "uncertainties": []}]
+        result = PipelineResult({"items": items, "coverage": {"collection_scope": "partial" if items else "unknown", "unrecognized_regions": [], "note": None}}, self.metadata)
         if self.extra_item_label:
             result.data["items"].append({**deepcopy(result.data["items"][0]), "label": self.extra_item_label})
         return result
@@ -231,15 +232,28 @@ def test_provider_failure_is_failed_job_not_empty_success(flow):
     assert flow.homework()["case_ids"] == []
 
 
-def test_uncertain_location_does_not_create_fake_full_page_question(flow):
-    flow.pipeline.unknown_location = True
-    _, job = flow.recognize()
+def test_question_tied_only_to_its_whole_page_still_gets_a_record(flow):
+    asset, _ = flow.recognize()
+    page = {"asset_id": asset["id"], "x": 0, "y": 0, "width": 120, "height": 80, "coordinate_space": "original_pixels"}
+    recognize = flow.pipeline.recognize
+    def whole_page(**context):
+        result = recognize(**context)
+        result.data["items"][0].update(regions=[page], answer_regions=[])
+        return result
+    flow.pipeline.recognize = whole_page
+    assert flow.worker.run_once()
+    assert len(flow.homework()["question_ids"]) == 1
+    question = flow.client.get(f"/v1/questions/{flow.homework()['question_ids'][0]}").json()["record"]
+    assert question["regions"] == [page]
+
+
+def test_empty_recognition_creates_no_question_and_says_so(flow):
+    flow.pipeline.empty = True
+    flow.recognize()
     assert flow.worker.run_once()
     assert flow.homework()["question_ids"] == []
     assert flow.homework()["coverage"]["collection_scope"] == "unknown"
-    with Session(flow.database.engine) as session:
-        task = session.get(Task, job["id"])
-        assert task.audit["executions"][0]["candidate"]["items"][0]["regions"] == []
+    assert "没有读出可核对的题目" in flow.homework()["coverage"]["note"]
 
 
 def test_pause_revision_does_not_invalidate_check_content(flow):
@@ -454,16 +468,16 @@ def test_staff_revision_that_clears_judgment_stays_in_review_queue(flow):
     assert queue().get(case["id"]) != "awaiting_check"
 
 
-def test_recognition_that_located_nothing_can_be_run_again_but_not_after_questions_exist(flow):
-    flow.pipeline.unknown_location = True
+def test_recognition_that_read_nothing_can_be_run_again_but_not_after_questions_exist(flow):
+    flow.pipeline.empty = True
     asset, job = flow.recognize()
     assert flow.worker.run_once()
     assert flow.client.get(f"/v1/jobs/{job['id']}").json()["status"] == "succeeded"
     assert flow.homework()["case_ids"] == []
-    assert "1 道没能在照片上定位" in flow.homework()["coverage"]["note"]
+    assert "没有读出可核对的题目" in flow.homework()["coverage"]["note"]
 
     path = f"/v1/homeworks/{flow.homework_id}/recognitions"
-    flow.pipeline.unknown_location = False
+    flow.pipeline.empty = False
     again = flow.post(path, {"expected_revision": flow.homework()["revision"], "asset_ids": [asset["id"]]})
     assert again.status_code == 202, again.text
     assert flow.worker.run_once()

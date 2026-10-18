@@ -237,7 +237,7 @@ def install_correction(app, engine, cfg, database_session, current_actor):
     def recognize(session, actor, homework, _, payload):
         assets_for(session, homework.id, payload["asset_ids"])
         existing = session.scalars(select(Task).where(Task.homework_id == homework.id, Task.kind == "recognize_homework", Task.status.not_in(["failed", "cancelled", "superseded"]))).all()
-        # A finished recognition that produced no question record (nothing could be located) may be run again.
+        # A finished recognition that produced no question record may be run again.
         if session.scalar(select(Entity.id).where(Entity.homework_id == homework.id, Entity.kind == "question").limit(1)) is None:
             existing = [t for t in existing if t.status != "succeeded"]
         if any(set(t.inputs["asset_ids"]) & set(payload["asset_ids"]) for t in existing):
