@@ -2,6 +2,32 @@
 
 本包提供同步 Worker 调用组件；公开 API、授权、作业状态机和数据落库由后端 Worker 负责。导入不启用模型；无凭据或无明确 base URL 时拒绝调用。部署端负责注入已核实的服务域名与凭据，不从学生客户端接受这些配置。
 
+## 整页双模型路径
+
+`CORRECTION_MODE=two_model` 使用 `TwoModelWholePagePipeline`，提示版本为
+`photo-correction.two-model.v2`。每张原图并行调用 DeepSeek（`ARK_*`）与
+Astra（`ZYAI_*`、`REVIEW_MODEL`）；两方独立读题、抄学生笔迹和判题，互相看不到候选文字、
+答案或结论。不先分框，不为每道题另发模型请求，不设置第三轮投票。
+
+服务端按来源照片和逐空题号匹配，两份完整题干、选项、学生作答和判定都一致且没有疑点，
+才输出确定的 AI 候选。明确错误还要求两方都有答案和改法，并且最终答案一致。任何一方
+失败、漏题或存在分歧时，仅对应题保留待核，不把不确定性转成错题或薄弱点。每空保留原图
+关联、双方原始观察及请求账本；两份 `correct` 仍不等于教师确认。
+
+结果使用 `items[].assessment`，其中 `verification.mode=two_model`，
+`verification.status` 为 `matched/conflict/degraded`，`reason_codes` 说明分歧来源。
+明确错误提供 `correct_answer/correction_method`；知识点只取双方标签交集，且学科不一致时
+返回空标签，最终教材范围由 Worker 校验。`recognize` 一次完成整页候选判题，正常上传不应再逐题
+调用 `check`；兼容的 `check/recheck` 入口只用于显式重试，重新读取当前作答原图并核对目标题。
+
+两方均使用可取消的 HTTP 总截止时间：DeepSeek 整页调用最多 200 秒，Astra 仍为 118 秒。
+每方最多一次供应商请求，不因失败自动增加付费重试；截止时间覆盖排队、传输及读体，
+到期保留待核和调用账本，不能用成功的一方直接放行。Responses 默认使用 SSE，必须收到完整 terminal response；构造时 `stream=False`
+可兼容非流接口，仍使用同一总截止时间、严格 schema 与失败审计。
+
+`CORRECTION_MODE=multimodel` 保留原三模型兼容路径；`single` 保留以下逐题旧接口。
+未设置模式的底层工厂仍为 `single`，运行脚本负责显式选择体验版本。
+
 ```python
 from xueban_backend.providers import ArkClient, ArkSettings
 
@@ -26,7 +52,7 @@ with ArkClient(ArkSettings(base_url=verified_base_url, api_key=server_api_key)) 
 
 DS 与 GPT 的有效结论分歧时不得放行 `correct`。GPT 无法确认、缺少正确答案或改法、服务失败或审核未完成时，返回 `unable_to_judge`/`needs_review`，不猜测为错题、不生成未经依据支持的纠正内容，并保留重试路径。只有 GPT 明确判错且证据充分时，才允许带红色 `*` 输出错误。系统不依赖或展示模型概率估计。所有凭证仅传给 Worker。商用教材范围由服务端学生档案和授权出版社确定；范围未命中先补充信息，已确定范围但无已审核知识点候选时严格返回空标签。
 
-`recognition / check / hint / recheck / knowledge_extract` 各有独立系统提示；知识点角色只是接口能力，不会部署或更新知识图谱。DeepSeek 默认思考开启、`max_tokens=4096`，可单次显式覆盖，最大8192（包含该模型思考 token）。Astra 使用 Responses API、`store=false`、结构化 JSON Schema 输出；因 Responses strict 子集限制，服务端会在解析后用原始业务 Schema 再校验。两类接口都不发送未经确认的温度或 top-p 参数。
+`recognition / check / hint / recheck / knowledge_extract` 各有独立系统提示；知识点角色只是接口能力，不会部署或更新知识图谱。旧 Ark 适配器默认思考开启、`max_tokens=4096`，可单次显式覆盖，最大16384（包含该模型思考 token）；整页有界适配器上限32768，本路径每方配置24576。Astra 使用 Responses API、`store=false`、结构化 JSON Schema 输出；因 Responses strict 子集限制，服务端会在解析后用原始业务 Schema 再校验。两类接口都不发送未经确认的温度或 top-p 参数。
 
 使用 Chat Completions 的 `response_format={"type":"json_object"}`，另在服务端做 JSON Schema 校验；不依赖上游严格 schema 输出。只接受一个完整 JSON 对象，拒绝重复键、NaN/Infinity、Markdown 包装、输出截断、工具调用、额外未允许字段和不匹配的数据类型。Schema 仅接受内联定义和本地引用，不检索远程 Schema。
 

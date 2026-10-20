@@ -1,9 +1,14 @@
 import { useEffect, useState } from 'react'
 import { ArrowLeft, ChevronRight, LoaderCircle, RefreshCw } from 'lucide-react'
 import { safeError } from '../core'
-import type { KnowledgeDetail, KnowledgeMap } from '../core/learning'
+import type { EvidenceSources, KnowledgeDetail, KnowledgeMap } from '../core/learning'
 import type { Workspace } from '../useStudentWorkspace'
 import { assistanceLabel, chapterCounts, dayLabel, eventLabel, groupStates, PENDING_NOTICE, reasonText, resultLabels, statusLabels } from '../learning'
+
+export function EvidenceSourceNote({ sources }: { sources: EvidenceSources | null | undefined }) {
+  if (!sources?.assessment_source || sources.assessment_source === 'none') return null
+  return <small className="knowledge-source-note">{sources.assessment_source === 'model' ? '根据 AI 初判，尚未经老师核实' : sources.assessment_source === 'staff' ? '根据老师核实的作答' : '包含 AI 初判与老师核实的作答'}</small>
+}
 
 /** The signed-in student's map, re-read after homework changes; null (no entry) on failure or for another student. */
 export function useKnowledgeMap(workspace: Workspace) {
@@ -27,12 +32,13 @@ export function KnowledgeDetailView({ detail, onBack }: { detail: KnowledgeDetai
   return <section className="knowledge-detail" aria-labelledby="knowledge-detail-title">
     <button className="text-button" onClick={onBack}><ArrowLeft size={16} /> 回到知识地图</button>
     <div className="knowledge-detail-head"><h2 id="knowledge-detail-title">{detail.node.name}</h2><span className={`status-pill ${status.tone}`}>{status.label}</span></div>
+    <EvidenceSourceNote sources={detail.state} />
     <p className="knowledge-reason">{reasonText(detail.state?.learning_status ?? 'no_judgment', detail.state?.reason_codes ?? [])}</p>
     {detail.node.observable_objective && <div className="knowledge-block"><h3>学完能做到</h3><p>{detail.node.observable_objective}</p></div>}
     {detail.prerequisites.length > 0 && <div className="knowledge-block"><h3>会用到之前学过的</h3><ul className="prerequisite-list">{detail.prerequisites.map(p => <li key={p.id}><span>{p.name}</span><span className={`status-pill ${statusLabels[p.learning_status].tone}`}>{statusLabels[p.learning_status].label}</span></li>)}</ul><p className="muted small">{detail.notice}</p></div>}
     <div className="knowledge-block"><h3>我的作答记录</h3>
       {detail.evidence.length ? <ol className="evidence-list">{detail.evidence.map(e => <li key={e.id}>
-        <div className="evidence-meta"><time dateTime={e.occurred_at}>{dayLabel(e.occurred_at)}</time>{e.homework_title && <span>{e.homework_title}</span>}<span>{eventLabel(e.event_type)}</span></div>
+        <div className="evidence-meta"><time dateTime={e.occurred_at}>{dayLabel(e.occurred_at)}</time>{e.homework_title && <span>{e.homework_title}</span>}<span>{eventLabel(e.event_type)}</span>{e.source_role && <span>{e.source_role === 'model' ? 'AI 初判' : '老师核实'}</span>}</div>
         <p className="evidence-question">{e.question_text || '题目文字暂缺'}</p>
         <div className="evidence-tags"><span className="status-pill neutral">{resultLabels[e.result]}</span><span className="muted small">{assistanceLabel(e.assistance_level)}</span></div>
       </li>)}</ol> : <p className="muted small">还没有可用的作答记录。</p>}
@@ -75,7 +81,7 @@ export function KnowledgeMapView({ map, onOpen }: { map: KnowledgeMap; onOpen: (
     {groupStates(map.states).map(group => <section className="knowledge-group" key={group.id || 'other'} aria-labelledby={`chapter-${group.id || 'other'}`}>
       <h2 id={`chapter-${group.id || 'other'}`} className="day-label">{group.name}</h2>
       <div className="knowledge-list">{group.states.map(state => { const status = statusLabels[state.learning_status]; return <button key={state.knowledge_id} className="knowledge-item" onClick={() => onOpen(state.knowledge_id)}>
-        <span className="knowledge-item-text"><strong>{state.name}</strong><span>{reasonText(state.learning_status, state.reason_codes)}</span></span>
+        <span className="knowledge-item-text"><strong>{state.name}</strong><span>{reasonText(state.learning_status, state.reason_codes)}</span><EvidenceSourceNote sources={state} /></span>
         <span className={`status-pill ${status.tone}`}>{status.label}</span><ChevronRight size={16} aria-hidden="true" />
       </button> })}</div>
     </section>)}

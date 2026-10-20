@@ -13,13 +13,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .auth import Actor
-from .correction_models import Entity
+from .correction_models import Entity, Task
+from .contracts import Contracts
 from .errors import Problem
 from .learning_models import (AttemptCondition, KnowledgeDiagnosis, KnowledgeEdge, KnowledgeNode, LearningEvidence,
                               LearningProjection, QuestionKnowledgeLink, StudentKnowledgeState, StudentLearningProfile)
-from .correction_core import remember_idempotent, replay_idempotent
+from .correction_core import (invalidate, iso, remember_idempotent, replay_idempotent, save_entity,
+                              set_task, update_case)
 from .learning_projection import OptionalKey, fingerprints, new_id, published_graph
-from .learning_rules import RULE_VERSION, chapter_rollup, hints_seen_before
+from .learning_rules import RULE_VERSION, chapter_rollup, hints_seen_before, model_decision_usable
 from .models import Homework, Student
 from .curriculum_catalog import (canonical_subject, curriculum_stage, graph_is_latest_reviewed,
                                  node_matches_scope, scope_for_subject, scope_payload, scopes_for_grade,
@@ -103,6 +105,7 @@ def install_learning(app, engine, cfg, database_session, current_actor):
     from .app import require_student
     ActorDep = Annotated[Actor, Depends(current_actor)]
     SessionDep = Annotated[Session, Depends(database_session)]
+    contracts = Contracts(cfg.contracts_dir)
 
     def graph_nodes(session):
         graph = published_graph(session)
@@ -234,7 +237,8 @@ def install_learning(app, engine, cfg, database_session, current_actor):
         for case in entities:
             decision = case.document.get("current_decision") or {}
             if (case.document.get("lifecycle") != "active"
-                    or decision.get("validity") in {"stale", "retracted"}):
+                    or decision.get("validity") not in {"candidate", "confirmed"}
+                    or (decision.get("origin") == "model" and not model_decision_usable(decision))):
                 continue
             homework = session.get(Homework, case.homework_id)
             course = homework.curriculum if homework and isinstance(homework.curriculum, dict) else {}
@@ -307,6 +311,7 @@ def install_learning(app, engine, cfg, database_session, current_actor):
                 "attempt_id", "case_id", "homework_id", "question_id", "decision_id", "verdict", "event_type", "result",
                 "assistance_level", "independent", "link_role", "occurred_at")},
                 "validity": row.validity, "invalidation_reason": row.invalidation_reason,
+                "source_role": row.document.get("source_role", "sitting_teacher"),
                 "question_text": question.document["stem_text"] if question else None,
                 "homework_title": homework.title if homework else None})
         state = session.get(StudentKnowledgeState, (student_id, knowledge_id))
@@ -331,11 +336,15 @@ def install_learning(app, engine, cfg, database_session, current_actor):
     @app.put("/v1/questions/{question_id}/subject", operation_id="setUnrecognizedQuestionSubject")
     def set_question_subject(question_id: str, payload: QuestionSubjectInput, actor: ActorDep, session: SessionDep):
         question, homework, student = question_scope(session, actor, question_id)
-        # Lock before reading the revision.  Otherwise two staff screens can
-        # both pass the stale check and the later writer can overwrite the
-        # first manual subject choice.
+        # Use the same homework-first lock as correction mutations, then
+        # refresh the previously loaded question before checking its revision.
+        homework = session.scalar(select(Homework).where(Homework.id == homework.id).with_for_update()
+                                  .execution_options(populate_existing=True))
+        if homework.processing_blocked:
+            raise Problem(409, "conflict", "processing_blocked", "该作业已停止处理。")
         question = session.scalar(select(Entity).where(
-            Entity.id == question_id, Entity.kind == "question").with_for_update())
+            Entity.id == question_id, Entity.kind == "question").with_for_update()
+                                  .execution_options(populate_existing=True))
         if question is None:
             raise Problem(404, "not_found", "not_found", "资源不存在或不可访问。")
         if question.revision != payload.expected_question_revision:
@@ -350,14 +359,35 @@ def install_learning(app, engine, cfg, database_session, current_actor):
         if scope is None:
             raise Problem(422, "validation", "invalid_request", "所选学科不在当前年级范围内。")
         if canonical_subject((question.annotations or {}).get("subject_override")) == subject:
-            return {"question_id": question.id, "subject": subject}
+            return {"question_id": question.id, "subject": subject, "question_revision": question.revision}
         if canonical_subject(question.document.get("subject")) is not None:
             raise Problem(409, "conflict", "subject_already_recognized", "AI 已识别这道题的学科，不能通过手动选择覆盖。")
         annotations = dict(question.annotations or {})
         annotations["subject_override"] = subject
+        annotations["subject_override_actor_id"] = actor.id
+        annotations["subject_override_at"] = iso()
+        # A subject correction does not change the image's diagram/slots.
+        if annotations.get("diagram_revision") == question.revision:
+            annotations["diagram_revision"] = question.revision + 1
         question.annotations = annotations
+        save_entity(session, contracts, homework.id, "question",
+                    {**question.document, "revision": question.revision + 1}, row=question)
+        affected = set()
+        for case in session.scalars(select(Entity).where(Entity.homework_id == homework.id, Entity.kind == "case")):
+            if case.document["question_id"] != question.id or case.document.get("lifecycle", "active") != "active":
+                continue
+            invalidate(session, contracts, case, "question_subject_revision")
+            update_case(session, contracts, case, current_question_revision=question.revision,
+                        current_decision=None, progress="paused" if case.document["progress"] == "paused" else "pending")
+            affected.add(case.id)
+        # Running calls are fenced by question_revision in the worker's
+        # commit-time check. Do not lock them in the opposite order to finish().
+        for task in session.scalars(select(Task).where(Task.homework_id == homework.id,
+                                                       Task.status.in_(["queued", "retryable_failed"]))):
+            if task.inputs.get("case_id") in affected:
+                set_task(session, contracts, task, "superseded")
         session.commit()
-        return {"question_id": question.id, "subject": subject}
+        return {"question_id": question.id, "subject": subject, "question_revision": question.revision}
 
     @app.post("/v1/questions/{question_id}/knowledge-links", status_code=201, operation_id="decideQuestionKnowledgeLink")
     def decide_link(question_id: str, payload: LinkInput, actor: ActorDep, session: SessionDep):

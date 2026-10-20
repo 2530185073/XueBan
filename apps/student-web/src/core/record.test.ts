@@ -3,7 +3,7 @@ import { IDBFactory } from 'fake-indexeddb'
 import examples from '../../../../contracts/phase1/examples.json'
 import { StudentClient } from './student'
 import { DraftStore, LOCAL_TTL_MS } from './store'
-import type { Attempt, CapturedQuestionRevision, CheckRun, CorrectionCase, Decision, HelpRequest, Hint, HomeworkSession, JournalEntry, NormalizedPhoto, Review, StoredDraft } from './types'
+import type { Attempt, CapturedQuestionRevision, CheckRun, CorrectionCase, Decision, HelpRequest, Hint, HomeworkSession, Job, JournalEntry, NormalizedPhoto, Review, StoredDraft } from './types'
 
 class MemorySession implements Storage {
   private values = new Map<string, string>()
@@ -59,6 +59,38 @@ function harness(store = new DraftStore(new IDBFactory())) {
 }
 const login = (client: StudentClient) => client.login('synthetic.student', 'synthetic password only')
 
+describe('latest page job recovery', () => {
+  const job = (id: string, created_at: string, status: Job['status']): Job => ({ id, revision: 1, kind: 'recognize_homework', status, created_at, updated_at: created_at, retry_after_seconds: null, failure: status === 'failed' ? { code: 'provider_unavailable', message: '合成失败', retryable: false } : null, result: status === 'succeeded' ? { resource_type: 'homework', resource_id: 'homework_one' } : null })
+  it('replaces an older failed local job with the newer successful job regardless of UUID order and does not POST again', async () => {
+    const s = harness(), { c, a } = s.addCase('case_one')
+    c.current_decision = s.decisionFor(c, a); s.hw.case_ids = [c.id]
+    const old = job('job_zfailed', '2026-10-18T09:00:00.123100Z', 'failed'), latest = job('job_asuccess', '2026-10-18T09:00:00.123200Z', 'succeeded')
+    s.reads.set(`/v1/jobs/${old.id}`, () => old); s.reads.set(`/v1/jobs/${latest.id}`, () => latest)
+    s.hw.job_ids = [old.id]
+    await login(s.client)
+    const first = await s.client.openHomework(s.hw.id)
+    const failed = await s.store.draft(scopeOf(), first.draftId!)
+    expect(failed.stage).toBe('failed'); expect(failed.recognitionJobId).toBe(old.id)
+    failed.error = { code: 'job_failed', message: '过期失败提示' }; await s.store.saveDraft(failed)
+    s.hw.job_ids = [latest.id, old.id]
+    const restored = new StudentClient(s.options); await restored.restore()
+    const opened = await restored.openHomework(s.hw.id), saved = await s.store.draft(scopeOf(), opened.draftId!)
+    expect(saved.stage).toBe('complete'); expect(saved.recognitionJobId).toBe(latest.id); expect(saved.error).toBeNull()
+    expect((await restored.runDraft(opened.draftId!)).stage).toBe('complete')
+    expect(s.calls.filter(call => call.init.method === 'POST').map(call => call.path)).toEqual(['/v1/auth/login'])
+  })
+  it('keeps a newer queued recognition waiting even when an older successful result exists', async () => {
+    const s = harness(), { c, a } = s.addCase('case_one')
+    c.current_decision = s.decisionFor(c, a); s.hw.case_ids = [c.id]
+    const old = job('job_zsuccess', '2026-10-18T09:00:00.123100Z', 'succeeded'), latest = job('job_aqueued', '2026-10-18T09:00:00.123200Z', 'queued')
+    s.reads.set(`/v1/jobs/${old.id}`, () => old); s.reads.set(`/v1/jobs/${latest.id}`, () => latest); s.hw.job_ids = [latest.id, old.id]
+    await login(s.client)
+    const opened = await s.client.openHomework(s.hw.id), saved = await s.store.draft(scopeOf(), opened.draftId!)
+    expect(saved.stage).toBe('waiting'); expect(saved.recognitionJobId).toBe(latest.id)
+    expect(s.calls.filter(call => call.init.method === 'POST').map(call => call.path)).toEqual(['/v1/auth/login'])
+  })
+})
+
 describe('layout repair: superseded cases', () => {
   it('hides superseded cases and shows their replacements in place, without reading retired questions', async () => {
     const s = harness()
@@ -83,10 +115,33 @@ describe('layout repair: superseded cases', () => {
   })
   it('does not count a replacement listed both in the homework and as a replacement twice', async () => {
     const s = harness()
-    s.addCase('case_old', { lifecycle: 'superseded', replacement_case_ids: ['case_new', 'case_extra'] }); s.addCase('case_new'); s.addCase('case_extra')
+    s.addCase('case_old', { lifecycle: 'superseded', replacement_case_ids: ['case_new', 'case_extra'] }); s.addCase('case_new'); const extra = s.addCase('case_extra')
+    extra.q.created_at = extra.c.created_at = '2026-10-16T08:00:01Z'
     s.hw.case_ids = ['case_old', 'case_new', 'case_extra']
     await login(s.client)
     expect((await s.client.openHomework(s.hw.id)).cases.map(r => r.case.id)).toEqual(['case_new', 'case_extra'])
+  })
+  it('orders page questions by creation time rather than random case IDs, including microseconds and refreshes', async () => {
+    const s = harness(), first = s.addCase('case_zearly'), middle = s.addCase('case_mmiddle'), last = s.addCase('case_alate')
+    first.q.created_at = first.c.created_at = '2026-10-18T09:00:00.123100+00:00'
+    middle.q.created_at = middle.c.created_at = '2026-10-18T09:00:00.123200+00:00'
+    last.q.created_at = last.c.created_at = '2026-10-18T09:00:00.123300+00:00'
+    s.hw.case_ids = [last.c.id, middle.c.id, first.c.id]
+    await login(s.client)
+    const expected = [first.c.id, middle.c.id, last.c.id]
+    expect((await s.client.openHomework(s.hw.id)).cases.map(row => row.case.id)).toEqual(expected)
+    s.hw.case_ids = [middle.c.id, first.c.id, last.c.id]
+    expect((await s.client.openHomework(s.hw.id)).cases.map(row => row.case.id)).toEqual(expected)
+    expect((await s.client.homeworkSummary(s.hw)).firstUnresolvedCaseId).toBe(first.c.id)
+  })
+  it('keeps newly repaired questions in the older original question position', async () => {
+    const s = harness(), original = s.addCase('case_original', { lifecycle: 'superseded', replacement_case_ids: ['case_replacement'] }), later = s.addCase('case_later'), replacement = s.addCase('case_replacement')
+    original.c.created_at = '2026-10-18T09:00:00Z'
+    later.q.created_at = later.c.created_at = '2026-10-18T09:00:01Z'
+    replacement.q.created_at = replacement.c.created_at = '2026-10-19T09:00:00Z'
+    s.hw.case_ids = [later.c.id, replacement.c.id, original.c.id]
+    await login(s.client)
+    expect((await s.client.openHomework(s.hw.id)).cases.map(row => row.case.id)).toEqual([replacement.c.id, later.c.id])
   })
 })
 

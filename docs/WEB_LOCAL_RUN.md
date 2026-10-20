@@ -51,6 +51,29 @@ services/backend/.venv/bin/python services/backend/scripts/mac_local.py admin \
 
 点击上传、提示、检查或再检会实际调用已配置的模型，可能产生接口费用。浏览器本身不运行假判题，也不要求填写模型密钥。
 
+## 整页双模型纠错（当前推荐配置）
+
+设置 `CORRECTION_MODE=two_model` 后，DeepSeek 与 GPT 分别读取同一页原图并独立判题；两路并行，不预先交换题干、学生答案或结论。服务器逐个作答项比较两路结果，在同一个持久任务中保存题目、原作答和候选判断。网页直接显示整页结果，不再为已有结果的每道题追加检查请求。两路存在实质分歧或一方失败时，对应题目待核，学生可以先看其他题。
+
+本机配置保留原 Ark 私有文件，另指定 OpenAI 兼容网关私有文件；它必须是权限 `0600` 的普通文件，内容为 `ZYAI_BASE_URL=https://api.zyai.online/v1` 和 `ZYAI_API_KEY=...`。密钥仅给 Worker，不给网页构建或公开 API 进程。
+
+```sh
+services/backend/.venv/bin/python services/backend/scripts/mac_local.py configure-models \
+  --mode two_model --gateway-config "$HOME/.config/xueban/zyai.env" \
+  --review-model gpt-6-astra
+
+services/backend/.venv/bin/python services/backend/scripts/mac_local.py stop
+services/backend/.venv/bin/python services/backend/scripts/mac_web.py
+```
+
+配置命令仅保存私有文件路径与模型开关，不复制密钥，不改变账号或历史记录。它为本地 Worker 设置至少 600 秒租约，覆盖有界的双读与复核阶段。切换模式后必须重启 Worker；已经运行的进程不会自动加载新代码或配置。回到原单模型路径使用 `configure-models --mode single`，再重启服务。
+
+模型结果仍有 `candidate` 和 `needs_review` 的区别：识读一致不等于人工确认或知识点掌握。原图、每次调用的候选与用量、分歧、当前作答版本都保留审计；网关不可用或复核超时不会伪装成多模型通过。正常作答和订正照片仍绑定原学员账号。坐班老师的原有人工切分修订入口保留。
+
+双模型配置使用 Ark 的 DeepSeek 和兼容网关 Responses 接口的 Astra，每页各一次调用，各自最多 24576 输出 tokens，DeepSeek 请求预算 200 秒、Astra 为 118 秒，每个供应商最多四次并发。`matched` 要求题目、可见作答、作答状态和结论一致；错误项还需要一致的正确答案及各自的改正依据。它仍然只是 AI 初判，不能替代老师确认或独立掌握证据。超时不会自动重新发起付费请求；失败可在网页明确重试，未知用量不按零费用记账。
+
+旧的三模型实验路径保留在 `CORRECTION_MODE=multimodel`：DeepSeek 批改、Kimi 独立只读、Astra 处理分歧。需要复现实验时可显式切换，该路径不等同于两模型独立判题。旧单模型配置 `single` 也继续兼容。
+
 ## 开发与部署结构
 
 学生端源码在 `apps/student-web`。构建后由 FastAPI 的 `/learn/` 提供静态资源，API 在同源 `/v1/`；图片通过短期授权票据下载为 Blob，模型密钥不进入构建。网页不加载第三方脚本或外部字体，不缓存私人API到Service Worker。
@@ -70,4 +93,4 @@ npm run build
 
 这是本地联网开发版，不是公网部署或正式学生试点。网页能否正常运行、模型是否返回候选、整页分题与纠错是否准确是不同检查项；切换到网页不会自动修复当前模型的多空合并、读回不一致或坐标偏移问题。质量记录继续以 [VALIDATION](../VALIDATION.md) 为准。
 
-浏览器关闭后不承诺持续执行客户端协调；已受理的服务端任务会继续，重新打开后恢复查询。拍照入口由浏览器和设备提供，Mac文件选择通过不等于安卓/苹果平板实机拍照验收。正式使用前仍需质量评测、身份运营、删除与恢复、坐班联合流程及现场设备验证。
+多模型模式下，整页上传并受理后，识读、核验与候选保存均在服务端任务中继续执行，浏览器重新打开后恢复查询；尚未上传成功的照片仍需客户端恢复。原单模型兼容路径仍有客户端逐题协调。拍照入口由浏览器和设备提供，Mac文件选择通过不等于安卓/苹果平板实机拍照验收。正式使用前仍需质量评测、身份运营、删除与恢复、坐班联合流程及现场设备验证。

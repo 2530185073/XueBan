@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Camera, Check, ChevronDown, CircleAlert, CircleX, Clock3, Lightbulb, LoaderCircle } from 'lucide-react'
 import type { CaseDetail } from '../core/types'
 import type { CurriculumScope } from '../core/learning'
@@ -6,17 +6,21 @@ import type { Workspace } from '../useStudentWorkspace'
 import { effectiveDecision } from '../core'
 import { studentQuestionText, studentResultState, studentResultUncertain, type StudentResultState } from '../presentation'
 import { ResultsSummary } from './ResultsSummary'
+import { QuestionDetail } from './QuestionDetail'
 
 interface RecognitionResultsProps {
   rows: CaseDetail[]
   workspace: Workspace
   onNext: () => void
+  selectedCaseId: string | null
+  onSelect: (row: CaseDetail) => void
+  onCorrection: (row: CaseDetail, camera: boolean) => void
   onSelectSubject: (row: CaseDetail, subject: string) => void
 }
 
 const stateLabels: Record<StudentResultState, string> = {
-  correct: '正确',
-  incorrect: '错误',
+  correct: 'AI 初判正确',
+  incorrect: '需要订正',
   uncertain: '待确认',
   processing: '处理中',
   unprocessed: '尚未检查',
@@ -44,9 +48,10 @@ function ResultIcon({ state }: { state: StudentResultState }) {
   return <CircleAlert size={17} strokeWidth={2.2} />
 }
 
-export function QuestionCard({ row, index, open, onToggle, subjects = [], onSelectSubject = () => {} }: { row: CaseDetail; index: number; open: boolean; onToggle: () => void; subjects?: CurriculumScope[]; onSelectSubject?: (subject: string) => void }) {
+export function QuestionCard({ row, index, open, onToggle, subjects = [], onSelectSubject = () => {}, workspace, onCorrection, onContinue }: { row: CaseDetail; index: number; open: boolean; onToggle: () => void; subjects?: CurriculumScope[]; onSelectSubject?: (subject: string) => void; workspace?: Workspace; onCorrection?: (camera: boolean) => void; onContinue?: () => void }) {
   const state = studentResultState(row)
   const decision = effectiveDecision(row)
+  const usable = decision && decision.validity !== 'needs_review' && decision.verdict !== 'unable_to_judge'
   const firstUncertainty = decision?.uncertainties?.[0]
   const controlledServiceMessage = firstUncertainty && controlledServiceUncertaintyMessages.has(firstUncertainty) ? firstUncertainty : undefined
   const uncertain = studentResultUncertain(row)
@@ -62,7 +67,7 @@ export function QuestionCard({ row, index, open, onToggle, subjects = [], onSele
     <button className="recognition-card-head" type="button" aria-expanded={open} onClick={onToggle}>
       <span className="recognition-index">{index + 1}</span>
       <span className="recognition-card-title">{stemText || '题干待核实'}</span>
-      <span className={`recognition-status ${state}`}>{uncertain && <sup className="result-star" aria-label="AI识别不确定">*</sup>}<ResultIcon state={state} />{stateLabels[state]}</span>
+      <span className={`recognition-status ${state}`}>{uncertain && <sup className="result-star" aria-label="AI识别不确定">*</sup>}<ResultIcon state={state} />{state === 'correct' && decision?.origin === 'staff' && decision.validity === 'confirmed' ? '老师确认正确' : stateLabels[state]}</span>
       <ChevronDown className="recognition-chevron" size={19} aria-hidden="true" />
     </button>
     {open && <div className="recognition-card-body">
@@ -71,7 +76,7 @@ export function QuestionCard({ row, index, open, onToggle, subjects = [], onSele
         <p>{stemText || '题干暂未读清。'}</p>
         {!!row.question.blank_count && <span className="blank-note">填空题 · {row.question.blank_count} 个空</span>}
       </div>
-      {decision?.answer_checks?.length ? <div className="recognition-answer-slots" aria-label="逐空判定">
+      {usable && decision.answer_checks?.length ? <div className="recognition-answer-slots" aria-label="逐空判定">
         {decision.answer_checks.map(part => <div key={part.index} className={`recognition-answer ${part.verdict === 'correct' ? 'correct' : part.verdict === 'unable_to_judge' ? 'uncertain' : 'incorrect'}`}>
           <span className="recognition-label">第{part.index}{row.question.blank_count ? '空' : '项'} · {part.prompt}</span>
           <p>{part.student_answer || '未作答'} <span className="slot-verdict">{part.verdict === 'correct' ? '✓ 正确' : part.verdict === 'unable_to_judge' ? '待核对' : '✕ 错误'}</span></p>
@@ -88,26 +93,29 @@ export function QuestionCard({ row, index, open, onToggle, subjects = [], onSele
       <div className="recognition-learning">
         {!row.question.subject && subjects.length > 0 && <div className="recognition-subject-picker">
           <span className="recognition-label">无法确定学科</span>
-          <div><select aria-label="选择题目学科" defaultValue="" onChange={event => { if (event.target.value) onSelectSubject(event.target.value) }}>
+          <div><select aria-label="选择题目学科" disabled={!!workspace?.busy} defaultValue="" onChange={event => { if (event.target.value) onSelectSubject(event.target.value) }}>
             <option value="">请选择本题学科</option>
             {subjects.map(subject => <option key={subject.subject} value={subject.subject}>{subject.subject} · {subject.publisher_name}</option>)}
           </select><small>仅显示当前年级已配置且官方目录匹配的最新版教材。</small></div>
         </div>}
         <div className="recognition-learning-row"><span>知识点</span><div className="knowledge-tags">{points.length ? points.map(point => <span key={point}>{point}</span>) : <em>暂未识别</em>}</div></div>
-        {method && decision && ['incorrect', 'partially_correct', 'unanswered'].includes(decision.verdict) && <div className="recognition-learning-row correction-method"><span><Lightbulb size={15} />改正方法</span><p>{method}</p></div>}
+        {method && usable && decision && ['incorrect', 'partially_correct', 'unanswered'].includes(decision.verdict) && <div className="recognition-learning-row correction-method"><span><Lightbulb size={15} />改正方法</span><p>{method}</p></div>}
       </div>
       {uncertainties.length > 0 && <p className="recognition-uncertainty">{controlledServiceMessage ?? '* AI 对这道题的识别或判断存在不确定，请结合原图核对。'}</p>}
+      {workspace && onCorrection && <QuestionDetail row={row} workspace={workspace} embedded onCorrection={() => onCorrection(true)} onUpload={() => onCorrection(false)} onContinue={onContinue} />}
     </div>}
   </article>
 }
 
-export function RecognitionResults({ rows, workspace, onNext, onSelectSubject }: RecognitionResultsProps) {
-  const [openId, setOpenId] = useState<string | null>(null)
+export function RecognitionResults({ rows, workspace, onNext, onSelectSubject, selectedCaseId, onSelect, onCorrection }: RecognitionResultsProps) {
+  const [openId, setOpenId] = useState<string | null>(selectedCaseId)
+  useEffect(() => { setOpenId(selectedCaseId) }, [selectedCaseId])
   const subjects = workspace.studentCurriculum?.subjects.filter(subject => subject.catalog_status === 'available') ?? []
+  const select = (row: CaseDetail) => { setOpenId(row.case.id); onSelect(row) }
   return <div className="recognition-results">
     <ResultsSummary rows={rows} detail={null} compact />
-    <p className="recognition-legend">按照片中的位置排列，序号连续显示。点击题目查看作答、正确答案、知识点和改正方法，正确/错误右上角的 * 表示 AI 识别存在不确定。</p>
-    <div className="recognition-card-list" aria-label="本次识别的题目">{rows.map((row, index) => <QuestionCard key={row.case.id} row={row} index={index} subjects={subjects} onSelectSubject={subject => onSelectSubject(row, subject)} open={openId === row.case.id} onToggle={() => setOpenId(current => current === row.case.id ? null : row.case.id)} />)}</div>
-    <div className="next-capture-wrap"><button className="button primary next-capture" type="button" disabled={!!workspace.busy} onClick={onNext}><Camera size={18} />拍下一题</button></div>
+    <p className="recognition-legend">点击题目，对照原图核对作答。AI 初判带 * 时仍有不确定之处；你可以先订正清楚的题，原作答会保留。</p>
+    <div className="recognition-card-list" aria-label="本次识别的题目">{rows.map((row, index) => <QuestionCard key={row.case.id} row={row} index={index} workspace={workspace} subjects={subjects} onSelectSubject={subject => onSelectSubject(row, subject)} open={openId === row.case.id} onToggle={() => { onSelect(row); setOpenId(openId === row.case.id ? null : row.case.id) }} onCorrection={camera => onCorrection(row, camera)} onContinue={rows.length > 1 ? () => select(rows[(index + 1) % rows.length]) : undefined} />)}</div>
+    <div className="next-capture-wrap"><button className="button primary next-capture" type="button" disabled={!!workspace.busy} onClick={onNext}><Camera size={18} />拍下一份作业</button></div>
   </div>
 }

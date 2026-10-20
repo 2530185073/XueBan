@@ -1,8 +1,8 @@
-"""Model-proposed question-to-knowledge links. Candidates only; staff confirm.
+"""Versioned knowledge links from safe AI matches and staff-reviewed proposals.
 
-The model chooses from the published concept list (an enum in the output
-schema), so it cannot invent a knowledge ID. Question text is user data and is
-never placed in the instructions.
+Automatic links require a reviewed curriculum scope and an unambiguous AI
+observation. The separate suggestion job chooses from a published enum and
+still creates candidates. Question text is user data, never instructions.
 """
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from .correction_models import Entity
 from .learning_models import KnowledgeNode, LearningOutbox, QuestionKnowledgeLink, StudentLearningProfile
 from .learning_projection import enqueue, new_id, published_graph, register_job_handler, register_projection_followup
 from .models import Homework
+from .learning_rules import model_decision_usable
 from .curriculum_catalog import (canonical_subject, graph_is_latest_reviewed, node_matches_scope,
                                  scope_for_subject, scope_payload)
 from .providers.prompts import Role
@@ -83,10 +84,17 @@ def auto_confirm_model_links(session, tenant_id: str, student_id: str) -> int:
         if (document.get("lifecycle", "active") != "active"
                 or decision.get("origin") != "model"
                 or decision.get("validity") != "candidate"
-                or decision.get("verdict") not in ("incorrect", "partially_correct")):
+                or decision.get("verdict") not in ("incorrect", "partially_correct")
+                or not model_decision_usable(decision)):
             continue
         question = session.get(Entity, document.get("question_id"))
         if question is None:
+            continue
+        attempt = session.get(Entity, document.get("current_attempt_id"))
+        if (attempt is None or attempt.document.get("recognition_status") != "ready"
+                or attempt.document.get("answer_status") == "unclear"
+                or attempt.document.get("recognition_uncertainties")
+                or question.document.get("recognition_uncertainties")):
             continue
         homework = session.get(Homework, case.homework_id)
         curriculum = homework.curriculum if homework and isinstance(homework.curriculum, dict) else {}

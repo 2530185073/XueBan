@@ -246,6 +246,10 @@ def _usage(value: object) -> Usage | None:
 
 
 class ArkClient:
+    # Keep the legacy adapter's budget unchanged. Explicit multimodel subclasses
+    # may opt into a larger output budget for dense whole-page work.
+    MAX_OUTPUT_TOKENS = 16384
+
     def __init__(self, settings: ArkSettings, *, transport: httpx.BaseTransport | None = None, sleep: Callable[[float], None] = time.sleep):
         self.settings = settings
         self._sleep = sleep
@@ -272,7 +276,7 @@ class ArkClient:
                 raise ValueError()
             if not isinstance(cfg.model, str) or not _SAFE_TOKEN.fullmatch(cfg.model):
                 raise ValueError()
-            for value, low, high in ((cfg.max_concurrency, 1, 16), (cfg.max_attempts, 1, 3), (cfg.max_tokens, 1, 16384), (cfg.max_response_bytes, 256, 4_194_304)):
+            for value, low, high in ((cfg.max_concurrency, 1, 16), (cfg.max_attempts, 1, 3), (cfg.max_tokens, 1, self.MAX_OUTPUT_TOKENS), (cfg.max_response_bytes, 256, 4_194_304)):
                 if type(value) is not int or not low <= value <= high:
                     raise ValueError()
             for value, ceiling in ((cfg.timeout_seconds, 240), (cfg.total_timeout_seconds, 240),
@@ -317,7 +321,7 @@ class ArkClient:
             raise ProviderError("invalid_input")
         thinking = self.settings.thinking if thinking is None else thinking
         max_tokens = self.settings.max_tokens if max_tokens is None else max_tokens
-        if type(thinking) is not bool or type(max_tokens) is not int or not 1 <= max_tokens <= 16384:
+        if type(thinking) is not bool or type(max_tokens) is not int or not 1 <= max_tokens <= self.MAX_OUTPUT_TOKENS:
             raise ProviderError("invalid_input")
         try:
             text.encode("utf-8")

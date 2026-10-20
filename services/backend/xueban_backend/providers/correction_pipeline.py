@@ -559,6 +559,12 @@ class CorrectionPipeline:
     def from_env(cls, environ: Mapping[str, str] | None = None):
         """Read only explicitly named environment values; never open .env files."""
         env = os.environ if environ is None else environ
+        if env.get("CORRECTION_MODE", "single") == "two_model":
+            from .two_model import TwoModelWholePagePipeline
+            return TwoModelWholePagePipeline.from_env(env)
+        if env.get("CORRECTION_MODE", "single") == "multimodel":
+            from .whole_page import WholePageCorrectionPipeline
+            return WholePageCorrectionPipeline.from_env(env)
         settings = ArkSettings(
             base_url=env.get("ARK_BASE_URL", ""), api_key=env.get("ARK_API_KEY", ""),
             model=env.get("ARK_MODEL", MODEL_ID), max_attempts=1,
@@ -997,6 +1003,11 @@ class CorrectionPipeline:
                                     self._merge_metadata(*prior_metadata, result.metadata),
                                     prompt_version=result.prompt_version)
         data = result.data
+        dual_correct = data.pop("_dual_correct", False)
+        if self.fallback_client is not None and data["verdict"] == "correct" and not dual_correct:
+            data.update(verdict="unable_to_judge", validity="needs_review", reason_code="verification_conflict")
+            data["uncertainties"] = list(dict.fromkeys([*data.get("uncertainties", []),
+                "尚未取得两份有效且一致的正确结论，本题暂待核对。"]))[:20]
         if self.fallback_client is not None and data["verdict"] == "correct" and data.get("uncertainties"):
             data.update(verdict="unable_to_judge", validity="needs_review",
                         reason_code="verification_conflict")
@@ -1025,7 +1036,10 @@ class CorrectionPipeline:
         local_images = {asset_id: images[asset_id] for asset_id in relevant_ids}
         diagram = question.get("diagram")
         needs_diagram = self._needs_diagram(question)
+        source_uncertainties = list(dict.fromkeys([
+            *question.get("recognition_uncertainties", []), *attempt.get("recognition_uncertainties", [])]))[:20]
         payload = {"question_label": question.get("label"),
+                   "recognition_uncertainties": source_uncertainties,
                    "question_content": {"question_type": question.get("question_type", "unknown"),
                                         "options": question.get("options", []),
                                         "blank_count": question.get("blank_count", 0)},
@@ -1127,6 +1141,8 @@ class CorrectionPipeline:
         ) if curriculum_context is not None else ""
         result = self._recorded_call(metadata, role, local_images,
             "这是第二轮判题。第一轮已经完成题目和作答识别，对于无图题 task_input.provisional_transcription 是本轮唯一的题干和学生作答文本；"
+            "recognition_uncertainties 是尚未消解的原始识读疑点；不得忽略、猜测补全或把它当作已确认答案。"
+            "question_asset_ids仅表示题干来源；本次作答仅属于attempt_asset_ids，不得把旧图答案混为本次作答。"
             "直接使用这份识别结果进行判题，不要重新抄写题干、选项或手写答案，不要因为原图回读差异覆盖第一轮结果。"
             "question_content.options 已包含选择题选项；原图只用于补充图形、表格、版式或第一轮文本中明确缺失的必要条件。"
             "如果第一轮文本已经完整，不要再次从图片识别文字。不要输出 readback 或 recognition_consistent 字段。"
@@ -1165,6 +1181,7 @@ class CorrectionPipeline:
                             or (primary_verdict in {"incorrect", "partially_correct"}
                                 and not (result.data.get("correct_answer") and result.data.get("correction_method")))
                             or needs_diagram and result.data.get("diagram_verified") is not True)
+        dual_correct = False
         model_conflict = False
         if (forced_client is None and self.fallback_client is not None
                 and needs_escalation and not already_escalated):
@@ -1183,6 +1200,7 @@ class CorrectionPipeline:
                 "answer_checks必须完整且student_answer逐字复制answer_slots中的answer_text。"
                 + learning_instructions + curriculum_instructions + visual_instructions,
                 schema, data=fallback_payload, thinking=True, client=self.fallback_client)
+            dual_correct = primary_verdict == result.data["verdict"] == "correct"
             model_conflict = ((primary_verdict == "correct" and result.data["verdict"] in {"incorrect", "partially_correct", "unanswered"})
                 or (result.data["verdict"] == "correct" and primary_verdict in {"incorrect", "partially_correct", "unanswered"}))
         raw = result.data
@@ -1224,7 +1242,7 @@ class CorrectionPipeline:
         if raw.get('diagram_verified') is True:
             raw = deepcopy(raw)
             _include_visual_solution(raw)
-        uncertainties = list(raw["uncertainties"])
+        uncertainties = list(dict.fromkeys([*source_uncertainties, *raw["uncertainties"]]))
         if model_conflict:
             uncertainties.append("首轮与独立复核的结论不一致，请核对原题后重试。")
         verdict, reason = raw["verdict"], raw["reason_code"]
@@ -1262,6 +1280,10 @@ class CorrectionPipeline:
             verdict, reason = "unable_to_judge", "recognition_conflict"
         elif observation["answer_status"] == "blank" and verdict != "unanswered":
             verdict, reason = "unable_to_judge", "recognition_conflict"
+        if source_uncertainties or observation["answer_status"] == "unclear":
+            verdict, reason = "unable_to_judge", "recognition_conflict"
+            if observation["answer_status"] == "unclear":
+                uncertainties.append("当前作答字迹尚未读清，不能依据候选文字判定对错。")
         if verdict == "unable_to_judge" and reason is None:
             reason = "needs_staff"
         if verdict == "correct":
@@ -1300,9 +1322,11 @@ class CorrectionPipeline:
         # the saved question and answer text are usable. The uncertainty remains
         # in the candidate for the student-facing star; this flag only prevents
         # an otherwise valid second-pass verdict from being discarded wholesale.
+        data["_dual_correct"] = dual_correct
         data["evidence_verified"] = bool(
             normalize_field_for_comparison(observation["stem_text"], "stem_text")
-            and observation["answer_status"] in {"present", "unclear"}
+            and observation["answer_status"] == "present"
+            and not uncertainties
             and normalize_field_for_comparison(observation["answer_text"], "answer_text")
             and verdict != "unable_to_judge"
         )

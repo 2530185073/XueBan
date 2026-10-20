@@ -8,7 +8,7 @@ Evidence rules (blueprint 02 section 4/5):
   The student-facing mistake review can start from the AI result; unresolved
   cases and decisions withdrawn by a later review, question or answer revision
   never do.
-* A staff decision made stale only because the learner submitted a correction
+* A usable decision made stale only because the learner submitted a correction
   remains a true fact about that earlier attempt.
 * A correction is never independent evidence. A first attempt is independent
   only when staff confirmed it was done without hints, adult or peer help.
@@ -24,7 +24,7 @@ import hashlib
 import json
 from zoneinfo import ZoneInfo
 
-RULE_VERSION = "r1.2-custody"
+RULE_VERSION = "r1.3-evidence-source"
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 STABLE_MIN_SPAN = timedelta(hours=24)
 DELAYED_AFTER = timedelta(days=7)
@@ -43,26 +43,40 @@ def _key(payload: dict) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def authoritative_decision(attempt_id: str, decisions: list[dict], stale_reasons: dict[str, str]) -> dict | None:
-    """Newest usable decision for this attempt, if it still stands.
+def model_decision_usable(decision: dict) -> bool:
+    """Keep provisional AI evidence, but never promote unresolved observations.
 
-    AI candidates are deliberately accepted here for the student learning
-    surface. An ``unable_to_judge`` result is filtered later by ``RESULT``;
-    therefore the model is never turned into evidence when it could not make a
-    determination.
+    Older single-model decisions have no verification field. They remain
+    explicitly model-sourced evidence; when independent verification is
+    present, it must have completed without a remaining disagreement.
     """
-    usable = [d for d in decisions
-              if d["input_versions"]["attempt_id"] == attempt_id
-              and ((d["origin"] == "staff" and d["validity"] in {"confirmed", "stale"})
-                   or (d["origin"] == "model" and d["validity"] == "candidate"))]
-    if not usable:
+    if decision.get("uncertainties") or decision.get("recognition_uncertainties"):
+        return False
+    if decision.get("reason_code") in {"unclear_image", "recognition_conflict", "verification_conflict", "needs_staff"}:
+        return False
+    verification = decision.get("verification")
+    if verification is not None:
+        if not isinstance(verification, dict) or verification.get("status") not in {"matched", "reviewed"}:
+            return False
+        if verification.get("reason_codes") or verification.get("independent_readback") is not True:
+            return False
+    return True
+
+
+def authoritative_decision(attempt_id: str, decisions: list[dict], stale_reasons: dict[str, str]) -> dict | None:
+    """Keep the latest decision only, including history superseded by a new attempt."""
+    candidates = [d for d in decisions if d["input_versions"]["attempt_id"] == attempt_id
+                  and d["origin"] in {"staff", "model"}]
+    if not candidates:
         return None
-    latest = max(usable, key=lambda d: (d["created_at"], d["id"]))
-    if latest["validity"] == "confirmed":
+    latest = max(candidates, key=lambda d: (d["created_at"], d["id"]))
+    if latest["origin"] == "model" and not model_decision_usable(latest):
+        return None
+    if latest["origin"] == "staff" and latest["validity"] == "confirmed":
         return latest
     if latest["validity"] == "stale" and stale_reasons.get(latest.get("invalidated_by_event_id")) == "new_attempt":
         return latest
-    return latest if latest["origin"] == "model" else None
+    return latest if latest["origin"] == "model" and latest["validity"] == "candidate" else None
 
 
 def hints_seen_before(attempt: dict, hints: list[dict]) -> list[dict]:
@@ -113,6 +127,16 @@ def derive_evidence(*, cases, attempts, decisions, hints, questions, links, cond
             decision = authoritative_decision(attempt_id, decisions, stale_reasons)
             if decision is None:
                 continue
+            versions = decision["input_versions"]
+            if (versions.get("question_revision") != question.get("revision")
+                    or versions.get("attempt_recognition_revision") != attempt.get("recognition_revision")):
+                continue
+            if decision["origin"] == "model" and (
+                    attempt.get("recognition_status") != "ready"
+                    or attempt.get("answer_status") == "unclear"
+                    or attempt.get("recognition_uncertainties")
+                    or question.get("recognition_uncertainties")):
+                continue
             result = RESULT.get(decision["verdict"])
             if result is None:
                 continue
@@ -147,6 +171,9 @@ def compute_state(knowledge_id: str, evidence: list[dict], diagnoses: list[dict]
     """Rule R1.1: explainable status, never a percentage score."""
     rows = sorted(evidence, key=lambda e: (e["occurred_at"], e["id"]))
     scorable = [e for e in rows if e["result"] != "unscorable"]
+    model_count = sum(e.get("source_role") == "model" for e in rows)
+    staff_count = len(rows) - model_count
+    source = "mixed" if model_count and staff_count else "model" if model_count else "staff" if staff_count else "none"
     errors = [e for e in scorable if e["result"] in WRONG]
     last_error = max((parse(e["occurred_at"]) for e in errors), default=None)
     independent = [e for e in scorable if e["independent"]]
@@ -186,6 +213,8 @@ def compute_state(knowledge_id: str, evidence: list[dict], diagnoses: list[dict]
         sufficiency = "insufficient"
     explanation = (f"来自 {len(independent_dates)} 个日期、{len({e['item_family_id'] for e in independent})} 道题的独立作答"
                    if independent else ("只有作业记录，独立完成情况未核实" if scorable else "暂无可评分的已核实作答"))
+    if model_count:
+        explanation += f"；含 {model_count} 条 AI 初判，{staff_count} 条老师核实记录"
     open_questions = []
     if unverified:
         open_questions.append({"code": "independence_unverified", "count": unverified})
@@ -194,6 +223,7 @@ def compute_state(knowledge_id: str, evidence: list[dict], diagnoses: list[dict]
     last_success = max((parse(e["occurred_at"]) for e in independent if e["result"] == "correct"), default=None)
     return {
         "knowledge_id": knowledge_id, "learning_status": status, "reason_codes": reasons,
+        "assessment_source": source, "model_evidence_count": model_count, "staff_verified_evidence_count": staff_count,
         "evidence_sufficiency": sufficiency, "sufficiency_explanation": explanation,
         "valid_evidence_count": len(rows), "scorable_evidence_count": len(scorable),
         "independent_evidence_count": len(independent), "independent_dates_count": len(independent_dates),

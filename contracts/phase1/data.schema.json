@@ -7,14 +7,62 @@
     "AnswerCheck": {
       "type": "object",
       "properties": {
-        "index": {"type": "integer", "minimum": 1, "maximum": 32},
-        "prompt": {"type": "string", "minLength": 1, "maxLength": 600},
-        "student_answer": {"anyOf": [{"type": "string", "minLength": 1, "maxLength": 1200}, {"type": "null"}]},
-        "verdict": {"enum": ["correct", "incorrect", "unanswered", "unable_to_judge"]},
-        "correct_answer": {"anyOf": [{"type": "string", "minLength": 1, "maxLength": 1200}, {"type": "null"}]},
-        "explanation": {"type": "string", "minLength": 1, "maxLength": 600}
+        "index": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600
+        },
+        "student_answer": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verdict": {
+          "enum": [
+            "correct",
+            "incorrect",
+            "unanswered",
+            "unable_to_judge"
+          ]
+        },
+        "correct_answer": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "explanation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600
+        }
       },
-      "required": ["index", "prompt", "student_answer", "verdict", "correct_answer", "explanation"],
+      "required": [
+        "index",
+        "prompt",
+        "student_answer",
+        "verdict",
+        "correct_answer",
+        "explanation"
+      ],
       "additionalProperties": false
     },
     "Scope": {
@@ -45,14 +93,34 @@
       "properties": {
         "stage": {
           "anyOf": [
-            {"enum": ["primary", "junior_middle"]},
-            {"type": "null"}
+            {
+              "enum": [
+                "primary",
+                "junior_middle"
+              ]
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "publisher_code": {
           "anyOf": [
-            {"enum": ["PEP", "BNUP", "PM", "PFA", "CSP", "ECSP", "JSFST", "SSTP"]},
-            {"type": "null"}
+            {
+              "enum": [
+                "PEP",
+                "BNUP",
+                "PM",
+                "PFA",
+                "CSP",
+                "ECSP",
+                "JSFST",
+                "SSTP"
+              ]
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "grade": {
@@ -131,7 +199,9 @@
                 ]
               }
             },
-            "required": ["grade"]
+            "required": [
+              "grade"
+            ]
           },
           "then": {
             "properties": {
@@ -152,7 +222,9 @@
                 ]
               }
             },
-            "required": ["grade"]
+            "required": [
+              "grade"
+            ]
           },
           "then": {
             "properties": {
@@ -998,7 +1070,9 @@
         },
         "answer_checks": {
           "type": "array",
-          "items": {"$ref": "data.schema.json#/$defs/AnswerCheck"},
+          "items": {
+            "$ref": "data.schema.json#/$defs/AnswerCheck"
+          },
           "maxItems": 32
         },
         "correction_method": {
@@ -1112,6 +1186,44 @@
         "created_at": {
           "type": "string",
           "format": "date-time"
+        },
+        "verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "enum": [
+                "single",
+                "multimodel",
+                "two_model"
+              ]
+            },
+            "status": {
+              "enum": [
+                "matched",
+                "reviewed",
+                "conflict",
+                "degraded"
+              ]
+            },
+            "independent_readback": {
+              "type": "boolean"
+            },
+            "reason_codes": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "string",
+                "maxLength": 128
+              }
+            }
+          },
+          "required": [
+            "mode",
+            "status",
+            "independent_readback",
+            "reason_codes"
+          ]
         }
       },
       "required": [

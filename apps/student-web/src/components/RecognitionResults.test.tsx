@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { CaseDetail } from '../core/types'
+import type { Workspace } from '../useStudentWorkspace'
 import { QuestionCard } from './RecognitionResults'
 
 const row = (): CaseDetail => ({
@@ -137,5 +138,29 @@ describe('controlled review uncertainty feedback', () => {
 
     expect(html).toContain('暂未生成正确答案，请重新识别或请老师核对。')
     expect(html).not.toContain('参考答案')
+  })
+})
+
+
+describe('correction controls in each result card', () => {
+  const workspace = { busy: '', online: true, hint: null, client: {}, recordVersion: 0 } as unknown as Workspace
+  it('keeps photo correction, album upload, graduated hints and teacher feedback reachable', () => {
+    const html = renderToStaticMarkup(<QuestionCard row={row()} index={0} open onToggle={() => {}} workspace={workspace} onCorrection={() => {}} />)
+    for (const text of ['我已在纸上订正', '从相册选择订正照片', '给我一点方向', '看看关键一步', '文字和照片不一样', '请老师帮忙']) expect(html).toContain(text)
+    expect(html).toContain('可以拍整页')
+    expect(html).toContain('订正记录')
+  })
+  it('never presents first-pass per-blank answers as settled after the overall judgment is unresolved', () => {
+    const value = row(); value.case.current_decision!.validity = 'needs_review'; value.case.current_decision!.verdict = 'unable_to_judge'
+    const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} workspace={workspace} onCorrection={() => {}} />)
+    expect(html).toContain('待确认'); expect(html).toContain('我的作答')
+    expect(html).not.toContain('aria-label="逐空判定"'); expect(html).not.toContain('应填：'); expect(html).not.toContain('正确答案</span>')
+    expect(html).toContain('我已在纸上订正')
+  })
+  it('offers a deliberate retry for a failed check while keeping the answer unjudged', () => {
+    const value = row(); value.case.current_decision = null; value.checkJob = { status: 'failed' } as CaseDetail['checkJob']
+    const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} workspace={workspace} onCorrection={() => {}} />)
+    expect(html).toContain('服务失败'); expect(html).toContain('重新检查这道题')
+    expect(html).not.toContain('正确答案</span>')
   })
 })

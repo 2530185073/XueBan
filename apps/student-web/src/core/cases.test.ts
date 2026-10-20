@@ -26,6 +26,11 @@ const row = (id: string, assetId: string, y: number, x = 0): CaseDetail => ({
 })
 
 describe('orderRowsByPhoto', () => {
+  it('keeps the provider creation order when only some questions have coordinates', () => {
+    const first = row('first', 'page_1', 0), second = row('second', 'page_1', 50)
+    first.question.regions = []
+    expect(orderRowsByPhoto([first, second], ['page_1']).map(item => item.case.id)).toEqual(['first', 'second'])
+  })
   it('preserves server reading order when whole-page questions share the same source region', () => {
     const rows = [row('z9', 'page_1', 0), row('a1', 'page_1', 0), row('k3', 'page_1', 0)]
     rows.forEach((item, index) => { item.question.label = ['1', '三', '1'][index] })

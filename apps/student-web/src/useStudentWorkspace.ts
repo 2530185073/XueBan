@@ -6,7 +6,7 @@ import type { StudentCurriculum } from './core/learning'
 import type { CurriculumContext } from './core/student'
 
 const helpDefaults: Record<CreateHelp['kind'], string> = { question: '我需要老师帮我看看这道题。', recognition: '识别文字与照片不一致，请老师核对。', judgment: '这道题的判断我看不懂，请老师看看。', appeal: '我觉得这道题的判断可能不对，请老师重新看看。' }
-const helpNotices: Record<CreateHelp['kind'], string> = { question: '求助已提交，等坐班老师过来一起看。', recognition: '已请老师核对识别结果。', judgment: '已请老师看看这次判断。', appeal: '重查申请已提交。老师处理前，当前结果保持不变。' }
+const helpNotices: Record<CreateHelp['kind'], string> = { question: '求助已提交，可以先继续其他题。', recognition: '已反馈文字与照片不一致，老师会帮你核对。可以先继续其他题。', judgment: '已请老师看看这次判断，可以先继续其他题。', appeal: '重查申请已提交。老师处理前，当前结果保持不变，可以先继续其他题。' }
 
 export function useStudentWorkspace() {
   const [client] = useState(() => {
@@ -109,8 +109,10 @@ export function useStudentWorkspace() {
       autoPollTimer.current = setTimeout(() => { autoPollTimer.current = null; void poll() }, autoPollRunning.current ? 250 : 1200)
     }
     const poll = async () => {
-      if (!live || autoPollRunning.current || activeDraft.current !== id || !identity || !studentId) return
-      if (busyRef.current) { schedule(); return }
+      if (!live || activeDraft.current !== id || !identity || !studentId) return
+      // Switching drafts while an old poll finishes must not consume the new
+      // draft's only timer. Keep observing it after the in-flight run exits.
+      if (autoPollRunning.current || busyRef.current) { schedule(); return }
       autoPollRunning.current = true
       try {
         const next = await client.runDraft(id)
@@ -157,6 +159,11 @@ export function useStudentWorkspace() {
     /** A correction takes exactly one photo; homework takes one or more pages. */
     importPhotos: (files: File[], correction?: CorrectionTarget, curriculum?: CurriculumContext | null) => action(files.length > 1 ? `正在准备 ${files.length} 张照片` : '正在准备照片', async () => { const next = correction ? await client.createCorrection(correction.caseId, files[0], 'unknown', correction.parentAttemptId) : await client.createDraft(files, '学校作业', curriculum ?? null); show(next); await sync() }),
     setStudentGrade: (grade: number) => action('正在保存年级', async () => { const next = await client.setStudentGrade(grade); setStudentCurriculum(next); setNotice('年级已保存，课程范围按对应教材出版社更新。') }),
+    retryQuestion: (row: CaseDetail) => action('正在重新检查这道题', async () => {
+      if (!draft?.homeworkId) throw new Error('请先打开这份作业再重试。')
+      const next = await client.runDraft(draft.id, { retryFailed: true, forceCheckCaseIds: [row.case.id], forceCheckToken: crypto.randomUUID() })
+      setDraft(next); setDetail(next.detail); setRecordVersion(v => v + 1); await sync()
+    }),
     setQuestionSubject: (row: CaseDetail, subject: string) => action('正在按所选学科重新判题', async () => {
       if (!draft?.homeworkId) throw new Error('当前作业无法重新判题，请刷新后重试。')
       await client.setQuestionSubject(row.question.question_id, row.question.revision, subject)

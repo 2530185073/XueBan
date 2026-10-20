@@ -176,7 +176,7 @@ def test_daily_feedback_is_drafted_the_same_day_and_lists_what_to_correct(flow, 
     assert queued["id"] == draft["id"] and queued["student_name"] and queued["mistake_count"] == 1
     assert draft["id"] not in {r["id"] for r in flow.client.get("/v1/reports").json()["items"]}
     snapshot = draft["snapshot"]
-    assert snapshot["rule_version"] == "daily-r1" and snapshot["unknown_current"] == []
+    assert snapshot["rule_version"] == "daily-r2-evidence-source" and snapshot["unknown_current"] == []
     [mistake] = snapshot["mistakes"]
     assert mistake["case_id"] == case["id"] and mistake["verdict"] == "答错" and mistake["correction"] == "还没订正"
     assert [f["knowledge_id"] for f in snapshot["focus"]] == ["kp-rational-add-sub"]

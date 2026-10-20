@@ -113,3 +113,11 @@ describe('learning client', () => {
     expect((await s.client.activePractice())?.id).toBe('practice_1')
   })
 })
+
+
+it('validates optional model and staff evidence sources without treating missing legacy fields as confirmation', () => {
+  expect(isKnowledgeMap({ ...map, states: [{ ...state, model_evidence_count: 2, staff_verified_evidence_count: 0, assessment_source: 'model' }] })).toBe(true)
+  expect(isKnowledgeMap({ ...map, states: [{ ...state, assessment_source: 'verified_by_ai' }] })).toBe(false)
+  expect(isKnowledgeDetail({ ...detail, evidence: detail.evidence.map(e => ({ ...e, source_role: 'model' })) })).toBe(true)
+  expect(isKnowledgeDetail({ ...detail, evidence: detail.evidence.map(e => ({ ...e, source_role: 'guessed' })) })).toBe(false)
+})

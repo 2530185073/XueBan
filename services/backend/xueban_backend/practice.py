@@ -33,7 +33,8 @@ from .learning_models import (KnowledgeEdge, KnowledgeNode, LearningOutbox, Lear
                               PracticeItem, PracticeResponse, PracticeSession, QuestionKnowledgeLink, StudentKnowledgeState,
                               StudentLearningProfile)
 from .correction_core import remember_idempotent, replay_idempotent
-from .learning_mapping import _match_node, auto_confirm_model_links
+from .learning_mapping import _current_links, _match_node, auto_confirm_model_links
+from .learning_rules import model_decision_usable
 from .learning_projection import (OptionalKey, enqueue, fingerprints, new_id, project_student, register_job_handler,
                                    require_published_graph)
 from .learning_reports import SHANGHAI, local_day, register_report_section
@@ -207,6 +208,12 @@ def _variant_error_overview(session, student, gate):
     for case in session.scalars(select(Entity).where(Entity.homework_id.in_(homework_ids), Entity.kind == "case")):
         decision = case.document.get("current_decision") or {}
         verdict = decision.get("verdict")
+        if case.document.get("lifecycle", "active") != "active":
+            continue
+        if (decision.get("validity") not in {"candidate", "confirmed"}
+                or (decision.get("origin") == "model" and not model_decision_usable(decision))):
+            uncertain_count += 1
+            continue
         if verdict == "unable_to_judge":
             uncertain_count += 1
             continue
@@ -218,13 +225,14 @@ def _variant_error_overview(session, student, gate):
         occurred_at = (attempt.document.get("occurred_at") if attempt else None) or (iso(homework.occurred_at) if homework else None)
         labels = [value.strip() for value in decision.get("knowledge_points", [])
                   if isinstance(value, str) and value.strip()]
-        links = list(session.scalars(select(QuestionKnowledgeLink).where(
-            QuestionKnowledgeLink.question_id == case.document.get("question_id"),
-            QuestionKnowledgeLink.status == "confirmed").order_by(
-                QuestionKnowledgeLink.created_at.desc(), QuestionKnowledgeLink.id.desc())))
+        current_links = _current_links(session, case.document.get("question_id"))
+        links = sorted((link for link in current_links.values() if link.status == "confirmed"),
+                       key=lambda link: (link.created_at, link.id), reverse=True)
+        rejected = {link.knowledge_id for link in current_links.values() if link.status == "rejected"}
         primary_link = next((link for link in links if link.role == "primary" and link.knowledge_id in nodes), None)
         node = nodes.get(primary_link.knowledge_id) if primary_link else next(
-            (candidate for label in labels if (candidate := _match_node(label, node_list))), None)
+            (candidate for label in labels if (candidate := _match_node(label, node_list))
+             and candidate.id not in rejected), None)
         topic = labels[0] if labels else ((question.document.get("question_type") or "未标注题型") if question else "未标注题型")
         if node is None:
             key = "auto-topic-" + hashlib.sha256(topic.encode("utf-8")).hexdigest()[:16]
@@ -632,7 +640,12 @@ def install_practice(app, engine, cfg, database_session, current_actor):
         if payload.purpose == "variant":
             if source_case is not None:
                 source_decision = source_case.document.get("current_decision") or {}
-                if source_decision.get("verdict") not in ("incorrect", "partially_correct"):
+                if (source_case.document.get("lifecycle", "active") != "active"
+                        or source_decision.get("validity") not in {"candidate", "confirmed"}
+                        or source_decision.get("verdict") not in ("incorrect", "partially_correct")
+                        or (source_decision.get("origin") == "model" and not model_decision_usable(source_decision))
+                        or any(link.knowledge_id == payload.knowledge_id and link.status == "rejected"
+                               for link in _current_links(session, source_case.document["question_id"]).values())):
                     raise Problem(409, "conflict", "practice_not_needed", "这道题当前没有可用于举一反三的错题判定。")
             else:
                 state = _states(session, student_id).get(payload.knowledge_id)

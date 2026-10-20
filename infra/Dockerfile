@@ -26,6 +26,7 @@ WORKDIR /app
 COPY services/backend/requirements.txt services/backend/requirements.txt
 RUN pip install -r services/backend/requirements.txt
 COPY contracts contracts
+COPY curriculum curriculum
 COPY services/backend services/backend
 COPY --from=student-web /src/apps/student-web/dist apps/student-web/dist
 COPY --from=staff-web /src/apps/staff-web/dist apps/staff-web/dist

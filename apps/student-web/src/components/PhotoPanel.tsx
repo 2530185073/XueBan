@@ -45,14 +45,15 @@ function useHomeworkPages(workspace: Workspace, detail: HomeworkDetail | null) {
   return pages && pages.key === key ? pages.ids : null
 }
 
-export function PhotoPanel({ workspace, row, draft, detail, onReplacePage }: { workspace: Workspace; row?: CaseDetail; draft: DraftView | null; detail: HomeworkDetail | null; onReplacePage?: (pageId: string) => void }) {
+export function PhotoPanel({ workspace, row, draft, detail, onReplacePage, focusVersion = 0 }: { workspace: Workspace; focusVersion?: number; row?: CaseDetail; draft: DraftView | null; detail: HomeworkDetail | null; onReplacePage?: (pageId: string) => void }) {
   const hasLocalPages = !!draft && !draft.correction && draft.pages.length > 0
   const serverPages = useHomeworkPages(workspace, hasLocalPages ? null : detail)
   const { sources, pageCount } = pageSources(draft, serverPages, row)
   const [currentKey, setCurrentKey] = useState<string | null>(null)
   const focus = row?.attempt.asset_ids[0]
-  // Opening a question shows the page its answer is on (or its correction photo).
-  useEffect(() => { setCurrentKey(focus ?? null) }, [focus, row?.case.id])
+  // Opening a question shows its answer photo, including when the same card
+  // is selected again after manually browsing to another page.
+  useEffect(() => { setCurrentKey(focus ?? null) }, [focus, row?.case.id, focusVersion])
   const found = sources.findIndex(s => s.key === currentKey || !!currentKey && s.assetId === currentKey), index = found >= 0 ? found : 0, current = sources[index]
   const [blob, setBlob] = useState<Blob | null>(null)
   const url = useObjectUrl(workspace.client, blob)
@@ -78,7 +79,7 @@ export function PhotoPanel({ workspace, row, draft, detail, onReplacePage }: { w
   // A region spanning the whole photo only says which page the question is on.
   const regions = row && assetId ? [...row.question.regions, ...row.attempt.answer_regions].filter(region => region.asset_id === assetId && !(region.x === 0 && region.y === 0 && region.width >= size.width && region.height >= size.height)) : []
   const waiting = !hasLocalPages && !!detail && serverPages === null && !sources.length
-  const picture = url ? <div className="photo-image-wrap"><img src={url} alt={`${current?.label ?? '作业照片'}${row ? '，这次作答对应的照片' : ''}`} onLoad={event => setSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} />{size.width > 0 && regions.length > 0 && <svg className="photo-regions" viewBox={`0 0 ${size.width} ${size.height}`} aria-hidden="true">{regions.map((region, i) => <rect key={i} x={region.x} y={region.y} width={region.width} height={region.height} rx="4" />)}</svg>}</div> : null
+  const picture = url ? <div className="photo-image-wrap"><img src={url} alt={`${current?.label ?? '作业照片'}${assetId && row?.attempt.asset_ids.includes(assetId) ? '，这次作答对应的照片' : ''}`} onLoad={event => setSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })} />{size.width > 0 && regions.length > 0 && <svg className="photo-regions" viewBox={`0 0 ${size.width} ${size.height}`} aria-hidden="true">{regions.map((region, i) => <rect key={i} x={region.x} y={region.y} width={region.width} height={region.height} rx="4" />)}</svg>}</div> : null
   const local = current?.localId != null
   const canReplace = local && !current?.uploaded && !!onReplacePage && draft?.stage === 'failed' && !workspace.busy
   return <section className="photo-panel" aria-label="作业原图">

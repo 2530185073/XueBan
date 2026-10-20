@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import shlex
 import signal
@@ -79,7 +80,49 @@ def load(runtime, *, require_model=False):
         env.update(_read_model_environment(Path(config["model_config"])))
         if not env.get("ARK_BASE_URL") or not env.get("ARK_API_KEY"):
             raise ValueError("Model configuration is incomplete")
+        if env.get("CORRECTION_MODE") in {"multimodel", "two_model"}:
+            if config.get("gateway_config"):
+                for line in read_private(Path(config["gateway_config"])).splitlines():
+                    name, separator, value = line.partition("=")
+                    if separator and name in {"ZYAI_BASE_URL", "ZYAI_API_KEY"}:
+                        env[name] = value.strip()
+            if not env.get("ZYAI_BASE_URL") or not env.get("ZYAI_API_KEY"):
+                raise ValueError("Multimodel gateway configuration is incomplete")
     return config, env
+
+
+def configure_models(runtime, *, mode, gateway_config=None, readback_model="kimi-k3", review_model="gpt-6-astra"):
+    """Keep secrets in their existing private file; persist only explicit paths and switches."""
+    config, _ = load(runtime)
+    if mode not in {"single", "multimodel", "two_model"}:
+        raise ValueError("Unknown correction mode")
+    for model in (readback_model, review_model):
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", model):
+            raise ValueError("Invalid model identifier")
+    if gateway_config is not None:
+        path = gateway_config.expanduser().resolve()
+        read_private(path)
+        config["gateway_config"] = str(path)
+    if mode in {"multimodel", "two_model"}:
+        path = config.get("gateway_config")
+        if not path:
+            raise ValueError("An explicit private gateway configuration is required")
+        from scripts.vision_benchmark import read_config
+        read_config(Path(path))
+    config["environment"].update(CORRECTION_MODE=mode, READBACK_MODEL=readback_model, REVIEW_MODEL=review_model)
+    if mode in {"multimodel", "two_model"}:
+        config["environment"]["WORKER_LEASE_SECONDS"] = str(max(600, int(config["environment"].get("WORKER_LEASE_SECONDS", "300"))))
+    temp = runtime / ("runtime-" + secrets.token_hex(8) + ".tmp")
+    try:
+        write_private(temp, json.dumps(config, indent=2))
+        os.replace(temp, runtime / "runtime.json")
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def api_environment(env):
+    """Only the worker needs external model credentials."""
+    return without_model_environment(env)
 
 
 def run(args, *, env=None, log=None):
@@ -209,6 +252,11 @@ def main():
     init.add_argument("--pg-port", type=int, default=55432)
     for command in ("start", "stop", "status", "migrate"):
         commands.add_parser(command)
+    models = commands.add_parser("configure-models")
+    models.add_argument("--mode", choices=("single", "multimodel", "two_model"), required=True)
+    models.add_argument("--gateway-config", type=Path)
+    models.add_argument("--readback-model", default="kimi-k3")
+    models.add_argument("--review-model", default="gpt-6-astra")
     admin = commands.add_parser("admin")
     admin.add_argument("arguments", nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -216,13 +264,18 @@ def main():
     if args.command == "init":
         initialize(args)
         return
+    if args.command == "configure-models":
+        configure_models(runtime, mode=args.mode, gateway_config=args.gateway_config,
+                         readback_model=args.readback_model, review_model=args.review_model)
+        print("Correction configuration saved; restart the worker to apply:", args.mode)
+        return
     config, env = load(runtime, require_model=args.command == "start")
     if args.command in {"start", "migrate", "admin"}:
         start_postgres(runtime, config)
     if args.command in {"start", "migrate"}:
         run([sys.executable, "-m", "alembic", "-c", str(BACKEND / "alembic.ini"), "upgrade", "head"], env=env)
     if args.command == "start":
-        api_env = without_model_environment(env)
+        api_env = api_environment(env)
         spawn(runtime, "api", [sys.executable, "-m", "uvicorn", "xueban_backend.app:create_app", "--factory", "--host",
               config["host"], "--port", str(config["api_port"]), "--no-access-log"], api_env)
         spawn(runtime, "worker", [sys.executable, "-m", "xueban_backend.worker"], env)

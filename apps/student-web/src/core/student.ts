@@ -6,8 +6,9 @@ import { editPhoto, normalizePhoto } from './photo'
 import { applyChange, checkBatch, checkSelection, isIdentity, movePage, pageBudget, removePage, type EditChange, type PageEdit } from './pages'
 import { homeworkPageIds } from './homeworkPages'
 import { valid } from './validation'
-import { bucketOfCase, countBuckets, firstUnresolved, isRetired, orderActiveCases, orderRowsByPhoto, retiredCases } from './cases'
+import { bucketOfCase, countBuckets, firstUnresolved, isRetired, orderActiveCases, orderCasesByCreation, orderRowsByPhoto, retiredCases } from './cases'
 import { ObjectUrls } from './objectUrls'
+import { compareCreated } from './chronology'
 import { isCurriculumCatalog, isKnowledgeDetail, isKnowledgeMap, isStudentCurriculum, isVariantPracticeOverview, isAgentContext, isMemory, isMemoryList, isOptionalActivities, isPracticeAnswer, isPracticeHint, isPracticeSession, isPracticeSessionList, MEMORY_CONTENT_MAX, MEMORY_CONTENT_MIN, PRACTICE_ANSWER_MAX, type AgentContext, type CurriculumCatalog, type ExitReason, type KnowledgeDetail, type KnowledgeMap, type Memory, type MemoryList, type OptionalActivities, type PracticeAnswer, type PracticeHint, type PracticeSession, type StartPractice, type StudentCurriculum, type StudentMemoryCategory, type VariantPracticeOverview } from './learning'
 
 export const remoteDraftId = (id: string) => `remote_${id}`
@@ -17,6 +18,7 @@ const encoded = encodeURIComponent
 const active = (job: Job) => ['queued', 'running', 'retryable_failed'].includes(job.status)
 const terminalFailure = (job: Job) => ['failed', 'superseded', 'cancelled'].includes(job.status)
 const JOB_POLL_ROUNDS = 120
+const latestRecognition = (jobs: Job[]) => jobs.filter(job => job.kind === 'recognize_homework').sort(compareCreated).at(-1)
 const matches = (v: InputVersions, row: CaseDetail) => v.question_id === row.case.question_id && v.question_revision === row.case.current_question_revision && v.attempt_id === row.case.current_attempt_id && v.attempt_recognition_revision === row.attempt.recognition_revision
 export function effectiveDecision(row: CaseDetail) { const d = row.case.current_decision; return !isRetired(row.case) && d && !['stale', 'retracted'].includes(d.validity) && matches(d.input_versions, row) ? d : null }
 /** Requests a student may raise on the current answer; an appeal needs a result to question. */
@@ -41,7 +43,7 @@ export function decisionLabel(row: CaseDetail): string {
     if (row.attempt.recognition_status !== 'ready') return '识别待核实 · 请重拍或请老师看'
     return '等待检查'
   }
-  if (d.validity === 'needs_review' || d.verdict === 'unable_to_judge') return '暂时看不准 · 请老师一起看'
+  if (d.validity === 'needs_review' || d.verdict === 'unable_to_judge') return '暂时看不准 · 可以先看其他题'
   const text = { correct: '正确', incorrect: '需要订正', partially_correct: '部分需要订正', unanswered: '尚未作答' }[d.verdict]
   return `${d.validity === 'confirmed' && d.origin === 'staff' ? '老师确认' : 'AI 初判'} · ${text}`
 }
@@ -367,8 +369,8 @@ export class StudentClient {
     // A failed or queued check is row-level state. Keep it next to the row so
     // the student view can distinguish it from a missing judgment.
     const withCheckJobs = await mapLimit(cases, 3, async row => {
-      for (const checkId of [...row.case.check_ids].reverse()) {
-        const check = await this.read<CheckRun>(ctx, `/v1/checks/${encoded(checkId)}`, 'CheckRun')
+      const checks = await mapLimit(row.case.check_ids, 3, checkId => this.read<CheckRun>(ctx, `/v1/checks/${encoded(checkId)}`, 'CheckRun'))
+      for (const check of checks.sort(compareCreated).reverse()) {
         if (matches(check.input_versions, row)) {
           const job = jobs.find(candidate => candidate.id === check.job_id)
           if (job) return { ...row, checkJob: job }
@@ -376,7 +378,9 @@ export class StudentClient {
       }
       return row
     })
-    return { homework, cases: orderRowsByPhoto(withCheckJobs, homework.asset_ids), jobs, retired: retiredCases(records) }
+    const rows = new Map(withCheckJobs.map(row => [row.case.id, row]))
+    const ordered = orderCasesByCreation(homework.case_ids, records, withCheckJobs).map(caseId => rows.get(caseId)!)
+    return { homework, cases: orderRowsByPhoto(ordered, homework.asset_ids), jobs, retired: retiredCases(records) }
   }
   /** Read-only counts for the history list; never a whole-homework accuracy. */
   async homeworkSummary(homework: HomeworkSession): Promise<HomeworkSummary> { return this.summaryFor(await this.authorize(), homework) }
@@ -391,7 +395,7 @@ export class StudentClient {
   }
   private async summaryFor(ctx: Context, homework: HomeworkSession): Promise<HomeworkSummary> {
     if (homework.scope.student_id !== ctx.student) throw new StudentError('access_denied', 403)
-    const records = await this.caseRecords(ctx, homework), active = orderActiveCases(homework.case_ids, records).map(id => records.get(id)!)
+    const records = await this.caseRecords(ctx, homework), active = orderCasesByCreation(homework.case_ids, records).map(id => records.get(id)!)
     return { homeworkId: homework.id, revision: homework.revision, counts: countBuckets(active.map(bucketOfCase)), firstUnresolvedCaseId: firstUnresolved(active, bucketOfCase)?.id ?? null, retired: records.size - active.length }
   }
   /** Every attempt, check decision, shown hint, help request and review of one case. */
@@ -414,18 +418,20 @@ export class StudentClient {
     const ctx = await this.authorize(), detail = await this.detail(ctx, id), drafts = await this.store.drafts(ctx.scope)
     let d = drafts.find(d => d.homeworkId === id && !d.correction)
     if (!d) { const now = new Date().toISOString(); d = { format: DRAFT_FORMAT, id: remoteDraftId(id), scope: ctx.scope, title: detail.homework.title ?? '学校作业', stage: 'waiting', createdAt: detail.homework.created_at, updatedAt: now, homeworkId: id, error: null, pages: [], locked: true, detail, generation: 0, checkJobs: {} } }
-    const recognition = [...detail.jobs].reverse().find(j => j.kind === 'recognize_homework')
+    const recognition = latestRecognition(detail.jobs)
     // Do not bypass an uncertain local write by adopting a remote job. The
     // original journal must replay its own key/body before advancing.
     d.detail = detail
-    if (!d.pages.length) d.recognitionJobId ??= recognition?.id
+    const hasPendingWrite = await this.store.hasPending(ctx.scope, `${d.journalId ?? d.id}:`)
+    if (recognition && d.pages.every(page => page.uploaded) && !hasPendingWrite) d.recognitionJobId = recognition.id
     // Pages not yet received, or no recognition started yet, is unfinished work and never shown as complete.
     if (d.pages.some(page => !page.uploaded) || !recognition && !detail.cases.length) d.stage = d.stage === 'failed' ? 'failed' : 'waiting'
     else if (recognition?.status === 'failed') d.stage = 'failed'
     else if (detail.jobs.some(active)) d.stage = 'waiting'
-    else if (detail.cases.every(row => effectiveDecision(row))) d.stage = 'complete'
+    else if (detail.cases.every(row => effectiveDecision(row) || row.attempt.recognition_status === 'needs_revision')) d.stage = 'complete'
     else if (detail.jobs.some(terminalFailure)) d.stage = 'failed'
     else d.stage = 'waiting'
+    if (d.stage === 'complete' && !hasPendingWrite) d.error = null
     detail.draftId = d.id
     await this.save(ctx, d)
     return detail
@@ -475,7 +481,9 @@ export class StudentClient {
   }
   private jobSucceeded(job: Job) { if (job.status !== 'succeeded') throw new StudentError(`job_${job.status}`, 0, job.status === 'failed' ? '本次识别或检查未完成。原图和失败记录已保留，可明确重试未完成部分。' : '任务版本已变化，请刷新作业查看最新结果。') }
   runDraft(id: string, options: { retryFailed?: boolean; rerecognize?: boolean; forceCheckCaseIds?: string[]; forceCheckToken?: string } = {}): Promise<DraftView> {
-    const key = `${this.epoch}:${id}`; const existing = this.runs.get(key); if (existing) return existing
+    const key = `${this.epoch}:${id}`; const existing = this.runs.get(key)
+    // Explicit input changes must not inherit an older background run.
+    if (existing) return options.forceCheckCaseIds?.length || options.retryFailed || options.rerecognize ? existing.then(() => this.runDraft(id, options)) : existing
     const run = async () => { const ctx = await this.authorize(); if (typeof navigator !== 'undefined' && navigator.locks) return navigator.locks.request(`xueban:${ctx.scope}:${id}`, () => this.process(ctx, id, options)); return this.process(ctx, id, options) }
     const result = run().finally(() => { this.runs.delete(key) }); this.runs.set(key, result); return result
   }
@@ -558,7 +566,8 @@ export class StudentClient {
       hw = await this.read<HomeworkSession>(ctx, path, 'HomeworkSession')
       if (!d.recognitionJobId && (d.correction || !hw.case_ids.length)) {
         if (!d.pages.length && d.generation === 0) {
-          for (const jobId of [...hw.job_ids].reverse()) { const job = await this.read<Job>(ctx, `/v1/jobs/${encoded(jobId)}`, 'Job'); if (job.kind === 'recognize_homework') { d.recognitionJobId = job.id; break } }
+          const jobs = await mapLimit(hw.job_ids, 3, jobId => this.read<Job>(ctx, `/v1/jobs/${encoded(jobId)}`, 'Job'))
+          d.recognitionJobId = latestRecognition(jobs)?.id
         }
         if (!d.recognitionJobId) {
           d.stage = 'recognizing'; await this.save(ctx, d)
@@ -593,12 +602,12 @@ export class StudentClient {
         if (effectiveDecision(row) && !forced.has(caseId)) continue
         const answerTextPresent = typeof row.attempt.answer_text === 'string' && row.attempt.answer_text.trim().length > 0
         if (row.attempt.recognition_status === 'pending' || row.attempt.recognition_status === 'failed'
-          || row.attempt.recognition_status === 'needs_revision' && !answerTextPresent) {
+          || row.attempt.recognition_status === 'needs_revision' && (!forced.has(caseId) || !answerTextPresent)) {
           skipped.add(caseId); continue
         }
         let job: Job | undefined
-        for (const checkId of [...row.case.check_ids].reverse()) {
-          const check = await this.read<CheckRun>(ctx, `/v1/checks/${encoded(checkId)}`, 'CheckRun')
+        const checks = await mapLimit(row.case.check_ids, 3, checkId => this.read<CheckRun>(ctx, `/v1/checks/${encoded(checkId)}`, 'CheckRun'))
+        for (const check of checks.sort(compareCreated).reverse()) {
           if (matches(check.input_versions, row)) {
             const candidate = knownJobs.get(check.job_id) ?? await this.read<Job>(ctx, `/v1/jobs/${encoded(check.job_id)}`, 'Job')
             if (active(candidate)) { job = candidate; break }
@@ -617,13 +626,13 @@ export class StudentClient {
       if (polled.some(active)) { d.error = null; d.stage = 'waiting'; await this.save(ctx, d); return this.view(d) }
       const failure = polled.find(job => job.status !== 'succeeded')
       if (failure) this.jobSucceeded(failure)
-      const unresolved = d.detail.cases.filter(row => !effectiveDecision(row))
+      const unresolved = d.detail.cases.filter(row => (!d.correction || row.case.id === d.correction.caseId) && !effectiveDecision(row))
       if (unresolved.length) {
         if (unresolved.some(row => row.attempt.recognition_status === 'failed')) throw new StudentError('recognition_failed', 0, '部分题目的识别服务未完成，未生成判断；请重试或请坐班老师核实。')
         // A correction photo can finish recognition without enough answer
         // evidence for a second-pass judgment. Keep the case visible for
         // review, but do not turn a completed recognition into a false error.
-        if (d.correction && skipped.size === ids.length) { d.stage = 'complete'; await this.save(ctx, d); return this.view(d) }
+        if (unresolved.every(row => row.attempt.recognition_status === 'needs_revision')) { d.stage = 'complete'; await this.save(ctx, d); return this.view(d) }
         // A pending attempt or a server-side queued check is unfinished work.
         d.error = null; d.stage = skipped.size ? 'waiting' : 'checking'; await this.save(ctx, d); return this.view(d)
       }

@@ -21,6 +21,18 @@ describe('student-facing evidence states', () => {
     expect(studentQuestionText('三、习作：点亮家乡名片。', '三、习作')).toBe('点亮家乡名片。')
     expect(studentQuestionText('3. 短文为了说明古人改错字的方法。', '3')).toBe('短文为了说明古人改错字的方法。')
   })
+  it.each([
+    ['3x + 1 = 10', '3'], ['12 + 8 = ?', '1'], ['0.5 + 1 = ?', '4'],
+    ['3.14 × 2', '3'], ['3² + 1', '3'], ['3(1)+2', '3(1)'],
+    ['3 - 2 = ?', '3'], ['3 x + 1 = 10', '3'], ['一元一次方程', '一'],
+    ['0.5 + 1 = ?', undefined],
+  ])('preserves mathematical content %s when a label is ambiguous', (stem, label) => {
+    expect(studentQuestionText(stem!, label)).toBe(stem)
+  })
+  it('strips only clearly separated explicit labels', () => {
+    expect(studentQuestionText('3、计算 3x + 1。', '3')).toBe('计算 3x + 1。')
+    expect(studentQuestionText('(1) 计算 0.5 + 1。', '(1)')).toBe('计算 0.5 + 1。')
+  })
   it('labels AI candidate as preliminary and staff confirmation separately', () => { const row = sample(); expect(casePresentation(row).label).toBe('初判正确'); row.case.current_decision!.origin = 'staff'; row.case.current_decision!.validity = 'confirmed'; expect(casePresentation(row).label).toBe('老师确认正确') })
   it('keeps a usable verdict when the first pass has a non-blocking uncertainty', () => {
     const row = sample(); row.attempt.recognition_status = 'needs_revision'; row.attempt.recognition_uncertainties = ['涂改影响一行中间步骤的辨认。']

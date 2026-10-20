@@ -105,6 +105,35 @@ def test_ds_correct_requires_gpt_and_only_two_model_attempts(role):
     _assert_two_attempts(result)
 
 
+@pytest.mark.parametrize("primary", [httpx.Response(503), _unable("DS_UNABLE")])
+def test_gpt_correct_alone_is_not_two_valid_correct_judgments(primary):
+    ctx = context()
+    ctx["attempt"]["answer_text"] = "4"
+    with _chain([primary], [_correct("GPT_ONLY_CORRECT")]) as flow:
+        result = flow.check(**ctx)
+    assert result.data["verdict"] == "unable_to_judge"
+    assert result.data["validity"] == "needs_review"
+    assert result.data["correct_answer"] is None
+    assert result.data["correction_method"] is None
+    assert len(result.metadata.attempts) == 2
+
+
+def test_original_transcription_ambiguity_reaches_both_checks_and_blocks_correct():
+    ctx = context()
+    ctx["attempt"]["answer_text"] = "4"
+    warning = "负号看不清，可能是4，也可能是-4。"
+    ctx["attempt"]["recognition_uncertainties"] = [warning]
+    primary_requests, secondary_requests = [], []
+    with _chain([_correct("DS")], [_correct("GPT")],
+                ds_requests=primary_requests, gpt_requests=secondary_requests) as flow:
+        result = flow.check(**ctx)
+    assert _task(primary_requests[0])["recognition_uncertainties"] == [warning]
+    assert _task(secondary_requests[0])["recognition_uncertainties"] == [warning]
+    assert result.data["verdict"] == "unable_to_judge"
+    assert warning in result.data["uncertainties"]
+    assert result.data["evidence_verified"] is False
+
+
 def test_ds_unable_gpt_unable_stays_unable_without_correction_or_slot_result():
     ds_requests, gpt_requests = [], []
     flow = _chain(

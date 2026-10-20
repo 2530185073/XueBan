@@ -22,7 +22,8 @@ export const PRACTICE_ANSWER_MAX = 200
 export const MAX_PRACTICE_ITEMS = 3
 
 export interface RelatedKnowledge { id: string; name: string; learning_status: LearningStatus }
-export interface KnowledgeState {
+export interface EvidenceSources { model_evidence_count?: number; staff_verified_evidence_count?: number; assessment_source?: 'model' | 'staff' | 'mixed' | 'none' }
+export interface KnowledgeState extends EvidenceSources {
   knowledge_id: string; name: string; chapter_id: string | null; chapter_name: string | null
   learning_status: LearningStatus; reason_codes: string[]; sufficiency_explanation: string | null; sort_order: number
 }
@@ -48,10 +49,10 @@ export interface KnowledgeMap {
   student_id: string; grade?: number | null; projection: { pending: boolean; projected_at: string | null }
   states: KnowledgeState[]; chapters: ChapterRollup[]; subjects?: CurriculumSubject[]; notice: string
 }
-export interface KnowledgeEvidence { id: string; occurred_at: string; question_text: string | null; homework_title: string | null; result: EvidenceResult; assistance_level: string; event_type: string }
+export interface KnowledgeEvidence { id: string; occurred_at: string; question_text: string | null; homework_title: string | null; result: EvidenceResult; assistance_level: string; event_type: string; source_role?: 'model' | 'sitting_teacher' }
 export interface KnowledgeDetail {
   node: { id: string; name: string; observable_objective: string | null; definition: string | null }
-  state: { learning_status: LearningStatus; reason_codes: string[] } | null
+  state: ({ learning_status: LearningStatus; reason_codes: string[] } & EvidenceSources) | null
   evidence: KnowledgeEvidence[]; prerequisites: RelatedKnowledge[]; notice: string
 }
 export interface AgentTip { kind: 'past_difficulty' | 'past_progress' | 'agreed_support'; text: string; memory_id: string; evidence_ids: string[] }
@@ -106,8 +107,9 @@ const list = <T>(guard: Guard<T>, max = 500) => (value: unknown): value is T[] =
 const shape = <T>(fields: Record<string, (value: unknown) => boolean>): Guard<T> => (value: unknown): value is T => record(value) && Object.entries(fields).every(([key, guard]) => guard(value[key]))
 
 const status = oneOf(learningStatuses)
+const evidenceSourceFields = { model_evidence_count: optional(count), staff_verified_evidence_count: optional(count), assessment_source: optional(oneOf(['model', 'staff', 'mixed', 'none'] as const)) }
 const isRelated = shape<RelatedKnowledge>({ id, name: text, learning_status: status })
-export const isKnowledgeState = shape<KnowledgeState>({ knowledge_id: id, name: text, chapter_id: nullable(id), chapter_name: nullable(text), learning_status: status, reason_codes: list(text, 20), sufficiency_explanation: optional(nullable(text)), sort_order: Number.isFinite })
+export const isKnowledgeState = shape<KnowledgeState>({ ...evidenceSourceFields, knowledge_id: id, name: text, chapter_id: nullable(id), chapter_name: nullable(text), learning_status: status, reason_codes: list(text, 20), sufficiency_explanation: optional(nullable(text)), sort_order: Number.isFinite })
 const isStatusCounts = (value: unknown): value is ChapterRollup['status_counts'] => record(value) && Object.entries(value).every(([key, n]) => status(key) && count(n))
 const isChapter = shape<ChapterRollup>({ chapter_id: id, name: text, objectives: count, status_counts: isStatusCounts })
 const isCurriculumBook = shape<CurriculumBook>({ term: oneOf(['up', 'down', 'full'] as const), title: text, isbn: nullable(text), catalog_year: nullable(count), updated_at: nullable(date), revised_2022_standard: v => typeof v === 'boolean', contents_review_status: text })
@@ -117,10 +119,10 @@ const isCurriculumCatalog = (value: unknown): value is CurriculumCatalog => reco
 const isStudentCurriculum = shape<StudentCurriculum>({ student_id: id, grade: nullable(gradeValue), stage: nullable(oneOf(['primary', 'junior_middle'] as const)), subjects: list(isCurriculumScope), notice: text })
 export const isKnowledgeMap = shape<KnowledgeMap>({ student_id: id, grade: optional(nullable(gradeValue)), projection: shape({ pending: v => typeof v === 'boolean', projected_at: nullable(date) }), states: list(isKnowledgeState), chapters: list(isChapter), subjects: optional(list(isCurriculumSubject)), notice: text })
 export { isCurriculumCatalog, isStudentCurriculum }
-const isEvidence = shape<KnowledgeEvidence>({ id, occurred_at: date, question_text: nullable(text), homework_title: nullable(text), result: oneOf(evidenceResults), assistance_level: text, event_type: text })
+const isEvidence = shape<KnowledgeEvidence>({ id, occurred_at: date, question_text: nullable(text), homework_title: nullable(text), result: oneOf(evidenceResults), assistance_level: text, event_type: text, source_role: optional(oneOf(['model', 'sitting_teacher'] as const)) })
 export const isKnowledgeDetail = shape<KnowledgeDetail>({
   node: shape({ id, name: text, observable_objective: nullable(text), definition: nullable(text) }),
-  state: nullable(shape({ learning_status: status, reason_codes: list(text, 20) })),
+  state: nullable(shape({ ...evidenceSourceFields, learning_status: status, reason_codes: list(text, 20) })),
   evidence: list(isEvidence, 1000), prerequisites: list(isRelated), notice: text,
 })
 const isTip = shape<AgentTip>({ kind: oneOf(['past_difficulty', 'past_progress', 'agreed_support'] as const), text, memory_id: id, evidence_ids: list(id) })
