@@ -44,6 +44,30 @@ describe('student-facing evidence states', () => {
     expect(studentResultState(row)).toBe('incorrect'); expect(studentResultUncertain(row)).toBe(true); expect(casePresentation(row).label).toBe('需要订正')
   })
   it('keeps genuinely unresolved answers out of the right/wrong buckets', () => { const row = sample(); row.case.current_decision!.validity = 'needs_review'; expect(casePresentation(row).tone).toBe('amber'); expect(studentResultState(row)).toBe('uncertain') })
+  it.each([
+    ['provider_unavailable', 'AI 核对暂未完成'],
+    ['reconciliation_unavailable', 'AI 核对暂未完成'],
+    ['visual_unreadable', '这处笔迹暂时看不清，可补拍'],
+    ['stem_disagreement', 'AI 还没确认这题'],
+  ])('distinguishes unresolved %s without claiming an active task or teacher handoff', (reason, label) => {
+    const row = sample(), decision = row.case.current_decision!
+    decision.validity = 'needs_review'; decision.verdict = 'unable_to_judge'
+    decision.verification = { mode: 'two_model', status: 'conflict', independent_readback: true, reason_codes: [reason] }
+    row.attempt.recognition_status = 'needs_revision'
+    row.checkJob = fixture<Job>('successful_check_job')
+    expect(studentResultState(row)).toBe('uncertain')
+    expect(casePresentation(row).label).toBe(label)
+    expect(casePresentation(row).note).not.toMatch(/正在|老师/)
+  })
+  it.each(['queued', 'running', 'retryable_failed'] as const)('shows an actual %s check ahead of an older completed decision', status => {
+    const row = sample(), job = fixture<Job>('successful_check_job')
+    job.status = status; row.checkJob = job
+    expect(studentResultState(row)).toBe('processing')
+    expect(casePresentation(row).label).toBe('正在检查')
+    row.case.current_decision!.validity = 'needs_review'
+    expect(studentResultState(row)).toBe('processing')
+    expect(casePresentation(row).label).toBe('正在检查')
+  })
   it('shows a needs-revision answer without a verdict as pending, not as uncertain right or wrong', () => {
     const row = sample(); row.case.current_decision = null; row.attempt.recognition_status = 'needs_revision'
     expect(studentResultState(row)).toBe('unprocessed'); expect(studentResultUncertain(row)).toBe(false); expect(casePresentation(row).label).toBe('识别待核实')

@@ -91,12 +91,19 @@ def load(runtime, *, require_model=False):
     return config, env
 
 
-def configure_models(runtime, *, mode, gateway_config=None, readback_model="kimi-k3", review_model="gpt-6-astra"):
+def configure_models(runtime, *, mode, gateway_config=None, readback_model="kimi-k3", review_model="gpt-6-astra",
+                     review_api="responses", review_thinking="enabled", reconciliation_provider="primary",
+                     visual_review_model="gpt-6-astra", visual_review_enabled="1"):
     """Keep secrets in their existing private file; persist only explicit paths and switches."""
     config, _ = load(runtime)
     if mode not in {"single", "multimodel", "two_model"}:
         raise ValueError("Unknown correction mode")
-    for model in (readback_model, review_model):
+    if (review_api not in {"chat", "responses"} or review_thinking not in {"enabled", "disabled"}
+            or reconciliation_provider not in {"primary", "secondary"} or visual_review_enabled not in {"0", "1"}):
+        raise ValueError("Invalid review API or thinking mode")
+    if mode != "two_model" and (review_api != "responses" or review_thinking != "enabled"):
+        raise ValueError("Review API and thinking overrides require two_model mode")
+    for model in (readback_model, review_model, visual_review_model):
         if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", model):
             raise ValueError("Invalid model identifier")
     if gateway_config is not None:
@@ -110,6 +117,9 @@ def configure_models(runtime, *, mode, gateway_config=None, readback_model="kimi
         from scripts.vision_benchmark import read_config
         read_config(Path(path))
     config["environment"].update(CORRECTION_MODE=mode, READBACK_MODEL=readback_model, REVIEW_MODEL=review_model)
+    config["environment"].update(REVIEW_API=review_api, REVIEW_THINKING=review_thinking)
+    config["environment"]["RECONCILIATION_PROVIDER"] = reconciliation_provider
+    config["environment"].update(VISUAL_REVIEW_MODEL=visual_review_model, VISUAL_REVIEW_ENABLED=visual_review_enabled)
     if mode in {"multimodel", "two_model"}:
         config["environment"]["WORKER_LEASE_SECONDS"] = str(max(600, int(config["environment"].get("WORKER_LEASE_SECONDS", "300"))))
     temp = runtime / ("runtime-" + secrets.token_hex(8) + ".tmp")
@@ -257,6 +267,11 @@ def main():
     models.add_argument("--gateway-config", type=Path)
     models.add_argument("--readback-model", default="kimi-k3")
     models.add_argument("--review-model", default="gpt-6-astra")
+    models.add_argument("--review-api", choices=("chat", "responses"), default="responses")
+    models.add_argument("--review-thinking", choices=("enabled", "disabled"), default="enabled")
+    models.add_argument("--reconciliation-provider", choices=("primary", "secondary"), default="primary")
+    models.add_argument("--visual-review-model", default="gpt-6-astra")
+    models.add_argument("--visual-review-enabled", choices=("0", "1"), default="1")
     admin = commands.add_parser("admin")
     admin.add_argument("arguments", nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -266,7 +281,11 @@ def main():
         return
     if args.command == "configure-models":
         configure_models(runtime, mode=args.mode, gateway_config=args.gateway_config,
-                         readback_model=args.readback_model, review_model=args.review_model)
+                         readback_model=args.readback_model, review_model=args.review_model,
+                         review_api=args.review_api, review_thinking=args.review_thinking,
+                         reconciliation_provider=args.reconciliation_provider,
+                         visual_review_model=args.visual_review_model,
+                         visual_review_enabled=args.visual_review_enabled)
         print("Correction configuration saved; restart the worker to apply:", args.mode)
         return
     config, env = load(runtime, require_model=args.command == "start")

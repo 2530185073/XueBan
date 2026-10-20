@@ -153,9 +153,33 @@ describe('correction controls in each result card', () => {
   it('never presents first-pass per-blank answers as settled after the overall judgment is unresolved', () => {
     const value = row(); value.case.current_decision!.validity = 'needs_review'; value.case.current_decision!.verdict = 'unable_to_judge'
     const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} workspace={workspace} onCorrection={() => {}} />)
-    expect(html).toContain('待确认'); expect(html).toContain('我的作答')
+    expect(html).toContain('AI 还没确认这题'); expect(html).toContain('我的作答')
     expect(html).not.toContain('aria-label="逐空判定"'); expect(html).not.toContain('应填：'); expect(html).not.toContain('正确答案</span>')
     expect(html).toContain('我已在纸上订正')
+  })
+  it.each([
+    ['provider_unavailable', 'AI 核对暂未完成'],
+    ['reconciliation_unavailable', 'AI 核对暂未完成'],
+    ['visual_unreadable', '这处笔迹暂时看不清，可补拍'],
+    ['answer_disagreement', 'AI 还没确认这题'],
+  ])('shows the completed unresolved %s result without an extra per-question model retry', (reason, label) => {
+    const value = row(), decision = value.case.current_decision!
+    decision.validity = 'needs_review'; decision.verdict = 'unable_to_judge'; decision.uncertainties = ['private provider detail']
+    decision.verification = { mode: 'two_model', status: 'conflict', independent_readback: true, reason_codes: [reason] }
+    value.attempt.recognition_status = 'needs_revision'
+    const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} workspace={workspace} onCorrection={() => {}} />)
+    expect(html).toContain(label)
+    expect(html).not.toMatch(/重新检查这道题|正在检查|正在再看|private provider detail|正确答案<|应填：/)
+    expect(html).toContain('文字和照片不一样？请老师核对')
+    expect(html).toContain('我已在纸上订正')
+  })
+  it('hides previous answer conclusions while a real recheck is running', () => {
+    const value = row(); value.checkJob = { status: 'running' } as CaseDetail['checkJob']
+    const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} workspace={workspace} onCorrection={() => {}} />)
+    expect(html).toContain('处理中'); expect(html).toContain('正在检查')
+    expect(html).not.toMatch(/aria-label="逐空判定"|应填：|正确答案<|重新检查这道题/)
+    const hints = html.match(/<button\b[\s\S]*?<\/button>/g)!.find(tag => tag.includes('给我一点方向'))
+    expect(hints).toContain('disabled')
   })
   it('offers a deliberate retry for a failed check while keeping the answer unjudged', () => {
     const value = row(); value.case.current_decision = null; value.checkJob = { status: 'failed' } as CaseDetail['checkJob']

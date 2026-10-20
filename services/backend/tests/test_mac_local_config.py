@@ -36,6 +36,11 @@ def test_enable_loads_worker_credentials_only_on_explicit_model_load(local_confi
     assert worker["ZYAI_API_KEY"] == "synthetic-gateway-secret"
     assert worker["ARK_API_KEY"] == "synthetic-ark-secret"
     assert worker["READBACK_MODEL"] == "kimi-k3"
+    assert worker["REVIEW_API"] == "responses"
+    assert worker["REVIEW_THINKING"] == "enabled"
+    assert worker["RECONCILIATION_PROVIDER"] == "primary"
+    assert worker["VISUAL_REVIEW_MODEL"] == "gpt-6-astra"
+    assert worker["VISUAL_REVIEW_ENABLED"] == "1"
     assert worker["CORRECTION_MODE"] == mode
     assert not any(k.startswith(("ARK_", "ZYAI_", "OPENAI_")) for k in api_environment(worker))
     assert (runtime / "runtime.json").stat().st_mode & 0o077 == 0
@@ -47,6 +52,33 @@ def test_missing_gateway_blocks_enable_without_altering_runtime(local_config):
     before = (runtime / "runtime.json").read_bytes()
     with pytest.raises(ValueError):
         configure_models(runtime, mode="multimodel")
+    assert (runtime / "runtime.json").read_bytes() == before
+
+
+def test_explicit_chat_reviewer_configuration_preserves_identity_and_database(local_config):
+    runtime, _, gateway = local_config
+    configure_models(runtime, mode="two_model", gateway_config=gateway,
+                     review_model="glm-5.3", review_api="chat", review_thinking="disabled",
+                     reconciliation_provider="secondary")
+    config, worker = load(runtime, require_model=True)
+    assert worker["REVIEW_MODEL"] == "glm-5.3"
+    assert worker["REVIEW_API"] == "chat"
+    assert worker["REVIEW_THINKING"] == "disabled"
+    assert worker["RECONCILIATION_PROVIDER"] == "secondary"
+    assert config["environment"]["DATABASE_URL"] == "unchanged-private-database"
+
+
+@pytest.mark.parametrize("changes", [
+    {"review_api": "guessed"}, {"review_thinking": "false"},
+    {"reconciliation_provider": "third_vote"},
+    {"visual_review_enabled": "true"}, {"visual_review_model": "../invalid"},
+    {"mode": "multimodel", "review_api": "chat"},
+])
+def test_invalid_review_settings_do_not_mutate_runtime(local_config, changes):
+    runtime, _, gateway = local_config
+    before = (runtime / "runtime.json").read_bytes()
+    with pytest.raises(ValueError):
+        configure_models(runtime, **{"mode": "two_model", "gateway_config": gateway, **changes})
     assert (runtime / "runtime.json").read_bytes() == before
 
 

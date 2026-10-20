@@ -5,7 +5,7 @@ import { studentResultState } from '../presentation'
 
 /** Per-photo counts for an opened homework; partial collection never becomes an accuracy figure. */
 export function ResultsSummary({ rows, detail, compact = false }: { rows: CaseDetail[]; detail: HomeworkDetail | null; compact?: boolean }) {
-  const counts = countBuckets(rows.map(bucketOfRow))
+  const counts = countBuckets(rows.map(row => studentResultState(row) === 'processing' ? 'pending_review' : bucketOfRow(row)))
   const incorrect = rows.filter(row => studentResultState(row) === 'incorrect').length
   const uncertain = rows.filter(row => studentResultState(row) === 'uncertain').length
   const processing = rows.filter(row => studentResultState(row) === 'processing').length

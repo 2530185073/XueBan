@@ -77,6 +77,16 @@ def normalize_literal_math(value, field_name=None):
         return None
     # Explicit fullwidth punctuation only; NFKC would erase exponent meaning.
     value = value.translate(str.maketrans("＋－＝／＊（）［］｛｝", "+-=/*()[]{}"))
+    # Expose adjacent operators before inspecting a fraction's context; spaces
+    # in a / ½b or x^ ½a must not bypass denominator/exponent protection.
+    value = re.sub(r"\s*([+\-*/=^(),\[\]{}])\s*", r"\1", value)
+    # A standalone half or a half coefficient before one/two literal variables
+    # has the same notation as 1/2. Do not expand a mixed number (2½), a
+    # denominator (a/½...), an exponent (x^½...) or an arbitrary adjacent word.
+    # Those need explicit grouping, not mechanical token concatenation.
+    if value == "½":
+        value = "1/2"
+    value = re.sub(r"(^|[(\[{])½(?=[ \t]*[A-Za-z]{1,2}(?![A-Za-z]))", r"\g<1>1/2", value)
     def exponent(match):
         text = match[0].translate(_SUPERSCRIPT_DIGITS)
         return "^" + text if re.fullmatch(r"[+-]?\d+", text) else "^{" + text + "}"
@@ -85,6 +95,9 @@ def normalize_literal_math(value, field_name=None):
     # 4 a and 4a use the same visible coefficient/letter; never merge 1 2,
     # x 2, or a whole word such as 4 apples into a different token.
     value = re.sub(r"(?<=[0-9])\s+(?=[A-Za-z](?:[^A-Za-z]|$))", "", value)
+    # Only a written rational coefficient's layout gap before a short variable
+    # product: 1/2 ah -> 1/2ah. Keep a h, digit groups and longer words intact.
+    value = re.sub(r"(?<![\w./^])(\d+/\d+)[ \t]+(?=[A-Za-z]{1,2}(?![A-Za-z]))", r"\1", value)
     return value
 
 

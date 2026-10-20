@@ -52,7 +52,7 @@ export function buildTimeline(record: CaseRecord): TimelineEntry[] {
     if (invalid) badges.push({ label: '已失效', tone: 'neutral' })
     else if (current) badges.push({ label: '当前结果', tone: d.verdict === 'correct' ? 'green' : d.verdict === 'incorrect' || d.verdict === 'partially_correct' ? 'red' : 'amber' })
     else badges.push({ label: '历史结果', tone: 'neutral' })
-    if (!invalid && d.validity === 'needs_review') badges.push({ label: '待老师核实', tone: 'amber' })
+    if (!invalid && d.validity === 'needs_review') badges.push({ label: '尚待核实', tone: 'amber' })
     const target = labels.get(d.input_versions.attempt_id)
     entries.push({ key: `decision:${d.id}`, kind: 'decision', at: d.confirmed_at ?? d.created_at, title: `${decisionTitle(d, record.reviews)} · ${verdictLabels[d.verdict]}`, note: target ? `针对${target}` : undefined, badges, state: invalid ? 'invalid' : current ? 'current' : 'historical' })
   }

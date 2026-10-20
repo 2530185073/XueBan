@@ -4,7 +4,7 @@ import type { CaseDetail } from '../core/types'
 import type { CurriculumScope } from '../core/learning'
 import type { Workspace } from '../useStudentWorkspace'
 import { effectiveDecision } from '../core'
-import { studentQuestionText, studentResultState, studentResultUncertain, type StudentResultState } from '../presentation'
+import { casePresentation, studentQuestionText, studentResultState, studentResultUncertain, type StudentResultState } from '../presentation'
 import { ResultsSummary } from './ResultsSummary'
 import { QuestionDetail } from './QuestionDetail'
 
@@ -51,7 +51,7 @@ function ResultIcon({ state }: { state: StudentResultState }) {
 export function QuestionCard({ row, index, open, onToggle, subjects = [], onSelectSubject = () => {}, workspace, onCorrection, onContinue }: { row: CaseDetail; index: number; open: boolean; onToggle: () => void; subjects?: CurriculumScope[]; onSelectSubject?: (subject: string) => void; workspace?: Workspace; onCorrection?: (camera: boolean) => void; onContinue?: () => void }) {
   const state = studentResultState(row)
   const decision = effectiveDecision(row)
-  const usable = decision && decision.validity !== 'needs_review' && decision.verdict !== 'unable_to_judge'
+  const usable = state !== 'processing' && decision && decision.validity !== 'needs_review' && decision.verdict !== 'unable_to_judge'
   const firstUncertainty = decision?.uncertainties?.[0]
   const controlledServiceMessage = firstUncertainty && controlledServiceUncertaintyMessages.has(firstUncertainty) ? firstUncertainty : undefined
   const uncertain = studentResultUncertain(row)
@@ -67,7 +67,7 @@ export function QuestionCard({ row, index, open, onToggle, subjects = [], onSele
     <button className="recognition-card-head" type="button" aria-expanded={open} onClick={onToggle}>
       <span className="recognition-index">{index + 1}</span>
       <span className="recognition-card-title">{stemText || '题干待核实'}</span>
-      <span className={`recognition-status ${state}`}>{uncertain && <sup className="result-star" aria-label="AI识别不确定">*</sup>}<ResultIcon state={state} />{state === 'correct' && decision?.origin === 'staff' && decision.validity === 'confirmed' ? '老师确认正确' : stateLabels[state]}</span>
+      <span className={`recognition-status ${state}`}>{uncertain && <sup className="result-star" aria-label="AI识别不确定">*</sup>}<ResultIcon state={state} />{state === 'correct' && decision?.origin === 'staff' && decision.validity === 'confirmed' ? '老师确认正确' : state === 'uncertain' ? casePresentation(row).label : stateLabels[state]}</span>
       <ChevronDown className="recognition-chevron" size={19} aria-hidden="true" />
     </button>
     {open && <div className="recognition-card-body">
@@ -101,7 +101,7 @@ export function QuestionCard({ row, index, open, onToggle, subjects = [], onSele
         <div className="recognition-learning-row"><span>知识点</span><div className="knowledge-tags">{points.length ? points.map(point => <span key={point}>{point}</span>) : <em>暂未识别</em>}</div></div>
         {method && usable && decision && ['incorrect', 'partially_correct', 'unanswered'].includes(decision.verdict) && <div className="recognition-learning-row correction-method"><span><Lightbulb size={15} />改正方法</span><p>{method}</p></div>}
       </div>
-      {uncertainties.length > 0 && <p className="recognition-uncertainty">{controlledServiceMessage ?? '* AI 对这道题的识别或判断存在不确定，请结合原图核对。'}</p>}
+      {uncertainties.length > 0 && <p className="recognition-uncertainty">{state === 'uncertain' ? casePresentation(row).note : state === 'processing' ? '正在检查这道题的作答，可以先继续其他题。' : controlledServiceMessage ?? '* AI 对这道题的识别或判断存在不确定，请结合原图核对。'}</p>}
       {workspace && onCorrection && <QuestionDetail row={row} workspace={workspace} embedded onCorrection={() => onCorrection(true)} onUpload={() => onCorrection(false)} onContinue={onContinue} />}
     </div>}
   </article>

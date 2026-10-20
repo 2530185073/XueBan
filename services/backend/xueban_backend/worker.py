@@ -534,7 +534,9 @@ class CorrectionWorker:
             reason = None
         if verdict not in {"correct", "incorrect", "partially_correct", "unanswered", "unable_to_judge"}:
             verdict, reason = "unable_to_judge", "verification_conflict"
-        if verification.get("status") == "degraded" and "provider_unavailable" in verification.get("reason_codes", []):
+        if any(
+                code in {"provider_unavailable", "reconciliation_unavailable"}
+                for code in verification.get("reason_codes", [])):
             verdict, reason = "unable_to_judge", "verification_conflict"
             summary = "有一路核对服务暂未完成，原图已保留，本题暂不判断对错。"
         elif attempt.document["recognition_status"] != "ready" or item.get("answer_status") == "unclear":

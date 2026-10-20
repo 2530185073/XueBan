@@ -244,6 +244,7 @@ def test_empty_present_answers_do_not_become_matched(answer):
     ("a²", "a^2"), ("(-2)²", "(-2)^2"), ("x⁻²", "x^-2"),
     ("4 a", "4a"), ("4 a + 2", "4a+2"), ("m / a", "m/a"),
     ("x²⁺¹", "x^{2+1}"), ("学生作答：4 a", "4a"),
+    ("½ah", "1/2 ah"), ("1/2ah", "1/2 ah"), ("½", "1/2"), ("½ a", "1/2a"),
 ])
 def test_multimodel_literal_typography_comparison_preserves_visible_math(left, right):
     assert normalize_literal_math(left, "answer_text") == normalize_literal_math(right, "answer_text")
@@ -254,6 +255,11 @@ def test_multimodel_literal_typography_comparison_preserves_visible_math(left, r
     ("-4", "4"), ("x²⁺¹", "x^2+1"), ("(x+1)²", "x+1²"),
     ("2½n", "2又1/2 n"), ("4 apples", "4apples"), ("12x", "2a+10"),
     ("2+2", "4"), ("1/2", "0.5"), ("a²", "a*a"),
+    ("2½ah", "21/2ah"), ("2 ½ah", "21/2ah"), ("½ah", "1/(2ah)"),
+    ("½ah", "1/3ah"), ("1/2a h", "1/2ah"), ("1/2 apples", "1/2apples"),
+    ("x^½ah", "x^1/2ah"), ("a/½ah", "a/1/2ah"), ("(½)^2", "1/2^2"),
+    ("x^ ½a", "x^1/2a"), ("a / ½b", "a/1/2b"),
+    ("x^-½a", "x^-1/2a"), ("a/-½b", "a/-1/2b"), ("2÷½a", "2÷1/2a"),
 ])
 def test_literal_comparison_never_solves_or_erases_distinguishing_symbols(left, right):
     assert normalize_literal_math(left, "answer_text") != normalize_literal_math(right, "answer_text")

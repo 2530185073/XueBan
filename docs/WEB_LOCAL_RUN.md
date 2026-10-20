@@ -47,20 +47,21 @@ services/backend/.venv/bin/python services/backend/scripts/mac_local.py admin \
 1. 学员登录自己的账号，确认姓名，选择自己的作业照片。电脑使用文件选择；支持的平板浏览器可从系统拍照入口上传。
 2. 查看上传、识别与检查的实际进度。原图、识别条目和判定一起查看；待核实和未读清不代表答对。
 3. 需要订正时逐级查看提示，在纸上改好，再提交包含同一道题题干的新照片，等待再检。
-4. 拿不准时提交坐班求助；历史可打开之前的作业并查看当前结果。原作答、订正父链和提示使用证据已由后端保留，网页尚未提供逐版本时间线。求助受理不等于老师已经确认结论。
+4. 拿不准时提交坐班求助；历史可打开之前的作业并查看当前结果。原作答、订正父链和提示使用证据由后端保留，网页可查看作答与订正时间线。求助受理不等于老师已经确认结论。
 
 点击上传、提示、检查或再检会实际调用已配置的模型，可能产生接口费用。浏览器本身不运行假判题，也不要求填写模型密钥。
 
 ## 整页双模型纠错（当前推荐配置）
 
-设置 `CORRECTION_MODE=two_model` 后，DeepSeek 与 GPT 分别读取同一页原图并独立判题；两路并行，不预先交换题干、学生答案或结论。服务器逐个作答项比较两路结果，在同一个持久任务中保存题目、原作答和候选判断。网页直接显示整页结果，不再为已有结果的每道题追加检查请求。两路存在实质分歧或一方失败时，对应题目待核，学生可以先看其他题。
+设置 `CORRECTION_MODE=two_model` 后，两个模型分别读取同一页原图并独立判题；两路并行，不预先交换题干、学生答案或结论。服务器逐个作答项比较两路结果，在同一个持久任务中保存题目、原作答和候选判断。网页直接显示整页结果，不再为已有结果的每道题追加检查请求。格式、转述和其他分歧先交给 AI 按页对照原图批量复核；真正未解决的题目或服务失败才保持待核，学生可以先看其他题。
 
 本机配置保留原 Ark 私有文件，另指定 OpenAI 兼容网关私有文件；它必须是权限 `0600` 的普通文件，内容为 `ZYAI_BASE_URL=https://api.zyai.online/v1` 和 `ZYAI_API_KEY=...`。密钥仅给 Worker，不给网页构建或公开 API 进程。
 
 ```sh
 services/backend/.venv/bin/python services/backend/scripts/mac_local.py configure-models \
   --mode two_model --gateway-config "$HOME/.config/xueban/zyai.env" \
-  --review-model gpt-6-astra
+  --review-model glm-5.3 --review-api chat --review-thinking disabled \
+  --reconciliation-provider primary --visual-review-model gpt-6-astra --visual-review-enabled 1
 
 services/backend/.venv/bin/python services/backend/scripts/mac_local.py stop
 services/backend/.venv/bin/python services/backend/scripts/mac_web.py
@@ -70,7 +71,11 @@ services/backend/.venv/bin/python services/backend/scripts/mac_web.py
 
 模型结果仍有 `candidate` 和 `needs_review` 的区别：识读一致不等于人工确认或知识点掌握。原图、每次调用的候选与用量、分歧、当前作答版本都保留审计；网关不可用或复核超时不会伪装成多模型通过。正常作答和订正照片仍绑定原学员账号。坐班老师的原有人工切分修订入口保留。
 
-双模型配置使用 Ark 的 DeepSeek 和兼容网关 Responses 接口的 Astra，每页各一次调用，各自最多 24576 输出 tokens，DeepSeek 请求预算 200 秒、Astra 为 118 秒，每个供应商最多四次并发。`matched` 要求题目、可见作答、作答状态和结论一致；错误项还需要一致的正确答案及各自的改正依据。它仍然只是 AI 初判，不能替代老师确认或独立掌握证据。超时不会自动重新发起付费请求；失败可在网页明确重试，未知用量不按零费用记账。
+上面的本机速度配置使用 Ark DeepSeek 快速独立初判和网关 GLM 独立复核，有分歧时复用 DeepSeek 一次批量对照原图。`--reconciliation-provider secondary` 可显式改为第二路模型处理分歧。要复现 GPT 路径，显式设 `--review-model gpt-6-astra --review-api responses --review-thinking enabled`。接口类型必须与供应商实际支持一致，不能只改模型名。`disabled` 对 Chat 请求传关闭思考，对 Responses 传 `reasoning.effort=low`，供应商实际用量仍以返回值为准。
+
+实际笔迹分歧由 Astra 另做一次独立只读，仅接收原图和题号，与 DeepSeek 知情复核并行；看不清或与所选作答不符就保留待核，不用猜测覆盖它。`--visual-review-enabled 0` 可用于复现实验，当前本机验收保持开启。
+
+每页独立读取两次，各最多 24576 输出 tokens，DeepSeek 请求预算 200 秒、第二路 118 秒；存在分歧时追加最多一次批量原图复核，实际笔迹分歧另有最多一次独立只读，二者各最多 8192 输出 tokens。每页共 2～4 次，不按题重复调用。`matched` 表示独立结果一致，`reviewed` 表示分歧已由原图复核解决；后续复核不冒充第三次独立读图。两者均为 AI 初判。未解决的字迹、数学分歧和服务失败分别显示，不把所有问题统一交给老师。超时不会自动重新发起付费请求；未知用量不按零费用记账。
 
 旧的三模型实验路径保留在 `CORRECTION_MODE=multimodel`：DeepSeek 批改、Kimi 独立只读、Astra 处理分歧。需要复现实验时可显式切换，该路径不等同于两模型独立判题。旧单模型配置 `single` 也继续兼容。
 
