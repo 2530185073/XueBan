@@ -1,9 +1,9 @@
-import type { Attempt, AttemptRead, CapturedQuestionRevision, CheckRun, CorrectionCase, DecisionRead, HelpRequest, Hint, HomeworkSession, Job, RecordLifecycle, Review } from '../../../staff-web/src/api/contracts.generated'
+import type { Attempt, AttemptRead, CapturedQuestionRevision, CheckRun, CorrectionCase, CurriculumContext, DecisionRead, HelpRequest, Hint, HomeworkSession, Job, RecordLifecycle, Review } from '../../../staff-web/src/api/contracts.generated'
 export type * from '../../../staff-web/src/api/contracts.generated'
 import type { Crop, Rotation } from './pages'
 
 export type DraftStage = 'local' | 'creating' | 'uploading' | 'recognizing' | 'checking' | 'complete' | 'failed' | 'waiting'
-export interface CaseDetail { case: CorrectionCase; question: CapturedQuestionRevision; attempt: Attempt }
+export interface CaseDetail { case: CorrectionCase; question: CapturedQuestionRevision; attempt: Attempt; checkJob?: Job }
 /** A case the staff retired (layout repair or deletion); never listed as current work. */
 export interface RetiredCase { id: string; lifecycle: Exclude<RecordLifecycle, 'active'>; replacementCaseIds: string[] }
 export interface HomeworkDetail { homework: HomeworkSession; cases: CaseDetail[]; jobs: Job[]; draftId?: string; retired?: RetiredCase[] }
@@ -25,7 +25,7 @@ export interface DraftView extends DraftSummary {
   photo: Blob | null; pages: DraftPageView[]
   /** Pages may still be added, removed, reordered, turned or cropped: nothing has been sent yet. */
   editable: boolean
-  detail: HomeworkDetail | null; correction?: { caseId: string; parentAttemptId: string }
+  detail: HomeworkDetail | null; curriculum?: CurriculumContext | null; correction?: { caseId: string; parentAttemptId: string }
 }
 export interface NormalizedPhoto { blob: Blob; width: number; height: number; sha256: string; mime: 'image/jpeg'; size: number }
 export interface StoredPage {
@@ -36,6 +36,7 @@ export interface StoredPage {
 }
 export interface StoredDraft extends Omit<DraftSummary, 'pageCount' | 'uploadedCount'> {
   format: 2
+  curriculum?: CurriculumContext | null
   scope: string; pages: StoredPage[]; locked: boolean; detail: HomeworkDetail | null; generation: number
   journalId?: string
   recognitionJobId?: string; checkJobs: Record<string, string>

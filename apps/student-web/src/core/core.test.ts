@@ -6,7 +6,7 @@ import { StudentApi } from './api'
 import { imageDimensions } from './photo'
 import { valid } from './validation'
 import examples from '../../../../contracts/phase1/examples.json'
-import type { Attempt, CapturedQuestionRevision, CaseDetail, CorrectionCase, Decision, Hint, HomeworkSession, ImageAsset, Job, NormalizedPhoto } from './types'
+import type { Attempt, CapturedQuestionRevision, CaseDetail, CheckRun, CorrectionCase, Decision, Hint, HomeworkSession, ImageAsset, Job, NormalizedPhoto } from './types'
 
 class MemorySession implements Storage {
   private values = new Map<string, string>()
@@ -123,9 +123,9 @@ describe('student session and durable corrections', () => {
 function correctionSetup() {
   const s = setup(), c = fixture<CorrectionCase>('resolved_case'), q = fixture<CapturedQuestionRevision>('question_revision_2')
   let a = fixture<Attempt>('correction_across_question_revision')
-  c.scope = s.hw.scope; c.homework_id = s.hw.id; c.current_decision = null; c.progress = 'editing'; q.homework_id = s.hw.id
+  c.scope = s.hw.scope; c.homework_id = s.hw.id; c.current_decision = null; c.progress = 'editing'; c.check_ids = []; c.attempt_ids = [a.id]; q.homework_id = s.hw.id
   s.hw.case_ids = [c.id]; s.hw.question_ids = [q.question_id]
-  const jobs = new Map<string, Job>(); let count = 0
+  const jobs = new Map<string, Job>(), checks = new Map<string, CheckRun>(); let count = 0, checkCount = 0
   s.route((path, init) => {
     if (path === `/v1/cases/${c.id}`) return json(c)
     if (path === `/v1/questions/${q.question_id}`) return json({ record: q, current_revision: q.revision, currently_effective: true })
@@ -138,6 +138,16 @@ function correctionSetup() {
       jobs.set(job.id, job); s.hw.job_ids.push(job.id)
       return json({ job, created_resource: { resource_type: 'attempt', resource_id: a.id } })
     }
+    if (path === `/v1/cases/${c.id}/checks`) {
+      const payload = JSON.parse(init.body as string) as { attempt_id: string; question_revision: number; attempt_recognition_revision: number }
+      expect(payload.attempt_id).toBe(a.id); expect(payload.question_revision).toBe(q.revision); expect(payload.attempt_recognition_revision).toBe(a.recognition_revision); checkCount++
+      const job: Job = { ...s.job, id: `job_check${checkCount}`, kind: 'check', status: 'succeeded', result: { resource_type: 'check', resource_id: `check_retry${checkCount}` } }
+      const checkId = `check_retry${checkCount}`, check: CheckRun = { id: checkId, revision: 1, job_id: job.id, case_id: c.id, input_versions: { question_id: q.question_id, question_revision: q.revision, attempt_id: a.id, attempt_recognition_revision: a.recognition_revision, case_revision_at_submission: c.revision, fingerprint: '1'.repeat(64) }, model_version: null, rule_version: null, prompt_version: null, decision_ids: [`decision_retry${checkCount}`], created_at: now }
+      const decision = fixture<Decision>('model_candidate'); decision.id = `decision_retry${checkCount}`; decision.case_id = c.id; decision.check_id = checkId; decision.input_versions = check.input_versions; c.current_decision = decision; c.progress = 'needs_correction'; c.check_ids.push(checkId); c.revision++
+      jobs.set(job.id, job); checks.set(checkId, check); s.hw.job_ids.push(job.id)
+      return json({ job, created_resource: { resource_type: 'check', resource_id: checkId } }, 202)
+    }
+    if (path.startsWith(`/v1/checks/`)) return json(checks.get(path.split('/').at(-1)!))
     const job = jobs.get(path.split('/').at(-1)!); if (path.startsWith('/v1/jobs/') && job) return json(job)
   })
   return { ...s, c, q, current: () => a, replaceAttempt: () => { a.id = 'attempt_newer'; c.current_attempt_id = a.id } }

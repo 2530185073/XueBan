@@ -220,7 +220,7 @@ def _images(values: tuple[str, ...]) -> list[dict[str, Any]]:
         )
         if not valid_magic or len(raw) > 4_194_304 or total > 8_388_608:
             raise ProviderError("invalid_input")
-        result.append({"type": "image_url", "image_url": {"url": value}})
+        result.append({"type": "image_url", "image_url": {"url": value, "detail": "high"}})
     return result
 
 
@@ -272,11 +272,12 @@ class ArkClient:
                 raise ValueError()
             if not isinstance(cfg.model, str) or not _SAFE_TOKEN.fullmatch(cfg.model):
                 raise ValueError()
-            for value, low, high in ((cfg.max_concurrency, 1, 16), (cfg.max_attempts, 1, 3), (cfg.max_tokens, 1, 8192), (cfg.max_response_bytes, 256, 4_194_304)):
+            for value, low, high in ((cfg.max_concurrency, 1, 16), (cfg.max_attempts, 1, 3), (cfg.max_tokens, 1, 16384), (cfg.max_response_bytes, 256, 4_194_304)):
                 if type(value) is not int or not low <= value <= high:
                     raise ValueError()
-            for value in (cfg.timeout_seconds, cfg.queue_timeout_seconds, cfg.total_timeout_seconds):
-                if not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 < value <= 120:
+            for value, ceiling in ((cfg.timeout_seconds, 240), (cfg.total_timeout_seconds, 240),
+                                   (cfg.queue_timeout_seconds, 120)):
+                if not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 < value <= ceiling:
                     raise ValueError()
             if type(cfg.thinking) is not bool:
                 raise ValueError()
@@ -316,7 +317,7 @@ class ArkClient:
             raise ProviderError("invalid_input")
         thinking = self.settings.thinking if thinking is None else thinking
         max_tokens = self.settings.max_tokens if max_tokens is None else max_tokens
-        if type(thinking) is not bool or type(max_tokens) is not int or not 1 <= max_tokens <= 8192:
+        if type(thinking) is not bool or type(max_tokens) is not int or not 1 <= max_tokens <= 16384:
             raise ProviderError("invalid_input")
         try:
             text.encode("utf-8")
@@ -338,6 +339,7 @@ class ArkClient:
                 {"role": "user", "content": content},
             ],
             "stream": False,
+            "temperature": 0,
             "max_tokens": max_tokens,
             "thinking": {"type": "enabled" if thinking else "disabled"},
             "response_format": {"type": "json_object"},

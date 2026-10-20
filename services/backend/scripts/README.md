@@ -18,8 +18,7 @@ services/backend/.venv/bin/python services/backend/scripts/vision_benchmark.py \
   --live --env-file /secure/path/gateway.env --image /secure/path/authorized.jpg \
   --model gpt-6-astra --protocol responses --output /private/path/new-astra-report.json
 
-# gpt-6.1-sol同样使用responses。
-# glm-5.3、kimi-k3本轮按网关提供的准确ID用chat协议测试。
+# gpt-6.1-sol同样使用responses；其他模型须按网关提供的准确ID和协议显式指定。
 ```
 
 Responses采用 `POST /v1/responses`，图片为 `input[].content[].input_image`，`image_url`直接使用base64 data URL；Chat Completions为 `messages[].content[].image_url`，内含`url`。二者不能混写。[官方图片输入](https://developers.openai.com/api/docs/guides/images-vision)

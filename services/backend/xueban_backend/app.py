@@ -22,6 +22,8 @@ from .contracts import Contracts
 from .db import create_database_engine
 from .errors import Problem, problem_response
 from .models import Homework, IdempotencyRecord, Student, StudentGrant
+from .curriculum_catalog import supported_scope
+from .learning_models import StudentLearningProfile
 
 ID_PATTERN = r"^[a-z][a-z0-9_-]{2,63}$"
 ResourceId = Annotated[str, Path(pattern=ID_PATTERN)]
@@ -54,6 +56,21 @@ def homework_json(row: Homework) -> dict:
         asset.document.get("created_at", ""),
         asset.id,
     ))
+    page_order = {asset.id: index for index, asset in enumerate(assets)}
+    questions = {entity.id: entity for entity in entities if entity.kind == "question"}
+
+    def question_order(question):
+        regions = question.document.get("regions", [])
+        page = min((page_order.get(region["asset_id"], len(assets)) for region in regions), default=len(assets))
+        order = (question.annotations or {}).get("reading_order")
+        # Whole-page recognition has no per-question coordinates. Persisted
+        # array order must survive UUID generation, API reads and reloads.
+        return (page, order if isinstance(order, int) else float("inf"), question.document["created_at"], question.id)
+
+    ordered_questions = sorted(questions.values(), key=question_order)
+    question_ranks = {question.id: index for index, question in enumerate(ordered_questions)}
+    cases = sorted((entity for entity in entities if entity.kind == "case"),
+                   key=lambda entity: (question_ranks.get(entity.document["question_id"], len(questions)), entity.id))
     return {
         "id": row.id,
         "revision": row.revision,
@@ -64,8 +81,8 @@ def homework_json(row: Homework) -> dict:
         "occurred_at": utc_string(row.occurred_at),
         "coverage": row.coverage_json or {"collection_scope": row.collection_scope, "unrecognized_regions": [], "note": None},
         "asset_ids": [asset.id for asset in assets],
-        "question_ids": [entity.id for entity in entities if entity.kind == "question"],
-        "case_ids": [entity.id for entity in entities if entity.kind == "case"],
+        "question_ids": [entity.id for entity in ordered_questions],
+        "case_ids": [entity.id for entity in cases],
         "job_ids": list(session.scalars(select(Task.id).where(Task.homework_id == row.id).order_by(Task.id))) if session else [],
         "processing_blocked": row.processing_blocked,
     }
@@ -177,6 +194,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ):
         student = require_student(session, actor, student_id)
         contracts.validate("CreateHomework", payload, kind="requests")
+        curriculum = payload["curriculum"]
+        profile = session.get(StudentLearningProfile, student.id)
+        profile_grade = profile.document.get("grade") if profile else None
+        if type(profile_grade) is int and profile_grade in {5, 6, 7, 8}:
+            if curriculum.get("grade") is not None and curriculum.get("grade") != profile_grade:
+                raise Problem(409, "conflict", "course_unknown", "作业年级与学生档案不一致，请先更新学生年级。")
+            curriculum = {**curriculum, "grade": profile_grade,
+                          "stage": "primary" if profile_grade <= 6 else "junior_middle",
+                          "edition": "publisher_latest"}
+        # The client may omit course details during capture, but once it sends
+        # a grade/subject/publisher they must be one of the product-approved
+        # textbook combinations. Unknown combinations stay unscoped.
+        if curriculum.get("grade") is not None and curriculum.get("subject") is not None:
+            scope = supported_scope(curriculum["grade"], curriculum["subject"], curriculum.get("publisher_code"))
+            if scope is None:
+                raise Problem(422, "validation", "invalid_request", "当前年级、学科和出版社组合暂未纳入知识图谱。")
+            # ``publisher_latest`` is deliberately a value of the existing
+            # contract's edition field.  Do not add an ad-hoc revision key to
+            # Homework.curriculum: the phase-one resource is strict and the
+            # official catalogue is the source of truth for the actual print
+            # edition.
+            curriculum = {**curriculum, "subject": scope.subject,
+                          "publisher_code": scope.publisher_code,
+                          "edition": curriculum.get("edition") or "publisher_latest"}
+        elif curriculum.get("grade") is not None:
+            grade = curriculum["grade"]
+            if type(grade) is int and grade in {5, 6, 7, 8}:
+                curriculum = {**curriculum, "stage": "primary" if grade <= 6 else "junior_middle",
+                              "edition": "publisher_latest"}
         occurred_at = parse_time(payload["occurred_at"])
         payload_hash = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
         operation = "POST /v1/students/{student_id}/homeworks"
@@ -215,7 +261,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             campus_id=student.campus_id,
             student_id=student.id,
             revision=1,
-            curriculum=payload["curriculum"],
+            curriculum=curriculum,
             title=payload["title"],
             collection_scope=payload["collection_scope"],
             created_at=now,

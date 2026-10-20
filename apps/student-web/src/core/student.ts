@@ -8,11 +8,15 @@ import { homeworkPageIds } from './homeworkPages'
 import { valid } from './validation'
 import { bucketOfCase, countBuckets, firstUnresolved, isRetired, orderActiveCases, orderRowsByPhoto, retiredCases } from './cases'
 import { ObjectUrls } from './objectUrls'
-import { isAgentContext, isKnowledgeDetail, isKnowledgeMap, isMemory, isMemoryList, isOptionalActivities, isPracticeAnswer, isPracticeHint, isPracticeSession, isPracticeSessionList, isVariantPracticeOverview, MEMORY_CONTENT_MAX, MEMORY_CONTENT_MIN, PRACTICE_ANSWER_MAX, type AgentContext, type ExitReason, type KnowledgeDetail, type KnowledgeMap, type Memory, type MemoryList, type OptionalActivities, type PracticeAnswer, type PracticeHint, type PracticeSession, type StartPractice, type StudentMemoryCategory, type VariantPracticeOverview } from './learning'
+import { isCurriculumCatalog, isKnowledgeDetail, isKnowledgeMap, isStudentCurriculum, isVariantPracticeOverview, isAgentContext, isMemory, isMemoryList, isOptionalActivities, isPracticeAnswer, isPracticeHint, isPracticeSession, isPracticeSessionList, MEMORY_CONTENT_MAX, MEMORY_CONTENT_MIN, PRACTICE_ANSWER_MAX, type AgentContext, type CurriculumCatalog, type ExitReason, type KnowledgeDetail, type KnowledgeMap, type Memory, type MemoryList, type OptionalActivities, type PracticeAnswer, type PracticeHint, type PracticeSession, type StartPractice, type StudentCurriculum, type StudentMemoryCategory, type VariantPracticeOverview } from './learning'
 
 export const remoteDraftId = (id: string) => `remote_${id}`
+import type { CurriculumContext } from './types'
+export type { CurriculumContext } from './types'
 const encoded = encodeURIComponent
 const active = (job: Job) => ['queued', 'running', 'retryable_failed'].includes(job.status)
+const terminalFailure = (job: Job) => ['failed', 'superseded', 'cancelled'].includes(job.status)
+const JOB_POLL_ROUNDS = 120
 const matches = (v: InputVersions, row: CaseDetail) => v.question_id === row.case.question_id && v.question_revision === row.case.current_question_revision && v.attempt_id === row.case.current_attempt_id && v.attempt_recognition_revision === row.attempt.recognition_revision
 export function effectiveDecision(row: CaseDetail) { const d = row.case.current_decision; return !isRetired(row.case) && d && !['stale', 'retracted'].includes(d.validity) && matches(d.input_versions, row) ? d : null }
 /** Requests a student may raise on the current answer; an appeal needs a result to question. */
@@ -33,8 +37,10 @@ async function readable(blob: Blob, index: number) {
 }
 export function decisionLabel(row: CaseDetail): string {
   const d = effectiveDecision(row)
-  if (row.attempt.recognition_status !== 'ready') return '识别待核实 · 请重拍或请老师看'
-  if (!d) return '等待检查'
+  if (!d) {
+    if (row.attempt.recognition_status !== 'ready') return '识别待核实 · 请重拍或请老师看'
+    return '等待检查'
+  }
   if (d.validity === 'needs_review' || d.verdict === 'unable_to_judge') return '暂时看不准 · 请老师一起看'
   const text = { correct: '正确', incorrect: '需要订正', partially_correct: '部分需要订正', unanswered: '尚未作答' }[d.verdict]
   return `${d.validity === 'confirmed' && d.origin === 'staff' ? '老师确认' : 'AI 初判'} · ${text}`
@@ -246,7 +252,7 @@ export class StudentClient {
   }
   private view(d: StoredDraft): DraftView {
     const pages = d.pages.map(p => ({ id: p.id, blob: p.photo.blob, width: p.photo.width, height: p.photo.height, size: p.photo.size, edited: !!p.original, assetId: p.assetId, uploaded: p.uploaded }))
-    return { id: d.id, title: d.title, stage: d.stage, createdAt: d.createdAt, updatedAt: d.updatedAt, homeworkId: d.homeworkId, error: d.error, pageCount: pages.length, uploadedCount: pages.filter(p => p.uploaded).length, photo: pages[0]?.blob ?? null, pages, editable: !d.locked, detail: d.detail, correction: d.correction ? { caseId: d.correction.caseId, parentAttemptId: d.correction.parentAttemptId } : undefined }
+    return { id: d.id, title: d.title, stage: d.stage, createdAt: d.createdAt, updatedAt: d.updatedAt, homeworkId: d.homeworkId, error: d.error, pageCount: pages.length, uploadedCount: pages.filter(p => p.uploaded).length, photo: pages[0]?.blob ?? null, pages, editable: !d.locked, detail: d.detail, curriculum: d.curriculum ?? null, correction: d.correction ? { caseId: d.correction.caseId, parentAttemptId: d.correction.parentAttemptId } : undefined }
   }
   async listDrafts(): Promise<DraftSummary[]> { const ctx = await this.authorize(); const drafts = await this.store.drafts(ctx.scope); this.check(ctx); return drafts.map(d => { const { photo: _p, detail: _d, pages: _pages, editable: _e, ...summary } = this.view(d); return summary }) }
   async getDraft(id: string) { const ctx = await this.authorize(); const d = await this.store.draft(ctx.scope, id); this.check(ctx); return this.view(d) }
@@ -263,10 +269,10 @@ export class StudentClient {
     checkBatch([...existing, ...pages].map(page => page.photo.size))
     return pages
   }
-  async createDraft(files: Blob | Blob[], title = '学校作业') {
+  async createDraft(files: Blob | Blob[], title = '学校作业', curriculum: CurriculumContext | null = null) {
     const list = Array.isArray(files) ? files : [files]; checkSelection(0, list)
     const ctx = await this.authorize(); const pages = await this.importPages(list, []); this.check(ctx)
-    const now = new Date().toISOString(); const d: StoredDraft = { format: DRAFT_FORMAT, id: crypto.randomUUID(), title: title.trim().slice(0, 120) || '学校作业', stage: 'local', createdAt: now, updatedAt: now, homeworkId: null, error: null, scope: ctx.scope, pages, locked: false, detail: null, generation: 0, checkJobs: {} }
+    const now = new Date().toISOString(); const d: StoredDraft = { format: DRAFT_FORMAT, id: crypto.randomUUID(), title: title.trim().slice(0, 120) || '学校作业', stage: 'local', createdAt: now, updatedAt: now, homeworkId: null, error: null, scope: ctx.scope, pages, locked: false, detail: null, generation: 0, checkJobs: {}, curriculum }
     await this.save(ctx, d); return this.view(d)
   }
   /** Applies a page change to a draft that has sent nothing yet. */
@@ -357,8 +363,20 @@ export class StudentClient {
     if (homework.scope.student_id !== ctx.student) throw new StudentError('access_denied', 403)
     const records = await this.caseRecords(ctx, homework), cases: CaseDetail[] = [], jobs: Job[] = []
     for (const caseId of orderActiveCases(homework.case_ids, records)) cases.push(await this.rowFor(ctx, records.get(caseId)!))
-    for (const id of homework.job_ids) jobs.push(await this.read<Job>(ctx, `/v1/jobs/${encoded(id)}`, 'Job'))
-    return { homework, cases: orderRowsByPhoto(cases, homework.asset_ids), jobs, retired: retiredCases(records) }
+    for (const jobId of homework.job_ids) jobs.push(await this.read<Job>(ctx, `/v1/jobs/${encoded(jobId)}`, 'Job'))
+    // A failed or queued check is row-level state. Keep it next to the row so
+    // the student view can distinguish it from a missing judgment.
+    const withCheckJobs = await mapLimit(cases, 3, async row => {
+      for (const checkId of [...row.case.check_ids].reverse()) {
+        const check = await this.read<CheckRun>(ctx, `/v1/checks/${encoded(checkId)}`, 'CheckRun')
+        if (matches(check.input_versions, row)) {
+          const job = jobs.find(candidate => candidate.id === check.job_id)
+          if (job) return { ...row, checkJob: job }
+        }
+      }
+      return row
+    })
+    return { homework, cases: orderRowsByPhoto(withCheckJobs, homework.asset_ids), jobs, retired: retiredCases(records) }
   }
   /** Read-only counts for the history list; never a whole-homework accuracy. */
   async homeworkSummary(homework: HomeworkSession): Promise<HomeworkSummary> { return this.summaryFor(await this.authorize(), homework) }
@@ -405,7 +423,9 @@ export class StudentClient {
     if (d.pages.some(page => !page.uploaded) || !recognition && !detail.cases.length) d.stage = d.stage === 'failed' ? 'failed' : 'waiting'
     else if (recognition?.status === 'failed') d.stage = 'failed'
     else if (detail.jobs.some(active)) d.stage = 'waiting'
-    else d.stage = detail.cases.every(row => effectiveDecision(row) || row.attempt.recognition_status !== 'ready') ? 'complete' : 'waiting'
+    else if (detail.cases.every(row => effectiveDecision(row))) d.stage = 'complete'
+    else if (detail.jobs.some(terminalFailure)) d.stage = 'failed'
+    else d.stage = 'waiting'
     detail.draftId = d.id
     await this.save(ctx, d)
     return detail
@@ -434,21 +454,32 @@ export class StudentClient {
     const now = new Date().toISOString(), d: StoredDraft = { format: DRAFT_FORMAT, id: crypto.randomUUID(), scope: ctx.scope, title: '新订正照片', stage: 'local', createdAt: now, updatedAt: now, homeworkId: row.case.homework_id, pages: [newPage(photo)], locked: false, detail: null, error: null, generation: 0, checkJobs: {}, correction: { caseId, parentAttemptId: row.case.current_attempt_id, reportedHelp } }
     await this.save(ctx, d); return this.view(d)
   }
-  private async awaitJob(ctx: Context, id: string): Promise<Job> {
-    for (let count = 0; count < 120; count++) {
-      const job = await this.read<Job>(ctx, `/v1/jobs/${encoded(id)}`, 'Job')
-      if (!active(job)) return job
-      await this.sleep(Math.min(5000, Math.max(1000, (job.retry_after_seconds ?? 2) * 1000))); this.check(ctx)
+  /** Poll a group as one unit so a slow job cannot prevent the other jobs from being observed. */
+  private async pollJobs(ctx: Context, ids: string[]): Promise<Job[]> {
+    const latest = new Map<string, Job>(), uniqueIds = unique(ids)
+    for (let count = 0; count < JOB_POLL_ROUNDS; count++) {
+      const pending = uniqueIds.filter(id => !latest.has(id) || active(latest.get(id)!))
+      if (!pending.length) return [...latest.values()]
+      const current = await Promise.all(pending.map(id => this.read<Job>(ctx, `/v1/jobs/${encoded(id)}`, 'Job')))
+      current.forEach(job => latest.set(job.id, job))
+      if (![...latest.values()].some(active)) return [...latest.values()]
+      const delay = Math.min(5000, Math.max(1000, Math.max(...current.map(job => job.retry_after_seconds ?? 2)) * 1000))
+      await this.sleep(delay); this.check(ctx)
     }
+    return [...latest.values()]
+  }
+  private async awaitJob(ctx: Context, id: string): Promise<Job> {
+    const [job] = await this.pollJobs(ctx, [id])
+    if (job && !active(job)) return job
     throw new StudentError('job_waiting', 0, '任务仍在处理中，可稍后打开这份记录继续查看。')
   }
   private jobSucceeded(job: Job) { if (job.status !== 'succeeded') throw new StudentError(`job_${job.status}`, 0, job.status === 'failed' ? '本次识别或检查未完成。原图和失败记录已保留，可明确重试未完成部分。' : '任务版本已变化，请刷新作业查看最新结果。') }
-  runDraft(id: string, options: { retryFailed?: boolean; rerecognize?: boolean } = {}): Promise<DraftView> {
+  runDraft(id: string, options: { retryFailed?: boolean; rerecognize?: boolean; forceCheckCaseIds?: string[]; forceCheckToken?: string } = {}): Promise<DraftView> {
     const key = `${this.epoch}:${id}`; const existing = this.runs.get(key); if (existing) return existing
     const run = async () => { const ctx = await this.authorize(); if (typeof navigator !== 'undefined' && navigator.locks) return navigator.locks.request(`xueban:${ctx.scope}:${id}`, () => this.process(ctx, id, options)); return this.process(ctx, id, options) }
     const result = run().finally(() => { this.runs.delete(key) }); this.runs.set(key, result); return result
   }
-  private async process(ctx: Context, id: string, options: { retryFailed?: boolean; rerecognize?: boolean }): Promise<DraftView> {
+  private async process(ctx: Context, id: string, options: { retryFailed?: boolean; rerecognize?: boolean; forceCheckCaseIds?: string[]; forceCheckToken?: string }): Promise<DraftView> {
     const d = await this.store.draft(ctx.scope, id); this.check(ctx)
     const journalId = d.journalId ?? id
     const post = <T>(name: string, path: string, body: unknown, shape: string, requestShape: string) => this.write<T>(ctx, `${journalId}:${name}`, path, body, shape, requestShape)
@@ -486,7 +517,8 @@ export class StudentClient {
       d.error = null
       if (!d.homeworkId) {
         d.stage = 'creating'; await this.save(ctx, d)
-        const hw = await post<HomeworkSession>('homework', `/v1/students/${encoded(ctx.student)}/homeworks`, { title: d.title, occurred_at: d.createdAt, collection_scope: 'partial', curriculum: { stage: 'junior_middle', publisher_code: 'PEP', grade: null, subject: null, volume: null, edition: null } }, 'HomeworkSession', 'CreateHomework')
+        const course = d.curriculum
+        const hw = await post<HomeworkSession>('homework', `/v1/students/${encoded(ctx.student)}/homeworks`, { title: d.title, occurred_at: d.createdAt, collection_scope: 'partial', curriculum: course ?? { stage: null, publisher_code: null, grade: null, subject: null, volume: null, edition: null } }, 'HomeworkSession', 'CreateHomework')
         d.homeworkId = hw.id; await this.save(ctx, d)
       }
       const path = `/v1/homeworks/${encoded(d.homeworkId)}`
@@ -541,30 +573,60 @@ export class StudentClient {
         }
         await this.save(ctx, d)
       }
-      if (d.recognitionJobId) { d.stage = 'recognizing'; await this.save(ctx, d); this.jobSucceeded(await this.awaitJob(ctx, d.recognitionJobId)) }
+      if (d.recognitionJobId) {
+        d.stage = 'recognizing'; await this.save(ctx, d)
+        const [recognitionJob] = await this.pollJobs(ctx, [d.recognitionJobId])
+        if (!recognitionJob || active(recognitionJob)) {
+          d.error = null; d.stage = 'waiting'; d.detail = await this.detail(ctx, d.homeworkId); await this.save(ctx, d); return this.view(d)
+        }
+        this.jobSucceeded(recognitionJob)
+      }
       d.detail = await this.detail(ctx, d.homeworkId); d.stage = 'checking'; await this.save(ctx, d)
-      const ids = d.correction ? [d.correction.caseId] : d.detail.cases.map(row => row.case.id)
-      const failures: Job[] = []
+      const forced = new Set(options.forceCheckCaseIds ?? [])
+      const ids = forced.size ? [...forced] : d.correction ? [d.correction.caseId] : d.detail.cases.map(row => row.case.id)
+      const knownJobs = new Map(d.detail.jobs.map(job => [job.id, job]))
+      const checkJobs = new Map<string, Job>()
+      const skipped = new Set<string>()
       for (const caseId of ids) {
         let row: CaseDetail
         try { row = await this.caseDetail(ctx, caseId) } catch (e) { if (!d.correction && e instanceof StudentError && ['case_superseded', 'case_unavailable'].includes(e.code)) continue; throw e }
-        if (effectiveDecision(row) || row.attempt.recognition_status !== 'ready') continue
+        if (effectiveDecision(row) && !forced.has(caseId)) continue
+        const answerTextPresent = typeof row.attempt.answer_text === 'string' && row.attempt.answer_text.trim().length > 0
+        if (row.attempt.recognition_status === 'pending' || row.attempt.recognition_status === 'failed'
+          || row.attempt.recognition_status === 'needs_revision' && !answerTextPresent) {
+          skipped.add(caseId); continue
+        }
         let job: Job | undefined
         for (const checkId of [...row.case.check_ids].reverse()) {
           const check = await this.read<CheckRun>(ctx, `/v1/checks/${encoded(checkId)}`, 'CheckRun')
-          if (matches(check.input_versions, row)) { const candidate = await this.read<Job>(ctx, `/v1/jobs/${encoded(check.job_id)}`, 'Job'); if (active(candidate)) { job = candidate; break } if (candidate.status === 'failed' && !options.retryFailed) { job = candidate; break } }
+          if (matches(check.input_versions, row)) {
+            const candidate = knownJobs.get(check.job_id) ?? await this.read<Job>(ctx, `/v1/jobs/${encoded(check.job_id)}`, 'Job')
+            if (active(candidate)) { job = candidate; break }
+            if (candidate.status === 'failed' && !options.retryFailed) { job = candidate; break }
+          }
         }
         if (!job) {
           const version = `${row.attempt.id}-${row.case.current_question_revision}-${row.attempt.recognition_revision}`
-          const accepted = await post<Accepted>(`check-${caseId}-${version}-${d.generation}`, `/v1/cases/${encoded(caseId)}/checks`, { expected_revision: row.case.revision, attempt_id: row.attempt.id, question_revision: row.case.current_question_revision, attempt_recognition_revision: row.attempt.recognition_revision }, 'Accepted', 'StartCheck')
+          const accepted = await post<Accepted>(`check-${caseId}-${version}-${d.generation}${forced.has(caseId) ? `-${options.forceCheckToken ?? crypto.randomUUID()}` : ''}`, `/v1/cases/${encoded(caseId)}/checks`, { expected_revision: row.case.revision, attempt_id: row.attempt.id, question_revision: row.case.current_question_revision, attempt_recognition_revision: row.attempt.recognition_revision }, 'Accepted', 'StartCheck')
           job = accepted.job
         }
-        d.checkJobs[caseId] = job.id; await this.save(ctx, d)
-        const done = await this.awaitJob(ctx, job.id); if (done.status !== 'succeeded') failures.push(done)
-        d.detail = await this.detail(ctx, d.homeworkId); await this.save(ctx, d)
+        d.checkJobs[caseId] = job.id; checkJobs.set(caseId, job); await this.save(ctx, d)
       }
+      const polled = await this.pollJobs(ctx, [...checkJobs.values()].map(job => job.id))
       d.detail = await this.detail(ctx, d.homeworkId)
-      if (failures.length) this.jobSucceeded(failures[0])
+      if (polled.some(active)) { d.error = null; d.stage = 'waiting'; await this.save(ctx, d); return this.view(d) }
+      const failure = polled.find(job => job.status !== 'succeeded')
+      if (failure) this.jobSucceeded(failure)
+      const unresolved = d.detail.cases.filter(row => !effectiveDecision(row))
+      if (unresolved.length) {
+        if (unresolved.some(row => row.attempt.recognition_status === 'failed')) throw new StudentError('recognition_failed', 0, '部分题目的识别服务未完成，未生成判断；请重试或请坐班老师核实。')
+        // A correction photo can finish recognition without enough answer
+        // evidence for a second-pass judgment. Keep the case visible for
+        // review, but do not turn a completed recognition into a false error.
+        if (d.correction && skipped.size === ids.length) { d.stage = 'complete'; await this.save(ctx, d); return this.view(d) }
+        // A pending attempt or a server-side queued check is unfinished work.
+        d.error = null; d.stage = skipped.size ? 'waiting' : 'checking'; await this.save(ctx, d); return this.view(d)
+      }
       d.stage = 'complete'; await this.save(ctx, d); return this.view(d)
     } catch (error) {
       this.check(ctx); d.error = safeError(error); d.stage = error instanceof StudentError && error.code === 'job_waiting' ? 'waiting' : 'failed'
@@ -621,15 +683,42 @@ export class StudentClient {
    * Idempotency-Key and these writes are not journaled; callers re-read
    * after an unknown outcome instead of replaying.
    */
-  private async learning<T>(path: (student: string) => string, guard: (value: unknown) => value is T, body?: unknown): Promise<{ value: T; student: string }> {
+  private async learning<T>(path: (student: string) => string, guard: (value: unknown) => value is T, body?: unknown, method?: 'PUT'): Promise<{ value: T; student: string }> {
     const ctx = await this.authorize()
-    const value = await this.api.request<unknown>(path(encoded(ctx.student)), 'Learning', body === undefined ? undefined : JSON.stringify(body), body === undefined ? undefined : crypto.randomUUID())
+    const value = await this.api.request<unknown>(path(encoded(ctx.student)), 'Learning', body === undefined ? undefined : JSON.stringify(body), body === undefined ? undefined : crypto.randomUUID(), false, method)
     this.check(ctx)
     if (!guard(value)) throw new StudentError('invalid_response', 502)
     return { value, student: ctx.student }
   }
   private owned<T extends { student_id: string }>(result: { value: T; student: string }): T { if (result.value.student_id !== result.student) throw new StudentError('access_denied', 403); return result.value }
   async knowledgeMap(): Promise<KnowledgeMap> { return this.owned(await this.learning(s => `/v1/students/${s}/knowledge`, isKnowledgeMap)) }
+  async setQuestionSubject(questionId: string, questionRevision: number, subject: string): Promise<void> {
+    const ctx = await this.authorize()
+    const value = await this.api.request<unknown>(`/v1/questions/${encoded(questionId)}/subject`, 'Learning',
+      JSON.stringify({ expected_question_revision: questionRevision, subject }), crypto.randomUUID(), false, 'PUT')
+    this.check(ctx)
+    if (typeof value !== 'object' || value === null || (value as { question_id?: unknown }).question_id !== questionId
+        || (value as { subject?: unknown }).subject !== subject) throw new StudentError('invalid_response', 502)
+  }
+  async curriculumCatalog(): Promise<CurriculumCatalog> {
+    const ctx = await this.authorize(), value = await this.api.request<unknown>('/v1/curriculum/catalog', 'Learning')
+    this.check(ctx); if (!isCurriculumCatalog(value)) throw new StudentError('invalid_response', 502); return value
+  }
+  async studentCurriculum(): Promise<StudentCurriculum> {
+    const { value, student } = await this.learning(s => `/v1/students/${s}/curriculum`, isStudentCurriculum)
+    if (value.student_id !== student) throw new StudentError('access_denied', 403)
+    return value
+  }
+  async setStudentGrade(grade: number): Promise<StudentCurriculum> {
+    if (![5, 6, 7, 8].includes(grade)) throw new StudentError('invalid_grade', 422, '请选择五至八年级。')
+    const profile = await this.learning(s => `/v1/students/${s}/learning-profile`, (value): value is { student_id: string; revision: number } => typeof value === 'object' && value !== null && typeof (value as { revision?: unknown }).revision === 'number' && (value as { student_id?: unknown }).student_id === this.student)
+    const current = profile.value as { revision: number }
+    const { value, student } = await this.learning(s => `/v1/students/${s}/learning-profile`, isStudentCurriculum, {
+      expected_revision: current.revision, grade, term: null, current_knowledge_ids: [], note: null,
+    }, 'PUT')
+    if (value.student_id !== student) throw new StudentError('access_denied', 403)
+    return value
+  }
   async knowledgeNode(knowledgeId: string): Promise<KnowledgeDetail> { return (await this.learning(s => `/v1/students/${s}/knowledge/${encoded(knowledgeId)}`, isKnowledgeDetail)).value }
   async agentContext(caseId: string): Promise<AgentContext> {
     const { value } = await this.learning(() => `/v1/cases/${encoded(caseId)}/agent-context`, isAgentContext)

@@ -20,6 +20,22 @@
 .knowledge-item-text strong{font-size:14px;font-weight:600}
 .knowledge-item-text span{font-size:12px;color:#6f7d68;line-height:1.7}
 .knowledge-notice{margin-top:22px;font-size:12px}
+.curriculum-grade{display:flex;gap:12px;align-items:center;margin:0 0 22px;color:var(--ink)}
+.curriculum-grade select{min-height:44px;padding:8px 14px;border:1px solid #cbd5c5;border-radius:6px;background:var(--paper);color:var(--ink)}
+.curriculum-overview{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;margin-bottom:24px}
+.curriculum-subject{background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:22px}
+.curriculum-subject-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.curriculum-subject-heading h2{font-size:22px}
+.curriculum-subject-heading p{color:var(--muted);font-size:12px;margin-top:4px}
+.curriculum-score{display:flex;align-items:baseline;gap:12px;margin:20px 0 4px}
+.curriculum-score strong{font-size:30px;color:var(--ink);font-weight:600}
+.curriculum-score span,.curriculum-counts{font-size:12px;color:var(--muted)}
+.curriculum-books{list-style:none;padding:0;margin:16px 0 0;border-top:1px solid var(--line)}
+.curriculum-books li{display:grid;gap:4px;padding:12px 0;border-bottom:1px solid #e4e7d8}
+.curriculum-books li>span{font-size:11px;color:#5d7a52}
+.curriculum-books strong{font-size:13px;font-weight:500;line-height:1.7}
+.curriculum-books small{font-size:11px;color:var(--muted)}
+.curriculum-source-note{font-size:12px;color:#7f6232;margin-top:12px}
 .knowledge-detail{background:var(--paper);border:1px solid #dcdfd1;border-radius:7px;padding:18px 22px 22px}
 .knowledge-detail-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px}
 .knowledge-reason{font-size:13px;color:#4d6747;margin-top:8px}

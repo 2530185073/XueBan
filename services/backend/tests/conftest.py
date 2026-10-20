@@ -109,7 +109,7 @@ def signing(tmp_path):
 
 @pytest.fixture
 def settings(database, signing):
-    return Settings(database_url=database.url, oidc_issuer=ISSUER, oidc_audience=AUDIENCE, jwt_public_key_file=str(signing.public_path), allow_sqlite_for_tests=True)
+    return Settings(database_url=database.url, oidc_issuer=ISSUER, oidc_audience=AUDIENCE, jwt_public_key_file=str(signing.public_path), allow_sqlite_for_tests=True, auto_check_after_recognition=False)
 
 
 @pytest.fixture

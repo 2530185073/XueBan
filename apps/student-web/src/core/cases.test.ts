@@ -26,6 +26,15 @@ const row = (id: string, assetId: string, y: number, x = 0): CaseDetail => ({
 })
 
 describe('orderRowsByPhoto', () => {
+  it('preserves server reading order when whole-page questions share the same source region', () => {
+    const rows = [row('z9', 'page_1', 0), row('a1', 'page_1', 0), row('k3', 'page_1', 0)]
+    rows.forEach((item, index) => { item.question.label = ['1', '三', '1'][index] })
+    expect(orderRowsByPhoto(rows, ['page_1']).map(item => item.case.id)).toEqual(['z9', 'a1', 'k3'])
+  })
+  it('reads the left question first when the right column starts slightly higher', () => {
+    const rows = [row('right', 'page_1', 95, 120), row('left', 'page_1', 100), row('next', 'page_1', 150)]
+    expect(orderRowsByPhoto(rows, ['page_1']).map(item => item.case.id)).toEqual(['left', 'right', 'next'])
+  })
   it('orders rows by page and coordinates instead of case IDs or printed labels', () => {
     const rows = [row('case_4', 'page_2', 20), row('case_3', 'page_1', 180), row('case_1', 'page_1', 20), row('case_2', 'page_1', 90)]
     expect(orderRowsByPhoto(rows, ['page_1', 'page_2']).map(item => item.case.id)).toEqual([

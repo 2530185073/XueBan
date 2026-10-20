@@ -139,7 +139,8 @@ def apply_repair(session, contracts, task, homework, result):
         if item:
             question["label"] = item["label"]
         row = save_entity(session, contracts, homework.id, "question", question)
-        row.annotations = {"label": item["label"]} if item else None
+        row.annotations = {"label": item["label"], "diagram": item.get("diagram") if not replacement["stem_text"] else None,
+                           "diagram_revision": 1} if item else None
         attempt = {"id": attempt_id, "revision": 1, "case_id": case_id, "question_id": question_id, "captured_question_revision": 1, "parent_attempt_id": None, "root_attempt_id": attempt_id, "asset_ids": list(dict.fromkeys(r["asset_id"] for r in replacement["regions"])), "recognition_revision": 1, "answer_text": item["answer_text"] if item else None, "answer_regions": answer_regions, "answer_status": item["answer_status"] if item else "unclear", "recognition_uncertainties": list(item.get("uncertainties", [])) if item else ["老师重新切分后仍需要核对这道题。"], "recognition_status": "ready" if ready else "needs_revision", "help_condition": "unknown", "occurred_at": iso(homework.occurred_at), "created_at": timestamp}
         attempt_row = save_entity(session, contracts, homework.id, "attempt", attempt)
         attempt_row.annotations = {"answer_status": item["answer_status"] if item else "unclear", "target_binding": "staff_layout" if item else "needs_staff"}

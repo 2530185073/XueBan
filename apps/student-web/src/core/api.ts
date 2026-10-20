@@ -3,7 +3,7 @@ import { valid } from './validation'
 
 const accountErrorStatus: Record<string, number> = { invalid_credentials: 401, login_rate_limited: 429, password_change_required: 403, username_conflict: 409 }
 // Codes of the later-phase learning endpoints that the phase-one Problem enum does not list.
-export const learningErrorStatus: Record<string, number> = { forbidden: 403, optional_gate_closed: 409, practice_not_needed: 409, course_unknown: 409, no_reviewed_items: 409, hints_disabled: 409, practice_active: 409 }
+export const learningErrorStatus: Record<string, number> = { forbidden: 403, optional_gate_closed: 409, practice_not_needed: 409, course_unknown: 409, subject_already_recognized: 409, no_reviewed_items: 409, hints_disabled: 409, practice_active: 409 }
 
 export class StudentApi {
   constructor(readonly origin: string, private token: () => string | null, private revoked: () => void, private transport: typeof fetch = (...args) => globalThis.fetch(...args)) {}
@@ -14,7 +14,7 @@ export class StudentApi {
     finally { await reader.cancel().catch(() => undefined) }
     const output = new Uint8Array(size); let offset = 0; for (const part of parts) { output.set(part, offset); offset += part.length } return output
   }
-  async request<T>(path: string, shape: string, body?: string, key?: string, publicRequest = false): Promise<T> {
+  async request<T>(path: string, shape: string, body?: string, key?: string, publicRequest = false, method?: 'PUT'): Promise<T> {
     if (!path.startsWith('/v1/') || path.split('?')[0].includes('..') || path.includes('#') || path.includes('\\')) throw new StudentError('invalid_path', 422)
     const token = this.token(); if (!publicRequest && !token) throw new StudentError('authentication_required', 401)
     const headers: Record<string, string> = { Accept: 'application/json' }
@@ -22,7 +22,7 @@ export class StudentApi {
     if (body !== undefined && !key) throw new StudentError('missing_idempotency_key', 422)
     if (body !== undefined) { headers['Content-Type'] = 'application/json'; headers['Idempotency-Key'] = key! }
     let response: Response
-    try { response = await this.transport(this.origin + path, { method: body === undefined ? 'GET' : 'POST', headers, body, cache: 'no-store', credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(30_000) }) }
+    try { response = await this.transport(this.origin + path, { method: method ?? (body === undefined ? 'GET' : 'POST'), headers, body, cache: 'no-store', credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(30_000) }) }
     catch { throw new StudentError('network_unknown') }
     if (!response.ok) {
       let code = `http_${response.status}`

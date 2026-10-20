@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Camera, Check, ChevronDown, CircleAlert, CircleX, Lightbulb } from 'lucide-react'
+import { Camera, Check, ChevronDown, CircleAlert, CircleX, Clock3, Lightbulb, LoaderCircle } from 'lucide-react'
 import type { CaseDetail } from '../core/types'
+import type { CurriculumScope } from '../core/learning'
 import type { Workspace } from '../useStudentWorkspace'
 import { effectiveDecision } from '../core'
 import { studentQuestionText, studentResultState, studentResultUncertain, type StudentResultState } from '../presentation'
@@ -10,30 +11,24 @@ interface RecognitionResultsProps {
   rows: CaseDetail[]
   workspace: Workspace
   onNext: () => void
+  onSelectSubject: (row: CaseDetail, subject: string) => void
 }
 
 const stateLabels: Record<StudentResultState, string> = {
   correct: '正确',
   incorrect: '错误',
   uncertain: '待确认',
+  processing: '处理中',
+  unprocessed: '尚未检查',
+  service_failure: '服务失败',
 }
 
-const reasonMethods: Record<string, string> = {
-  sign: '重新检查正负号，负数先加括号，再按运算顺序逐步计算。',
-  operation: '先判断题目中两个量的关系，再确认应该使用哪一种运算。',
-  distribution: '把括号外的因数分别乘到括号内每一项，检查有没有漏项。',
-  fraction: '先确认分数线包含的范围，再分别检查分子和分母的运算。',
-  units: '把每一步的单位写清楚，先统一单位，再检查数量关系。',
-  substitution: '把已知数逐个代入对应字母，负数代入时先加括号。',
-  diagram: '回到图形中逐一核对边、角和标记，再检查计算使用的条件。',
-  steps: '从第一处变化开始逐行检查，每一步只做一个运算并保留中间结果。',
-  insufficient_process: '补齐题目要求的关键步骤，再检查每一步是否由上一行正确得到。',
-}
-
-function fallbackMethod(row: CaseDetail) {
-  const decision = effectiveDecision(row)
-  return decision?.reason_code ? reasonMethods[decision.reason_code] : undefined
-}
+const controlledServiceUncertaintyMessages = new Set([
+  '请先在学生档案设置已支持的年级，并选择本题学科。',
+  '本题不在已配置的首发年级、学科和教材出版社范围内，暂不提供判题结论。',
+  '模型复核仍未能确认本题对错，请核对题目和作答后重试。',
+  '首轮与独立复核的结论不一致，请核对原题后重试。',
+])
 
 function answerText(row: CaseDetail) {
   if (row.attempt.answer_status === 'blank') return '未填写作答'
@@ -43,14 +38,19 @@ function answerText(row: CaseDetail) {
 function ResultIcon({ state }: { state: StudentResultState }) {
   if (state === 'correct') return <Check size={17} strokeWidth={2.5} />
   if (state === 'incorrect') return <CircleX size={17} strokeWidth={2.2} />
+  if (state === 'processing') return <LoaderCircle className="spin" size={17} strokeWidth={2.2} />
+  if (state === 'unprocessed') return <Clock3 size={17} strokeWidth={2.2} />
+  if (state === 'service_failure') return <CircleX size={17} strokeWidth={2.2} />
   return <CircleAlert size={17} strokeWidth={2.2} />
 }
 
-function QuestionCard({ row, index, open, onToggle }: { row: CaseDetail; index: number; open: boolean; onToggle: () => void }) {
+export function QuestionCard({ row, index, open, onToggle, subjects = [], onSelectSubject = () => {} }: { row: CaseDetail; index: number; open: boolean; onToggle: () => void; subjects?: CurriculumScope[]; onSelectSubject?: (subject: string) => void }) {
   const state = studentResultState(row)
   const decision = effectiveDecision(row)
+  const firstUncertainty = decision?.uncertainties?.[0]
+  const controlledServiceMessage = firstUncertainty && controlledServiceUncertaintyMessages.has(firstUncertainty) ? firstUncertainty : undefined
   const uncertain = studentResultUncertain(row)
-  const method = decision?.correction_method?.trim() || fallbackMethod(row)
+  const method = decision?.correction_method?.trim()
   const points = decision?.knowledge_points ?? []
   const stemText = studentQuestionText(row.question.stem_text, row.question.label)
   const uncertainties = [...new Set([
@@ -71,29 +71,43 @@ function QuestionCard({ row, index, open, onToggle }: { row: CaseDetail; index: 
         <p>{stemText || '题干暂未读清。'}</p>
         {!!row.question.blank_count && <span className="blank-note">填空题 · {row.question.blank_count} 个空</span>}
       </div>
-      <div className={`recognition-answer ${state}`}>
+      {decision?.answer_checks?.length ? <div className="recognition-answer-slots" aria-label="逐空判定">
+        {decision.answer_checks.map(part => <div key={part.index} className={`recognition-answer ${part.verdict === 'correct' ? 'correct' : part.verdict === 'unable_to_judge' ? 'uncertain' : 'incorrect'}`}>
+          <span className="recognition-label">第{part.index}{row.question.blank_count ? '空' : '项'} · {part.prompt}</span>
+          <p>{part.student_answer || '未作答'} <span className="slot-verdict">{part.verdict === 'correct' ? '✓ 正确' : part.verdict === 'unable_to_judge' ? '待核对' : '✕ 错误'}</span></p>
+          {part.verdict !== 'correct' && part.correct_answer && <p className="slot-correction">应填：{part.correct_answer}</p>}
+        </div>)}
+      </div> : <div className={`recognition-answer ${state}`}>
         <span className="recognition-label">我的作答</span>
         <p>{answerText(row)}</p>
-      </div>
+      </div>}
       {state === 'incorrect' && <div className="recognition-correct-answer">
         <span className="recognition-label">正确答案</span>
         <p>{decision?.correct_answer?.trim() || '暂未生成正确答案，请重新识别或请老师核对。'}</p>
       </div>}
       <div className="recognition-learning">
+        {!row.question.subject && subjects.length > 0 && <div className="recognition-subject-picker">
+          <span className="recognition-label">无法确定学科</span>
+          <div><select aria-label="选择题目学科" defaultValue="" onChange={event => { if (event.target.value) onSelectSubject(event.target.value) }}>
+            <option value="">请选择本题学科</option>
+            {subjects.map(subject => <option key={subject.subject} value={subject.subject}>{subject.subject} · {subject.publisher_name}</option>)}
+          </select><small>仅显示当前年级已配置且官方目录匹配的最新版教材。</small></div>
+        </div>}
         <div className="recognition-learning-row"><span>知识点</span><div className="knowledge-tags">{points.length ? points.map(point => <span key={point}>{point}</span>) : <em>暂未识别</em>}</div></div>
-        {(state === 'incorrect' || uncertain) && <div className="recognition-learning-row correction-method"><span><Lightbulb size={15} />改正方法</span><p>{method || '请重新读题，逐步检查题目条件、运算符号和最终作答。'}</p></div>}
+        {method && decision && ['incorrect', 'partially_correct', 'unanswered'].includes(decision.verdict) && <div className="recognition-learning-row correction-method"><span><Lightbulb size={15} />改正方法</span><p>{method}</p></div>}
       </div>
-      {uncertainties.length > 0 && <p className="recognition-uncertainty">* AI 对这道题的识别或判断存在不确定，请结合原图核对。</p>}
+      {uncertainties.length > 0 && <p className="recognition-uncertainty">{controlledServiceMessage ?? '* AI 对这道题的识别或判断存在不确定，请结合原图核对。'}</p>}
     </div>}
   </article>
 }
 
-export function RecognitionResults({ rows, workspace, onNext }: RecognitionResultsProps) {
+export function RecognitionResults({ rows, workspace, onNext, onSelectSubject }: RecognitionResultsProps) {
   const [openId, setOpenId] = useState<string | null>(null)
+  const subjects = workspace.studentCurriculum?.subjects.filter(subject => subject.catalog_status === 'available') ?? []
   return <div className="recognition-results">
     <ResultsSummary rows={rows} detail={null} compact />
     <p className="recognition-legend">按照片中的位置排列，序号连续显示。点击题目查看作答、正确答案、知识点和改正方法，正确/错误右上角的 * 表示 AI 识别存在不确定。</p>
-    <div className="recognition-card-list" aria-label="本次识别的题目">{rows.map((row, index) => <QuestionCard key={row.case.id} row={row} index={index} open={openId === row.case.id} onToggle={() => setOpenId(current => current === row.case.id ? null : row.case.id)} />)}</div>
+    <div className="recognition-card-list" aria-label="本次识别的题目">{rows.map((row, index) => <QuestionCard key={row.case.id} row={row} index={index} subjects={subjects} onSelectSubject={subject => onSelectSubject(row, subject)} open={openId === row.case.id} onToggle={() => setOpenId(current => current === row.case.id ? null : row.case.id)} />)}</div>
     <div className="next-capture-wrap"><button className="button primary next-capture" type="button" disabled={!!workspace.busy} onClick={onNext}><Camera size={18} />拍下一题</button></div>
   </div>
 }

@@ -22,6 +22,61 @@ from .errors import Problem
 from .models import Homework, Principal, PrincipalRole, Student
 
 
+def enqueue_check_task(session, contracts, homework, case, question, attempt, *, assets=None):
+    """Create or reuse one current check inside the caller's transaction."""
+    asset_ids = list(dict.fromkeys(
+        [region["asset_id"] for region in question.document["regions"]]
+        + list(attempt.document["asset_ids"])
+    ))
+    assets = assets if assets is not None else assets_for(session, homework.id, asset_ids)
+    versions = input_versions(case, question, attempt, assets)
+    decision_id = (case.document["current_decision"] or {}).get("id")
+    current_check_id = (case.document.get("check_ids") or [None])[-1]
+    reusable_statuses = {"queued", "running", "retryable_failed", "succeeded"}
+    for task in session.scalars(select(Task).where(
+        Task.homework_id == homework.id,
+        Task.kind == "check",
+        Task.status.in_(reusable_statuses),
+    )):
+        inputs = task.inputs
+        decision_matches = (
+            (case.document.get("current_decision") or {}).get("check_id") == inputs.get("check_id")
+            if task.status == "succeeded"
+            else inputs.get("decision_id_at_submission") == decision_id
+        )
+        if (inputs.get("case_id") == case.id
+                and inputs.get("check_id") == current_check_id
+                and decision_matches
+                and inputs.get("input_versions", {}).get("fingerprint") == versions["fingerprint"]):
+            return {"job": task.document, "created_resource": task.document.get("result")}
+
+    identifier = new_id("check")
+    resource = {"resource_type": "check", "resource_id": identifier}
+    task, accepted = create_task(session, contracts, homework, "check", {
+        "case_id": case.id,
+        "check_id": identifier,
+        "input_versions": versions,
+        "asset_ids": [asset.id for asset in assets],
+        "decision_id_at_submission": decision_id,
+    }, resource)
+    save_entity(session, contracts, homework.id, "check", {
+        "id": identifier,
+        "revision": 1,
+        "job_id": task.id,
+        "case_id": case.id,
+        "input_versions": versions,
+        "model_version": None,
+        "rule_version": None,
+        "prompt_version": None,
+        "decision_ids": [],
+        "created_at": iso(),
+    })
+    update_case(session, contracts, case,
+                check_ids=case.document["check_ids"] + [identifier],
+                progress="rechecking")
+    return accepted
+
+
 def install_correction(app, engine, cfg, database_session, current_actor):
     from .app import accessible_students, parse_time, require_student
 
@@ -91,6 +146,8 @@ def install_correction(app, engine, cfg, database_session, current_actor):
                 if snapshot is None:
                     raise Problem(404, "not_found", "not_found", "该历史版本不存在。")
                 document = snapshot.document
+            if resource == "question" and revision is None and row.annotations and row.annotations.get("subject_override"):
+                document = {**document, "subject": row.annotations["subject_override"]}
             if wrapper:
                 effective = document.get("revision") == row.revision and row.document.get("lifecycle", "active") == "active" and row.document.get("validity") not in {"stale", "retracted"}
                 if resource in {"attempt", "decision"}:
@@ -267,15 +324,8 @@ def install_correction(app, engine, cfg, database_session, current_actor):
         return question, attempt, assets, input_versions(case, question, attempt, assets)
 
     def check(session, actor, homework, case, payload):
-        question, attempt, assets, versions = context(session, homework, case, payload)
-        for task in session.scalars(select(Task).where(Task.homework_id == homework.id, Task.kind == "check", Task.status.in_(["queued", "running", "retryable_failed"]))):
-            if task.inputs.get("case_id") == case.id and task.inputs.get("input_versions", {}).get("fingerprint") == versions["fingerprint"]:
-                conflict(case.revision, "check_already_started")
-        identifier = new_id("check")
-        task, accepted = create_task(session, contracts, homework, "check", {"case_id": case.id, "check_id": identifier, "input_versions": versions, "asset_ids": [a.id for a in assets], "decision_id_at_submission": (case.document["current_decision"] or {}).get("id")}, {"resource_type": "check", "resource_id": identifier})
-        save_entity(session, contracts, homework.id, "check", {"id": identifier, "revision": 1, "job_id": task.id, "case_id": case.id, "input_versions": versions, "model_version": None, "rule_version": None, "prompt_version": None, "decision_ids": [], "created_at": iso()})
-        update_case(session, contracts, case, check_ids=case.document["check_ids"] + [identifier], progress="rechecking")
-        return accepted
+        question, attempt, assets, _ = context(session, homework, case, payload)
+        return enqueue_check_task(session, contracts, homework, case, question, attempt, assets=assets)
 
     def hint(session, actor, homework, case, payload):
         active_case(case)

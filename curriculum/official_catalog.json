@@ -1,12 +1,547 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "source": "国家中小学智慧教育平台 公开目录 (basic.smartedu.cn)",
   "catalog_url": "https://s-file-1.ykt.cbern.com.cn/zxx/ndrs/resources/tch_material/version/data_version.json",
-  "note": "只读取公开目录与详情 JSON；PDF 需登录平台下载，本脚本不下载。",
+  "verified_at": "2026-10-19T09:59:27.108083+00:00",
+  "note": "只读取公开目录与详情 JSON；PDF 需登录平台下载。目录中不存在同出版社版本时明确标为未匹配，不使用旧版或其他出版社替代。",
+  "requested_scopes": [
+    {
+      "grade": 7,
+      "subject": "语文",
+      "publisher": "人民教育出版社",
+      "version_tag": "统编版",
+      "status": "available",
+      "candidate_versions": [
+        "统编版"
+      ],
+      "book_ids": [
+        "g7-chinese-up",
+        "g7-chinese-down"
+      ]
+    },
+    {
+      "grade": 7,
+      "subject": "数学",
+      "publisher": "北京师范大学出版社",
+      "version_tag": "北师大版",
+      "status": "available",
+      "candidate_versions": [
+        "人教版",
+        "冀教版",
+        "北京版",
+        "北师大版",
+        "华东师大版",
+        "沪科技版",
+        "浙教版",
+        "湘教版",
+        "苏科版",
+        "青岛版"
+      ],
+      "book_ids": [
+        "g7-math-up",
+        "g7-math-down"
+      ]
+    },
+    {
+      "grade": 7,
+      "subject": "英语",
+      "publisher": "人民教育出版社",
+      "version_tag": "人教版",
+      "status": "available",
+      "candidate_versions": [
+        "人教版",
+        "冀教版",
+        "北师大版",
+        "外研社版（主编：孙有中）",
+        "沪外教版",
+        "沪教版",
+        "科普版",
+        "译林版",
+        "鲁教版"
+      ],
+      "book_ids": [
+        "g7-english-up",
+        "g7-english-down"
+      ]
+    },
+    {
+      "grade": 7,
+      "subject": "道德与法治",
+      "publisher": "人民教育出版社",
+      "version_tag": "统编版",
+      "status": "available",
+      "candidate_versions": [
+        "统编版"
+      ],
+      "book_ids": [
+        "g7-morality-law-up",
+        "g7-morality-law-down"
+      ]
+    },
+    {
+      "grade": 7,
+      "subject": "历史",
+      "publisher": "人民教育出版社",
+      "version_tag": "统编版",
+      "status": "available",
+      "candidate_versions": [
+        "统编版"
+      ],
+      "book_ids": [
+        "g7-history-up",
+        "g7-history-down"
+      ]
+    },
+    {
+      "grade": 7,
+      "subject": "地理",
+      "publisher": "人民教育出版社",
+      "version_tag": "人教版",
+      "status": "available",
+      "candidate_versions": [
+        "中华中图版",
+        "中图版（主编：王民）",
+        "中图版（主编：钟作慈）",
+        "人教版",
+        "商务星球版",
+        "晋教版",
+        "湘教版",
+        "科普版",
+        "粤教粤人版"
+      ],
+      "book_ids": [
+        "g7-geography-up",
+        "g7-geography-down"
+      ]
+    },
+    {
+      "grade": 7,
+      "subject": "生物",
+      "publisher": "江苏凤凰科学技术出版社",
+      "version_tag": "苏科版",
+      "status": "available",
+      "candidate_versions": [
+        "人教版",
+        "冀少版",
+        "北京版",
+        "北师大版",
+        "济南版",
+        "苏教版",
+        "苏科版"
+      ],
+      "book_ids": [
+        "g7-biology-up",
+        "g7-biology-down"
+      ]
+    },
+    {
+      "grade": 8,
+      "subject": "语文",
+      "publisher": "人民教育出版社",
+      "version_tag": "统编版",
+      "status": "available",
+      "candidate_versions": [
+        "统编版"
+      ],
+      "book_ids": [
+        "g8-chinese-up",
+        "g8-chinese-down"
+      ]
+    },
+    {
+      "grade": 8,
+      "subject": "数学",
+      "publisher": "北京师范大学出版社",
+      "version_tag": "北师大版",
+      "status": "available",
+      "candidate_versions": [
+        "人教版",
+        "冀教版",
+        "北京版",
+        "北师大版",
+        "华东师大版",
+        "沪科技版",
+        "浙教版",
+        "湘教版",
+        "苏科版",
+        "青岛版"
+      ],
+      "book_ids": [
+        "g8-math-up",
+        "g8-math-down"
+      ]
+    },
+    {
+      "grade": 8,
+      "subject": "英语",
+      "publisher": "人民教育出版社",
+      "version_tag": "人教版",
+      "status": "available",
+      "candidate_versions": [
+        "人教版",
+        "冀教版",
+        "北师大版",
+        "外研社版（主编：孙有中）",
+        "沪外教版",
+        "沪教版",
+        "科普版",
+        "译林版",
+        "鲁教版"
+      ],
+      "book_ids": [
+        "g8-english-up",
+        "g8-english-down"
+      ]
+    },
+    {
+      "grade": 8,
+      "subject": "物理",
+      "publisher": "江苏凤凰科学技术出版社",
+      "version_tag": "苏科版",
+      "status": "available",
+      "candidate_versions": [
+        "人教版",
+        "北师大版（主编：郭玉英）",
+        "教科版",
+        "沪科技粤教版",
+        "苏科版"
+      ],
+      "book_ids": [
+        "g8-physics-up",
+        "g8-physics-down"
+      ]
+    },
+    {
+      "grade": 8,
+      "subject": "道德与法治",
+      "publisher": "人民教育出版社",
+      "version_tag": "统编版",
+      "status": "available",
+      "candidate_versions": [
+        "统编版"
+      ],
+      "book_ids": [
+        "g8-morality-law-up",
+        "g8-morality-law-down"
+      ]
+    },
+    {
+      "grade": 8,
+      "subject": "历史",
+      "publisher": "人民教育出版社",
+      "version_tag": "统编版",
+      "status": "available",
+      "candidate_versions": [
+        "统编版"
+      ],
+      "book_ids": [
+        "g8-history-up",
+        "g8-history-down"
+      ]
+    },
+    {
+      "grade": 8,
+      "subject": "地理",
+      "publisher": "人民教育出版社",
+      "version_tag": "人教版",
+      "status": "available",
+      "candidate_versions": [
+        "中图版（主编：王民）",
+        "中图版（主编：钟作慈）",
+        "人教版",
+        "商务星球版",
+        "晋教版",
+        "湘教版",
+        "科普版",
+        "粤教粤人版"
+      ],
+      "book_ids": [
+        "g8-geography-up",
+        "g8-geography-down"
+      ]
+    },
+    {
+      "grade": 8,
+      "subject": "生物",
+      "publisher": "江苏凤凰科学技术出版社",
+      "version_tag": "苏科版",
+      "status": "available",
+      "candidate_versions": [
+        "人教版",
+        "冀少版",
+        "北京版",
+        "北师大版",
+        "济南版",
+        "苏教版",
+        "苏科版"
+      ],
+      "book_ids": [
+        "g8-biology-up",
+        "g8-biology-down"
+      ]
+    },
+    {
+      "grade": 5,
+      "subject": "体育与健康",
+      "publisher": "人民教育出版社",
+      "version_tag": "人教版",
+      "status": "available",
+      "candidate_versions": [
+        "人教版",
+        "冀教版",
+        "北京版",
+        "华东师大版",
+        "华中师大版",
+        "地质社版",
+        "教科版",
+        "未来社版",
+        "科学社版"
+      ],
+      "book_ids": [
+        "g5-physical-education-full"
+      ]
+    },
+    {
+      "grade": 5,
+      "subject": "艺术音乐",
+      "publisher": "人民音乐出版社",
+      "version_tag": "人音版",
+      "status": "incomplete",
+      "candidate_versions": [
+        "人教版（五线谱）",
+        "人教版（简谱）",
+        "人音版（主编：赵季平，杜永寿）",
+        "人音版（五线谱）（主编：李心草）",
+        "冀少版",
+        "接力社版",
+        "教科版",
+        "沪教版",
+        "湘文艺版",
+        "粤教花城版",
+        "苏少版（五线谱）",
+        "苏少版（简谱）",
+        "西南大学版",
+        "辽海版",
+        "鄂教版"
+      ],
+      "book_ids": [
+        "g5-music-up"
+      ]
+    },
+    {
+      "grade": 5,
+      "subject": "语文",
+      "publisher": "人民教育出版社",
+      "version_tag": "统编版",
+      "status": "available",
+      "candidate_versions": [
+        "统编版"
+      ],
+      "book_ids": [
+        "g5-chinese-up",
+        "g5-chinese-down"
+      ]
+    },
+    {
+      "grade": 5,
+      "subject": "数学",
+      "publisher": "人民教育出版社",
+      "version_tag": "人教版",
+      "status": "available",
+      "candidate_versions": [
+        "人教版",
+        "冀教版",
+        "北京版",
+        "北师大版",
+        "苏教版",
+        "西南大学版",
+        "青岛版"
+      ],
+      "book_ids": [
+        "g5-math-up",
+        "g5-math-down"
+      ]
+    },
+    {
+      "grade": 5,
+      "subject": "英语",
+      "publisher": "陕西旅游出版社",
+      "version_tag": "陕旅版",
+      "status": "available",
+      "candidate_versions": [
+        "人教大同版",
+        "人教版（主编：吴欣）",
+        "人教版（主编：苗兴伟）",
+        "冀教版",
+        "北京版",
+        "北师大版",
+        "外研社版(主编：张祖春）",
+        "外研社版（主编：刘兆义）",
+        "外研社版（主编：孙有中）",
+        "川教版",
+        "接力社版",
+        "教科版（主编：龚亚夫）",
+        "沪教版",
+        "清华大学版",
+        "湘少版",
+        "科普版",
+        "粤教沪外教版",
+        "译林版",
+        "辽宁师大版",
+        "重庆大学版",
+        "闽教版",
+        "陕旅版",
+        "鲁教湘教版",
+        "鲁科版"
+      ],
+      "book_ids": [
+        "g5-english-up",
+        "g5-english-down"
+      ]
+    },
+    {
+      "grade": 5,
+      "subject": "科学",
+      "publisher": "科学教育出版社",
+      "version_tag": null,
+      "status": "publisher_mismatch",
+      "candidate_versions": [
+        "人教鄂教版",
+        "冀人版",
+        "大象社版",
+        "教科版",
+        "湘科版",
+        "粤教科技版",
+        "苏教版",
+        "青岛版"
+      ],
+      "book_ids": []
+    },
+    {
+      "grade": 6,
+      "subject": "美术",
+      "publisher": "人民美术出版社",
+      "version_tag": "人美版",
+      "status": "available",
+      "candidate_versions": [
+        "人教版",
+        "人美版（主编：杨力）",
+        "人美版（主编：黄宗贤）",
+        "冀美版",
+        "岭南美版",
+        "桂美版",
+        "沪教版",
+        "浙人美版",
+        "湘美版",
+        "苏少版",
+        "赣美版",
+        "辽海版"
+      ],
+      "book_ids": [
+        "g6-art-up",
+        "g6-art-down"
+      ]
+    },
+    {
+      "grade": 6,
+      "subject": "语文",
+      "publisher": "人民教育出版社",
+      "version_tag": "统编版",
+      "status": "available",
+      "candidate_versions": [
+        "统编版"
+      ],
+      "book_ids": [
+        "g6-chinese-up",
+        "g6-chinese-down"
+      ]
+    },
+    {
+      "grade": 6,
+      "subject": "数学",
+      "publisher": "人民教育出版社",
+      "version_tag": "人教版",
+      "status": "available",
+      "candidate_versions": [
+        "人教版",
+        "冀教版",
+        "北京版",
+        "北师大版",
+        "苏教版",
+        "西南大学版",
+        "青岛版"
+      ],
+      "book_ids": [
+        "g6-math-up",
+        "g6-math-down"
+      ]
+    },
+    {
+      "grade": 6,
+      "subject": "英语",
+      "publisher": "陕西旅游出版社",
+      "version_tag": "陕旅版",
+      "status": "available",
+      "candidate_versions": [
+        "人教大同版",
+        "人教版（主编：吴欣）",
+        "人教版（主编：苗兴伟）",
+        "冀教版",
+        "北京版",
+        "北师大版",
+        "外研社版（主编：刘兆义）",
+        "外研社版（主编：孙有中）",
+        "川教版",
+        "接力社版",
+        "教科版（主编：龚亚夫）",
+        "沪教版",
+        "清华大学版",
+        "湘少版",
+        "科普版",
+        "粤教沪外教版",
+        "译林版",
+        "辽宁师大版",
+        "重庆大学版",
+        "闽教版",
+        "陕旅版",
+        "鲁教湘教版",
+        "鲁教版"
+      ],
+      "book_ids": [
+        "g6-english-up",
+        "g6-english-down"
+      ]
+    },
+    {
+      "grade": 6,
+      "subject": "科学",
+      "publisher": "教育科学出版社",
+      "version_tag": "教科版",
+      "status": "available",
+      "candidate_versions": [
+        "人教鄂教版",
+        "冀人版",
+        "大象社版",
+        "教科版",
+        "湘科版",
+        "粤教科技版",
+        "苏教版",
+        "青岛版"
+      ],
+      "book_ids": [
+        "g6-science-up",
+        "g6-science-down"
+      ]
+    }
+  ],
   "books": [
     {
       "id": "g7-chinese-up",
       "platform_id": "8b9c7052-add4-4744-ab04-69d6c180d5d9",
+      "grade": 7,
+      "subject": "语文",
+      "publisher": "人民教育出版社",
+      "term": "up",
       "title": "（根据2022年版课程标准修订）义务教育教科书·语文七年级上册",
       "version": "统编版",
       "catalog_year": null,
@@ -31,6 +566,10 @@
     {
       "id": "g7-chinese-down",
       "platform_id": "6b3ec445-9f7b-430c-a246-fc1903ca38b2",
+      "grade": 7,
+      "subject": "语文",
+      "publisher": "人民教育出版社",
+      "term": "down",
       "title": "（根据2022年版课程标准修订）义务教育教科书·语文七年级下册",
       "version": "统编版",
       "catalog_year": null,
@@ -55,6 +594,10 @@
     {
       "id": "g7-math-up",
       "platform_id": "8376191d-2d32-4c68-aba9-2f6c9dbfdf4a",
+      "grade": 7,
+      "subject": "数学",
+      "publisher": "北京师范大学出版社",
+      "term": "up",
       "title": "（根据2022年版课程标准修订）义务教育教科书•数学七年级上册",
       "version": "北师大版",
       "catalog_year": null,
@@ -79,6 +622,10 @@
     {
       "id": "g7-math-down",
       "platform_id": "547e13ff-e4c3-4542-b793-2c43dedb77c5",
+      "grade": 7,
+      "subject": "数学",
+      "publisher": "北京师范大学出版社",
+      "term": "down",
       "title": "（根据2022年版课程标准修订）义务教育教科书·数学七年级下册",
       "version": "北师大版",
       "catalog_year": null,
@@ -103,6 +650,10 @@
     {
       "id": "g7-english-up",
       "platform_id": "33f98190-ed21-f303-9657-d29d792f27a9",
+      "grade": 7,
+      "subject": "英语",
+      "publisher": "人民教育出版社",
+      "term": "up",
       "title": "（根据2022年版课程标准修订）义务教育教科书•英语 七年级上册",
       "version": "人教版",
       "catalog_year": 2026,
@@ -127,6 +678,10 @@
     {
       "id": "g7-english-down",
       "platform_id": "5f12c902-f141-4ae2-9dcb-e2c504a7783b",
+      "grade": 7,
+      "subject": "英语",
+      "publisher": "人民教育出版社",
+      "term": "down",
       "title": "（根据2022年版课程标准修订）义务教育教科书·英语 七年级 下册",
       "version": "人教版",
       "catalog_year": 2025,
@@ -151,6 +706,10 @@
     {
       "id": "g7-morality-law-up",
       "platform_id": "11446212-4b7b-4094-afe3-bd5b4f2b3f0c",
+      "grade": 7,
+      "subject": "道德与法治",
+      "publisher": "人民教育出版社",
+      "term": "up",
       "title": "（根据2022年版课程标准修订）义务教育教科书·道德与法治七年级上册",
       "version": "统编版",
       "catalog_year": null,
@@ -175,6 +734,10 @@
     {
       "id": "g7-morality-law-down",
       "platform_id": "4e1a2a9e-1e62-451f-a52e-ef99cb4e8bf2",
+      "grade": 7,
+      "subject": "道德与法治",
+      "publisher": "人民教育出版社",
+      "term": "down",
       "title": "（根据2022年版课程标准修订）义务教育教科书·道德与法治七年级下册",
       "version": "统编版",
       "catalog_year": null,
@@ -199,6 +762,10 @@
     {
       "id": "g7-history-up",
       "platform_id": "8fc851b4-28df-4eaa-8e55-08d63dc1fe38",
+      "grade": 7,
+      "subject": "历史",
+      "publisher": "人民教育出版社",
+      "term": "up",
       "title": "（根据2022年版课程标准修订）义务教育教科书·中国历史七年级上册",
       "version": "统编版",
       "catalog_year": null,
@@ -223,6 +790,10 @@
     {
       "id": "g7-history-down",
       "platform_id": "d5b610a4-f7ff-4212-9749-6bebac05ee0f",
+      "grade": 7,
+      "subject": "历史",
+      "publisher": "人民教育出版社",
+      "term": "down",
       "title": "（根据2022年版课程标准修订）义务教育教科书·中国历史七年级下册",
       "version": "统编版",
       "catalog_year": null,
@@ -247,6 +818,10 @@
     {
       "id": "g7-geography-up",
       "platform_id": "4d045a6b-46f3-42de-9c91-89bc443cbeff",
+      "grade": 7,
+      "subject": "地理",
+      "publisher": "人民教育出版社",
+      "term": "up",
       "title": "（根据2022年版课程标准修订）义务教育教科书·地理七年级上册",
       "version": "人教版",
       "catalog_year": null,
@@ -271,6 +846,10 @@
     {
       "id": "g7-geography-down",
       "platform_id": "8bc3c0a8-5f4b-4d80-8427-e5d35a8669ac",
+      "grade": 7,
+      "subject": "地理",
+      "publisher": "人民教育出版社",
+      "term": "down",
       "title": "（根据2022年版课程标准修订）义务教育教科书·地理七年级下册",
       "version": "人教版",
       "catalog_year": null,
@@ -295,6 +874,10 @@
     {
       "id": "g7-biology-up",
       "platform_id": "a2696c5a-4dd1-49dc-8248-6bf3c5789cba",
+      "grade": 7,
+      "subject": "生物",
+      "publisher": "江苏凤凰科学技术出版社",
+      "term": "up",
       "title": "（根据2022年版课程标准修订）义务教育教科书•生物学七年级上册",
       "version": "苏科版",
       "catalog_year": null,
@@ -319,6 +902,10 @@
     {
       "id": "g7-biology-down",
       "platform_id": "19b2c1d4-5c44-4c03-9beb-779bc2dd5f4e",
+      "grade": 7,
+      "subject": "生物",
+      "publisher": "江苏凤凰科学技术出版社",
+      "term": "down",
       "title": "（根据2022年版课程标准修订）义务教育教科书·生物学七年级下册",
       "version": "苏科版",
       "catalog_year": null,
@@ -343,6 +930,10 @@
     {
       "id": "g8-chinese-up",
       "platform_id": "4f64356a-8df7-4579-9400-e32c9a7f6718",
+      "grade": 8,
+      "subject": "语文",
+      "publisher": "人民教育出版社",
+      "term": "up",
       "title": "（根据2022年版课程标准修订）义务教育教科书·语文八年级上册",
       "version": "统编版",
       "catalog_year": null,
@@ -367,6 +958,10 @@
     {
       "id": "g8-chinese-down",
       "platform_id": "8f907d12-14b5-44ba-b042-0ffbc46e085b",
+      "grade": 8,
+      "subject": "语文",
+      "publisher": "人民教育出版社",
+      "term": "down",
       "title": "（根据2022年版课程标准修订）义务教育教科书·语文八年级下册",
       "version": "统编版",
       "catalog_year": null,
@@ -391,6 +986,10 @@
     {
       "id": "g8-math-up",
       "platform_id": "85ac3198-7050-441c-a614-493ea53e8d4a",
+      "grade": 8,
+      "subject": "数学",
+      "publisher": "北京师范大学出版社",
+      "term": "up",
       "title": "（根据2022年版课程标准修订）义务教育教科书•数学八年级上册",
       "version": "北师大版",
       "catalog_year": null,
@@ -415,6 +1014,10 @@
     {
       "id": "g8-math-down",
       "platform_id": "146b5d39-425a-46ee-a645-f62f4a61e1c1",
+      "grade": 8,
+      "subject": "数学",
+      "publisher": "北京师范大学出版社",
+      "term": "down",
       "title": "（根据2022年版课程标准修订）义务教育教科书·数学八年级下册",
       "version": "北师大版",
       "catalog_year": null,
@@ -439,6 +1042,10 @@
     {
       "id": "g8-english-up",
       "platform_id": "5700edda-c4c1-11ea-29c4-8fe2c1ca7beb",
+      "grade": 8,
+      "subject": "英语",
+      "publisher": "人民教育出版社",
+      "term": "up",
       "title": "（根据2022年版课程标准修订）义务教育教科书•英语 八年级上册",
       "version": "人教版",
       "catalog_year": 2026,
@@ -463,6 +1070,10 @@
     {
       "id": "g8-english-down",
       "platform_id": "467816b8-e76c-43fc-afc7-91638f97dba8",
+      "grade": 8,
+      "subject": "英语",
+      "publisher": "人民教育出版社",
+      "term": "down",
       "title": "（根据2022年版课程标准修订）义务教育教科书·英语八年级下册",
       "version": "人教版",
       "catalog_year": null,
@@ -487,6 +1098,10 @@
     {
       "id": "g8-physics-up",
       "platform_id": "6a9ba25f-3f1d-47e0-b578-c4bb7f3caab6",
+      "grade": 8,
+      "subject": "物理",
+      "publisher": "江苏凤凰科学技术出版社",
+      "term": "up",
       "title": "（根据2022年版课程标准修订）义务教育教科书•物理八年级上册",
       "version": "苏科版",
       "catalog_year": null,
@@ -511,6 +1126,10 @@
     {
       "id": "g8-physics-down",
       "platform_id": "fb4f5034-b963-4c7b-82ff-391b93b8bcd3",
+      "grade": 8,
+      "subject": "物理",
+      "publisher": "江苏凤凰科学技术出版社",
+      "term": "down",
       "title": "（根据2022年版课程标准修订）义务教育教科书·物理八年级下册",
       "version": "苏科版",
       "catalog_year": null,
@@ -535,6 +1154,10 @@
     {
       "id": "g8-morality-law-up",
       "platform_id": "5a29b928-d6da-4131-a69e-4c54941f7651",
+      "grade": 8,
+      "subject": "道德与法治",
+      "publisher": "人民教育出版社",
+      "term": "up",
       "title": "（根据2022年版课程标准修订）义务教育教科书·道德与法治八年级上册",
       "version": "统编版",
       "catalog_year": null,
@@ -559,6 +1182,10 @@
     {
       "id": "g8-morality-law-down",
       "platform_id": "f1db2a19-2513-4626-8e6c-275cf549bdf2",
+      "grade": 8,
+      "subject": "道德与法治",
+      "publisher": "人民教育出版社",
+      "term": "down",
       "title": "（根据2022年版课程标准修订）义务教育教科书·道德与法治八年级下册",
       "version": "统编版",
       "catalog_year": null,
@@ -583,6 +1210,10 @@
     {
       "id": "g8-history-up",
       "platform_id": "c1becbb7-300c-4ded-9310-f4444788b998",
+      "grade": 8,
+      "subject": "历史",
+      "publisher": "人民教育出版社",
+      "term": "up",
       "title": "（根据2022年版课程标准修订）义务教育教科书·中国历史八年级上册",
       "version": "统编版",
       "catalog_year": null,
@@ -607,6 +1238,10 @@
     {
       "id": "g8-history-down",
       "platform_id": "c91cf483-b7ca-4ab5-a9c8-7e64a90158ac",
+      "grade": 8,
+      "subject": "历史",
+      "publisher": "人民教育出版社",
+      "term": "down",
       "title": "（根据2022年版课程标准修订）义务教育教科书·中国历史八年级下册",
       "version": "统编版",
       "catalog_year": null,
@@ -631,6 +1266,10 @@
     {
       "id": "g8-geography-up",
       "platform_id": "4e916d49-8495-4606-9a97-672ba6489eb8",
+      "grade": 8,
+      "subject": "地理",
+      "publisher": "人民教育出版社",
+      "term": "up",
       "title": "（根据2022年版课程标准修订）义务教育教科书·地理八年级上册",
       "version": "人教版",
       "catalog_year": null,
@@ -655,6 +1294,10 @@
     {
       "id": "g8-geography-down",
       "platform_id": "f02521c3-69db-4125-ab18-16e2232863ea",
+      "grade": 8,
+      "subject": "地理",
+      "publisher": "人民教育出版社",
+      "term": "down",
       "title": "（根据2022年版课程标准修订）义务教育教科书·地理八年级下册",
       "version": "人教版",
       "catalog_year": null,
@@ -679,6 +1322,10 @@
     {
       "id": "g8-biology-up",
       "platform_id": "d6640bd0-cc2c-4deb-a2c5-5203dd72e04d",
+      "grade": 8,
+      "subject": "生物",
+      "publisher": "江苏凤凰科学技术出版社",
+      "term": "up",
       "title": "（根据2022年版课程标准修订）义务教育教科书•生物学八年级上册",
       "version": "苏科版",
       "catalog_year": null,
@@ -703,6 +1350,10 @@
     {
       "id": "g8-biology-down",
       "platform_id": "b9417eff-2d0f-4590-ada8-1ec279c73e5e",
+      "grade": 8,
+      "subject": "生物",
+      "publisher": "江苏凤凰科学技术出版社",
+      "term": "down",
       "title": "（根据2022年版课程标准修订）义务教育教科书·生物学八年级下册",
       "version": "苏科版",
       "catalog_year": null,
@@ -725,8 +1376,57 @@
       ]
     },
     {
+      "id": "g5-physical-education-full",
+      "platform_id": "db454455-5304-f652-2b3e-ab859c1b425a",
+      "grade": 5,
+      "subject": "体育与健康",
+      "publisher": "人民教育出版社",
+      "term": "full",
+      "title": "（根据2022年版课程标准修订）义务教育教科书•体育与健康 学生用书 五年级 （全一册）",
+      "version": "人教版",
+      "catalog_year": null,
+      "revised_2022_standard": true,
+      "isbn": null,
+      "bytes": null,
+      "updated_at": "2026-08-20T15:52:46.866+0800",
+      "alternatives": 0,
+      "preview_pages": []
+    },
+    {
+      "id": "g5-music-up",
+      "platform_id": "af3f64d3-b434-583d-1e27-aa28cb5ed319",
+      "grade": 5,
+      "subject": "艺术音乐",
+      "publisher": "人民音乐出版社",
+      "term": "up",
+      "title": "（根据2022年版课程标准修订）义务教育教科书•艺术•音乐（五线谱）（赵季平，杜永寿）五年级上册",
+      "version": "人音版",
+      "catalog_year": null,
+      "revised_2022_standard": true,
+      "isbn": "9787103073001",
+      "bytes": 52504376,
+      "updated_at": "2026-08-31T11:16:20.347+0800",
+      "alternatives": 1,
+      "preview_pages": [
+        "https://r1-ndr.ykt.cbern.com.cn/edu_product/esp/assets/af3f64d3-b434-583d-1e27-aa28cb5ed319.t/zh-CN/1788145899463/transcode/image/1.jpg",
+        "https://r3-ndr.ykt.cbern.com.cn/edu_product/esp/assets/af3f64d3-b434-583d-1e27-aa28cb5ed319.t/zh-CN/1788145899463/transcode/image/2.jpg",
+        "https://r3-ndr.ykt.cbern.com.cn/edu_product/esp/assets/af3f64d3-b434-583d-1e27-aa28cb5ed319.t/zh-CN/1788145899463/transcode/image/3.jpg",
+        "https://r3-ndr.ykt.cbern.com.cn/edu_product/esp/assets/af3f64d3-b434-583d-1e27-aa28cb5ed319.t/zh-CN/1788145899463/transcode/image/4.jpg",
+        "https://r2-ndr.ykt.cbern.com.cn/edu_product/esp/assets/af3f64d3-b434-583d-1e27-aa28cb5ed319.t/zh-CN/1788145899463/transcode/image/5.jpg",
+        "https://r3-ndr.ykt.cbern.com.cn/edu_product/esp/assets/af3f64d3-b434-583d-1e27-aa28cb5ed319.t/zh-CN/1788145899463/transcode/image/6.jpg",
+        "https://r2-ndr.ykt.cbern.com.cn/edu_product/esp/assets/af3f64d3-b434-583d-1e27-aa28cb5ed319.t/zh-CN/1788145899463/transcode/image/7.jpg",
+        "https://r2-ndr.ykt.cbern.com.cn/edu_product/esp/assets/af3f64d3-b434-583d-1e27-aa28cb5ed319.t/zh-CN/1788145899463/transcode/image/8.jpg",
+        "https://r2-ndr.ykt.cbern.com.cn/edu_product/esp/assets/af3f64d3-b434-583d-1e27-aa28cb5ed319.t/zh-CN/1788145899463/transcode/image/9.jpg",
+        "https://r1-ndr.ykt.cbern.com.cn/edu_product/esp/assets/af3f64d3-b434-583d-1e27-aa28cb5ed319.t/zh-CN/1788145899463/transcode/image/10.jpg"
+      ]
+    },
+    {
       "id": "g5-chinese-up",
       "platform_id": "aabf2e4a-3ceb-4e86-8804-22c10223cc57",
+      "grade": 5,
+      "subject": "语文",
+      "publisher": "人民教育出版社",
+      "term": "up",
       "title": "（根据2022年版课程标准修订）义务教育教科书·语文五年级上册",
       "version": "统编版",
       "catalog_year": null,
@@ -751,6 +1451,10 @@
     {
       "id": "g5-chinese-down",
       "platform_id": "98172dc9-8fba-4da6-9fae-6a3d1166f038",
+      "grade": 5,
+      "subject": "语文",
+      "publisher": "人民教育出版社",
+      "term": "down",
       "title": "义务教育教科书·语文五年级下册",
       "version": "统编版",
       "catalog_year": null,
@@ -775,6 +1479,10 @@
     {
       "id": "g5-math-up",
       "platform_id": "d0d6252f-2233-4f66-9ac9-440638d56fec",
+      "grade": 5,
+      "subject": "数学",
+      "publisher": "人民教育出版社",
+      "term": "up",
       "title": "（根据2022年版课程标准修订）义务教育教科书 · 数学五年级上册",
       "version": "人教版",
       "catalog_year": null,
@@ -799,6 +1507,10 @@
     {
       "id": "g5-math-down",
       "platform_id": "83339b94-2b33-4a9b-ba0e-026b4fdd4f0e",
+      "grade": 5,
+      "subject": "数学",
+      "publisher": "人民教育出版社",
+      "term": "down",
       "title": "义务教育教科书·数学五年级下册",
       "version": "人教版",
       "catalog_year": null,
@@ -823,6 +1535,10 @@
     {
       "id": "g5-english-up",
       "platform_id": "d1091104-6dfa-7b34-1aab-3022c371c772",
+      "grade": 5,
+      "subject": "英语",
+      "publisher": "陕西旅游出版社",
+      "term": "up",
       "title": "（根据2022年版课程标准修订）义务教育教科书 英语 五年级上册",
       "version": "陕旅版",
       "catalog_year": 2026,
@@ -847,6 +1563,10 @@
     {
       "id": "g5-english-down",
       "platform_id": "0d42a7db-b850-4c0d-b505-f26579d2aab3",
+      "grade": 5,
+      "subject": "英语",
+      "publisher": "陕西旅游出版社",
+      "term": "down",
       "title": "义务教育教科书·英语（三年级起点） 五年级 下册",
       "version": "陕旅版",
       "catalog_year": null,
@@ -869,56 +1589,68 @@
       ]
     },
     {
-      "id": "g5-science-up",
-      "platform_id": "4f4b95e8-022c-4685-a126-cc3bded02620",
-      "title": "（根据2022年版课程标准修订）义务教育教科书·科学五年级上册",
-      "version": "教科版",
+      "id": "g6-art-up",
+      "platform_id": "ab4a12b0-7d27-4f4e-832a-e6ac3d062c4e",
+      "grade": 6,
+      "subject": "美术",
+      "publisher": "人民美术出版社",
+      "term": "up",
+      "title": "（根据2022年版课程标准修订）义务教育教科书·美术六年级上册",
+      "version": "人美版",
       "catalog_year": null,
       "revised_2022_standard": true,
-      "isbn": "9787519150259",
-      "bytes": 373620578,
-      "updated_at": "2026-08-21T13:57:02.234+0800",
-      "alternatives": 0,
+      "isbn": "9787102090764",
+      "bytes": 41429048,
+      "updated_at": "2026-08-21T13:57:15.930+0800",
+      "alternatives": 1,
       "preview_pages": [
-        "https://r1-ndr.ykt.cbern.com.cn/edu_product/esp/assets/4f4b95e8-022c-4685-a126-cc3bded02620.t/zh-CN/1787020645687/transcode/image/1.jpg",
-        "https://r1-ndr.ykt.cbern.com.cn/edu_product/esp/assets/4f4b95e8-022c-4685-a126-cc3bded02620.t/zh-CN/1787020645687/transcode/image/2.jpg",
-        "https://r1-ndr.ykt.cbern.com.cn/edu_product/esp/assets/4f4b95e8-022c-4685-a126-cc3bded02620.t/zh-CN/1787020645687/transcode/image/3.jpg",
-        "https://r1-ndr.ykt.cbern.com.cn/edu_product/esp/assets/4f4b95e8-022c-4685-a126-cc3bded02620.t/zh-CN/1787020645687/transcode/image/4.jpg",
-        "https://r2-ndr.ykt.cbern.com.cn/edu_product/esp/assets/4f4b95e8-022c-4685-a126-cc3bded02620.t/zh-CN/1787020645687/transcode/image/5.jpg",
-        "https://r2-ndr.ykt.cbern.com.cn/edu_product/esp/assets/4f4b95e8-022c-4685-a126-cc3bded02620.t/zh-CN/1787020645687/transcode/image/6.jpg",
-        "https://r2-ndr.ykt.cbern.com.cn/edu_product/esp/assets/4f4b95e8-022c-4685-a126-cc3bded02620.t/zh-CN/1787020645687/transcode/image/7.jpg",
-        "https://r2-ndr.ykt.cbern.com.cn/edu_product/esp/assets/4f4b95e8-022c-4685-a126-cc3bded02620.t/zh-CN/1787020645687/transcode/image/8.jpg",
-        "https://r1-ndr.ykt.cbern.com.cn/edu_product/esp/assets/4f4b95e8-022c-4685-a126-cc3bded02620.t/zh-CN/1787020645687/transcode/image/9.jpg",
-        "https://r1-ndr.ykt.cbern.com.cn/edu_product/esp/assets/4f4b95e8-022c-4685-a126-cc3bded02620.t/zh-CN/1787020645687/transcode/image/10.jpg"
+        "https://r3-ndr.ykt.cbern.com.cn/edu_product/esp/assets/ab4a12b0-7d27-4f4e-832a-e6ac3d062c4e.t/zh-CN/1787020672301/transcode/image/1.jpg",
+        "https://r2-ndr.ykt.cbern.com.cn/edu_product/esp/assets/ab4a12b0-7d27-4f4e-832a-e6ac3d062c4e.t/zh-CN/1787020672301/transcode/image/2.jpg",
+        "https://r1-ndr.ykt.cbern.com.cn/edu_product/esp/assets/ab4a12b0-7d27-4f4e-832a-e6ac3d062c4e.t/zh-CN/1787020672301/transcode/image/3.jpg",
+        "https://r2-ndr.ykt.cbern.com.cn/edu_product/esp/assets/ab4a12b0-7d27-4f4e-832a-e6ac3d062c4e.t/zh-CN/1787020672301/transcode/image/4.jpg",
+        "https://r1-ndr.ykt.cbern.com.cn/edu_product/esp/assets/ab4a12b0-7d27-4f4e-832a-e6ac3d062c4e.t/zh-CN/1787020672301/transcode/image/5.jpg",
+        "https://r2-ndr.ykt.cbern.com.cn/edu_product/esp/assets/ab4a12b0-7d27-4f4e-832a-e6ac3d062c4e.t/zh-CN/1787020672301/transcode/image/6.jpg",
+        "https://r3-ndr.ykt.cbern.com.cn/edu_product/esp/assets/ab4a12b0-7d27-4f4e-832a-e6ac3d062c4e.t/zh-CN/1787020672301/transcode/image/7.jpg",
+        "https://r3-ndr.ykt.cbern.com.cn/edu_product/esp/assets/ab4a12b0-7d27-4f4e-832a-e6ac3d062c4e.t/zh-CN/1787020672301/transcode/image/8.jpg",
+        "https://r3-ndr.ykt.cbern.com.cn/edu_product/esp/assets/ab4a12b0-7d27-4f4e-832a-e6ac3d062c4e.t/zh-CN/1787020672301/transcode/image/9.jpg",
+        "https://r1-ndr.ykt.cbern.com.cn/edu_product/esp/assets/ab4a12b0-7d27-4f4e-832a-e6ac3d062c4e.t/zh-CN/1787020672301/transcode/image/10.jpg"
       ]
     },
     {
-      "id": "g5-science-down",
-      "platform_id": "9a2bcf38-3f8e-4835-9466-341207f7d02c",
-      "title": "义务教育教科书·科学五年级下册",
-      "version": "教科版",
+      "id": "g6-art-down",
+      "platform_id": "e66767ae-6a6b-4815-b74f-3a512a7b8b1c",
+      "grade": 6,
+      "subject": "美术",
+      "publisher": "人民美术出版社",
+      "term": "down",
+      "title": "义务教育教科书·美术六年级下册",
+      "version": "人美版",
       "catalog_year": null,
       "revised_2022_standard": false,
       "isbn": null,
-      "bytes": 105958062,
-      "updated_at": "2026-09-04T10:10:15.150+0800",
+      "bytes": 64461548,
+      "updated_at": "2026-09-04T10:10:51.200+0800",
       "alternatives": 0,
       "preview_pages": [
-        "https://r2-ndr.ykt.cbern.com.cn/edu_product/esp/assets/9a2bcf38-3f8e-4835-9466-341207f7d02c.t/zh-CN/1737863651218/transcode/image/1.jpg",
-        "https://r2-ndr.ykt.cbern.com.cn/edu_product/esp/assets/9a2bcf38-3f8e-4835-9466-341207f7d02c.t/zh-CN/1737863651218/transcode/image/2.jpg",
-        "https://r3-ndr.ykt.cbern.com.cn/edu_product/esp/assets/9a2bcf38-3f8e-4835-9466-341207f7d02c.t/zh-CN/1737863651218/transcode/image/3.jpg",
-        "https://r1-ndr.ykt.cbern.com.cn/edu_product/esp/assets/9a2bcf38-3f8e-4835-9466-341207f7d02c.t/zh-CN/1737863651218/transcode/image/4.jpg",
-        "https://r2-ndr.ykt.cbern.com.cn/edu_product/esp/assets/9a2bcf38-3f8e-4835-9466-341207f7d02c.t/zh-CN/1737863651218/transcode/image/5.jpg",
-        "https://r2-ndr.ykt.cbern.com.cn/edu_product/esp/assets/9a2bcf38-3f8e-4835-9466-341207f7d02c.t/zh-CN/1737863651218/transcode/image/6.jpg",
-        "https://r2-ndr.ykt.cbern.com.cn/edu_product/esp/assets/9a2bcf38-3f8e-4835-9466-341207f7d02c.t/zh-CN/1737863651218/transcode/image/7.jpg",
-        "https://r1-ndr.ykt.cbern.com.cn/edu_product/esp/assets/9a2bcf38-3f8e-4835-9466-341207f7d02c.t/zh-CN/1737863651218/transcode/image/8.jpg",
-        "https://r1-ndr.ykt.cbern.com.cn/edu_product/esp/assets/9a2bcf38-3f8e-4835-9466-341207f7d02c.t/zh-CN/1737863651218/transcode/image/9.jpg",
-        "https://r3-ndr.ykt.cbern.com.cn/edu_product/esp/assets/9a2bcf38-3f8e-4835-9466-341207f7d02c.t/zh-CN/1737863651218/transcode/image/10.jpg"
+        "https://r3-ndr.ykt.cbern.com.cn/edu_product/esp/assets/e66767ae-6a6b-4815-b74f-3a512a7b8b1c.t/zh-CN/1688378298621/transcode/image/1.jpg",
+        "https://r1-ndr.ykt.cbern.com.cn/edu_product/esp/assets/e66767ae-6a6b-4815-b74f-3a512a7b8b1c.t/zh-CN/1688378298621/transcode/image/2.jpg",
+        "https://r1-ndr.ykt.cbern.com.cn/edu_product/esp/assets/e66767ae-6a6b-4815-b74f-3a512a7b8b1c.t/zh-CN/1688378298621/transcode/image/3.jpg",
+        "https://r2-ndr.ykt.cbern.com.cn/edu_product/esp/assets/e66767ae-6a6b-4815-b74f-3a512a7b8b1c.t/zh-CN/1688378298621/transcode/image/4.jpg",
+        "https://r1-ndr.ykt.cbern.com.cn/edu_product/esp/assets/e66767ae-6a6b-4815-b74f-3a512a7b8b1c.t/zh-CN/1688378298621/transcode/image/5.jpg",
+        "https://r3-ndr.ykt.cbern.com.cn/edu_product/esp/assets/e66767ae-6a6b-4815-b74f-3a512a7b8b1c.t/zh-CN/1688378298621/transcode/image/6.jpg",
+        "https://r3-ndr.ykt.cbern.com.cn/edu_product/esp/assets/e66767ae-6a6b-4815-b74f-3a512a7b8b1c.t/zh-CN/1688378298621/transcode/image/7.jpg",
+        "https://r2-ndr.ykt.cbern.com.cn/edu_product/esp/assets/e66767ae-6a6b-4815-b74f-3a512a7b8b1c.t/zh-CN/1688378298621/transcode/image/8.jpg",
+        "https://r3-ndr.ykt.cbern.com.cn/edu_product/esp/assets/e66767ae-6a6b-4815-b74f-3a512a7b8b1c.t/zh-CN/1688378298621/transcode/image/9.jpg",
+        "https://r2-ndr.ykt.cbern.com.cn/edu_product/esp/assets/e66767ae-6a6b-4815-b74f-3a512a7b8b1c.t/zh-CN/1688378298621/transcode/image/10.jpg"
       ]
     },
     {
       "id": "g6-chinese-up",
       "platform_id": "2e3dc199-9c42-486b-bbee-7731bd0ee227",
+      "grade": 6,
+      "subject": "语文",
+      "publisher": "人民教育出版社",
+      "term": "up",
       "title": "（根据2022年版课程标准修订）义务教育教科书·语文六年级上册",
       "version": "统编版",
       "catalog_year": null,
@@ -943,6 +1675,10 @@
     {
       "id": "g6-chinese-down",
       "platform_id": "06422d77-21f1-45c3-b409-fa2947eee424",
+      "grade": 6,
+      "subject": "语文",
+      "publisher": "人民教育出版社",
+      "term": "down",
       "title": "义务教育教科书·语文六年级下册",
       "version": "统编版",
       "catalog_year": null,
@@ -967,6 +1703,10 @@
     {
       "id": "g6-math-up",
       "platform_id": "845136d4-e27b-4e7e-b9a9-00cadf4f9e20",
+      "grade": 6,
+      "subject": "数学",
+      "publisher": "人民教育出版社",
+      "term": "up",
       "title": "（根据2022年版课程标准修订）义务教育教科书 · 数学六年级上册",
       "version": "人教版",
       "catalog_year": null,
@@ -991,6 +1731,10 @@
     {
       "id": "g6-math-down",
       "platform_id": "8e650f4c-e616-4699-ac0a-4911b22e2f2e",
+      "grade": 6,
+      "subject": "数学",
+      "publisher": "人民教育出版社",
+      "term": "down",
       "title": "义务教育教科书·数学六年级下册",
       "version": "人教版",
       "catalog_year": null,
@@ -1015,6 +1759,10 @@
     {
       "id": "g6-english-up",
       "platform_id": "ee8d5ed9-f613-9928-42f3-e282497fc32b",
+      "grade": 6,
+      "subject": "英语",
+      "publisher": "陕西旅游出版社",
+      "term": "up",
       "title": "（根据2022年版课程标准修订）义务教育教科书 英语 六年级上册",
       "version": "陕旅版",
       "catalog_year": 2026,
@@ -1039,6 +1787,10 @@
     {
       "id": "g6-english-down",
       "platform_id": "4d2c8c36-d8c4-45dd-8703-fe32dcba0b5d",
+      "grade": 6,
+      "subject": "英语",
+      "publisher": "陕西旅游出版社",
+      "term": "down",
       "title": "义务教育教科书·英语（三年级起点）六年级下册",
       "version": "陕旅版",
       "catalog_year": null,
@@ -1063,6 +1815,10 @@
     {
       "id": "g6-science-up",
       "platform_id": "89bce7a4-35e0-48a0-a29a-f9b97f14354d",
+      "grade": 6,
+      "subject": "科学",
+      "publisher": "教育科学出版社",
+      "term": "up",
       "title": "（根据2022年版课程标准修订）义务教育教科书·科学六年级上册",
       "version": "教科版",
       "catalog_year": null,
@@ -1087,6 +1843,10 @@
     {
       "id": "g6-science-down",
       "platform_id": "2c4fe2cc-076f-47bf-9962-39816e866429",
+      "grade": 6,
+      "subject": "科学",
+      "publisher": "教育科学出版社",
+      "term": "down",
       "title": "义务教育教科书·科学六年级下册",
       "version": "教科版",
       "catalog_year": null,

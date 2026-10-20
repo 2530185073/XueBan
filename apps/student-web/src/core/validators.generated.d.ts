@@ -1,4 +1,5 @@
 // Generated; do not edit.
+export declare const data_AnswerCheck: (value: unknown) => boolean
 export declare const data_Scope: (value: unknown) => boolean
 export declare const data_CurriculumContext: (value: unknown) => boolean
 export declare const data_Region: (value: unknown) => boolean

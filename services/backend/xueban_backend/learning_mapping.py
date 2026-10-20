@@ -18,6 +18,8 @@ from .correction_models import Entity
 from .learning_models import KnowledgeNode, LearningOutbox, QuestionKnowledgeLink, StudentLearningProfile
 from .learning_projection import enqueue, new_id, published_graph, register_job_handler, register_projection_followup
 from .models import Homework
+from .curriculum_catalog import (canonical_subject, graph_is_latest_reviewed, node_matches_scope,
+                                 scope_for_subject, scope_payload)
 from .providers.prompts import Role
 
 MAX_LINKS = 3
@@ -65,7 +67,7 @@ def auto_confirm_model_links(session, tenant_id: str, student_id: str) -> int:
     link later through the existing append-only review flow.
     """
     graph = published_graph(session)
-    if graph is None:
+    if graph is None or not graph_is_latest_reviewed(graph):
         return 0
     nodes = list(session.scalars(select(KnowledgeNode).where(
         KnowledgeNode.graph_version == graph.version,
@@ -86,11 +88,25 @@ def auto_confirm_model_links(session, tenant_id: str, student_id: str) -> int:
         question = session.get(Entity, document.get("question_id"))
         if question is None:
             continue
+        homework = session.get(Homework, case.homework_id)
+        curriculum = homework.curriculum if homework and isinstance(homework.curriculum, dict) else {}
+        profile = session.get(StudentLearningProfile, student_id)
+        grade = profile.document.get("grade") if profile else None
+        subject = canonical_subject((question.annotations or {}).get("subject_override")
+                                    or question.document.get("subject"))
+        scoped = scope_for_subject(grade, subject)
+        if (scoped is None or curriculum.get("grade") != grade
+                or curriculum.get("edition") != "publisher_latest"
+                or (curriculum.get("subject") is not None and canonical_subject(curriculum.get("subject")) != subject)
+                or (curriculum.get("publisher_code") is not None and curriculum.get("publisher_code") != scoped.publisher_code)
+                or scope_payload(scoped)["catalog_status"] != "available"):
+            continue
+        eligible_nodes = [node for node in nodes if node_matches_scope(node, scoped)]
         labels = [value.strip() for value in decision.get("knowledge_points", [])
                   if isinstance(value, str) and value.strip()]
         matched = []
         for label in labels:
-            node = _match_node(label, nodes)
+            node = _match_node(label, eligible_nodes)
             if node and node.id not in {item.id for item in matched}:
                 matched.append(node)
             if len(matched) == MAX_LINKS:
@@ -153,8 +169,18 @@ def suggest_links(session, job, worker):
     graph = published_graph(session)
     if graph is None:
         return {"status": "no_published_graph"}
+    homework = session.get(Homework, question.homework_id)
+    curriculum = homework.curriculum if homework and isinstance(homework.curriculum, dict) else {}
     profile = session.get(StudentLearningProfile, job.student_id)
-    nodes = _candidates(session, graph.version, (profile.document.get("grade") if profile else None))
+    grade = profile.document.get("grade") if profile else None
+    subject = canonical_subject((question.annotations or {}).get("subject_override")
+                                or question.document.get("subject"))
+    scoped = scope_for_subject(grade, subject)
+    if (scoped is None or graph.review_status != "publisher_latest_reviewed"
+            or curriculum.get("grade") != grade or curriculum.get("edition") != "publisher_latest"
+            or scope_payload(scoped)["catalog_status"] != "available"):
+        return {"status": "no_latest_curriculum_graph"}
+    nodes = [node for node in _candidates(session, graph.version, grade) if node_matches_scope(node, scoped)]
     ids = [n.id for n in nodes]
     text = json.dumps({"question": question.document["stem_text"],
                        "candidates": [{"id": n.id, "name": n.name, "objective": n.observable_objective} for n in nodes]},

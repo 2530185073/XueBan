@@ -8,10 +8,12 @@ import argparse
 import base64
 import re
 import sys
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import asdict
 from datetime import timedelta
 import time
+from threading import Event, Thread
 import unicodedata
 
 from sqlalchemy import and_, or_, select, update
@@ -20,11 +22,15 @@ from sqlalchemy.orm import Session
 from .asset_store import LocalAssetStore
 from .config import Settings
 from .contracts import Contracts
+from .correction_api import enqueue_check_task
 from .correction_core import (assets_for, create_task, event, get_entity, input_versions, invalidate, iso,
     new_id, now, save_entity, set_task, update_case)
 from .correction_models import Asset, Entity, Task
 from .db import create_database_engine
 from .errors import Problem
+from .learning_models import CurriculumGraph, KnowledgeNode, StudentLearningProfile
+from .curriculum_catalog import (canonical_subject, graph_is_latest_reviewed, node_matches_scope,
+                                 scope_for_subject, scope_payload)
 from .layout_repair import apply_repair, recognize_replacements
 from .models import Homework, Student
 from .providers import ProviderError
@@ -91,13 +97,68 @@ class CorrectionWorker:
                 attempt_input = deepcopy(attempt.document)
                 if attempt.annotations and "answer_status" in attempt.annotations:
                     attempt_input["answer_status"] = attempt.annotations["answer_status"]
+                if (attempt.annotations and attempt.annotations.get("slots_recognition_revision") == attempt.document["recognition_revision"]
+                        and attempt.annotations.get("slots_question_revision") == question.revision):
+                    attempt_input["answer_slots"] = deepcopy(attempt.annotations.get("answer_slots", []))
                 question_input = deepcopy(question.document)
+                if question.annotations and question.annotations.get("subject_override"):
+                    question_input["subject"] = question.annotations["subject_override"]
                 if question.annotations and question.annotations.get("label"):
                     question_input["label"] = question.annotations["label"]
+                if question.annotations and question.annotations.get("diagram") and question.annotations.get("diagram_revision") == question.revision:
+                    question_input["diagram"] = deepcopy(question.annotations["diagram"])
+                if question.annotations and question.annotations.get("diagram_revision") == question.revision:
+                    question_input["has_diagram"] = bool(question.annotations.get("has_diagram"))
                 context.update(question=question_input, attempt=attempt_input, input_versions=deepcopy(versions))
+                if task.kind == "check":
+                    context.update(self._student_learning_context(session, homework, student, question))
                 if task.kind == "hint":
                     context.update(decision=deepcopy(case.document["current_decision"]), level=task.inputs["level"])
             return task.kind, context
+
+    @staticmethod
+    def _student_learning_context(session, homework, student, question=None):
+        """Return the approved textbook scope even when no reviewed graph can supply tags."""
+        profile = session.get(StudentLearningProfile, student.id)
+        grade = (profile.document.get("grade") if profile else None)
+        if type(grade) is not int or grade not in (5, 6, 7, 8):
+            grade = None
+        context = {"student_grade": grade, "knowledge_point_candidates": [],
+                   "curriculum_context": {"scope": None, "status": "unsupported_scope",
+                                          "revision_policy": "publisher_latest"}}
+        if grade is None:
+            return context
+        subject = canonical_subject(((question.annotations or {}).get("subject_override")
+                                     or question.document.get("subject")) if question is not None else None)
+        if subject is None:
+            context["curriculum_context"]["status"] = "unresolved_subject"
+            return context
+        scoped = scope_for_subject(grade, subject)
+        if scoped is None:
+            return context
+        curriculum = homework.curriculum if isinstance(homework.curriculum, dict) else {}
+        if ((curriculum.get("subject") is not None
+             and canonical_subject(curriculum["subject"]) != subject)
+                or (curriculum.get("publisher_code") is not None
+                    and curriculum["publisher_code"] != scoped.publisher_code)):
+            return context
+        scope = scope_payload(scoped)
+        context["curriculum_context"].update(scope=scope, status="unverified_edition")
+        if (curriculum.get("grade") != grade or curriculum.get("edition") != "publisher_latest"
+                or scope["catalog_status"] != "available"):
+            return context
+        context["curriculum_context"]["status"] = "available"
+        graph = session.scalar(select(CurriculumGraph).where(
+            CurriculumGraph.status == "published"
+        ).order_by(CurriculumGraph.published_at.desc()).limit(1))
+        if graph is None or not graph_is_latest_reviewed(graph):
+            return context
+        nodes = session.scalars(select(KnowledgeNode).where(
+            KnowledgeNode.graph_version == graph.version,
+            KnowledgeNode.node_type.in_(("concept", "skill")),
+        ).order_by(KnowledgeNode.sort_order))
+        context["knowledge_point_candidates"] = [node.name for node in nodes if node_matches_scope(node, scoped)]
+        return context
 
     def _current(self, session, task, case, question, attempt):
         versions = task.inputs["input_versions"]
@@ -111,6 +172,42 @@ class CorrectionWorker:
             return current is not None and current["id"] == task.inputs["source_decision_id"] and current["revision"] == task.inputs["source_decision_revision"] and current["validity"] in {"candidate", "needs_review", "confirmed"}
         return (current or {}).get("id") == task.inputs.get("decision_id_at_submission") and case.document["check_ids"][-1] == task.inputs["check_id"]
 
+    def renew_lease(self, identifier, token):
+        """Extend only a live lease owned by this execution, never revive an old one."""
+        timestamp = now()
+        with Session(self.engine) as session:
+            updated = session.execute(update(Task).where(
+                Task.id == identifier, Task.status == "running", Task.lease_token == token,
+                Task.lease_expires_at > timestamp,
+            ).values(lease_expires_at=timestamp + timedelta(seconds=max(120, self.settings.worker_lease_seconds))))
+            session.commit()
+            return updated.rowcount == 1
+
+    @contextmanager
+    def _keep_lease(self, identifier, token):
+        # A page may now require multiple bounded provider calls. Renew in a
+        # separate short transaction while inference runs, retaining token fencing.
+        stopped = Event()
+        interval = min(30, max(120, self.settings.worker_lease_seconds) / 3)
+
+        def heartbeat():
+            while not stopped.wait(interval):
+                try:
+                    if not self.renew_lease(identifier, token):
+                        return
+                except Exception:
+                    # A transient DB failure can recover next tick; finish still
+                    # refuses an expired lease. Never log connection details.
+                    continue
+
+        thread = Thread(target=heartbeat, daemon=True, name="correction-lease")
+        thread.start()
+        try:
+            yield
+        finally:
+            stopped.set()
+            thread.join(timeout=1)
+
     def run_once(self):
         claim = self.claim()
         if claim is None:
@@ -122,17 +219,19 @@ class CorrectionWorker:
             if loaded is None:
                 return True
             kind, context = loaded
-            if kind in {"recognize_homework", "recognize_attempt"}:
-                result = self.pipeline.recognize(**context)
-            elif kind == "check":
-                method = self.pipeline.recheck if context["attempt"]["parent_attempt_id"] is not None else self.pipeline.check
-                result = method(**context)
-            elif kind == "hint":
-                result = self.pipeline.hint(**context)
-            elif kind == "repair_layout":
-                result = recognize_replacements(self.pipeline, self.store, context["assets"], context["replacements"])
-            else:
-                raise ProviderError("invalid_input")
+            with self._keep_lease(identifier, token):
+                if kind in {"recognize_homework", "recognize_attempt"}:
+                    result = self.pipeline.recognize(**context)
+                elif kind == "check":
+                    method = self.pipeline.recheck if context["attempt"]["parent_attempt_id"] is not None else self.pipeline.check
+                    result = method(**context)
+                elif kind == "hint":
+                    result = self.pipeline.hint(**context)
+                elif kind == "repair_layout":
+                    result = recognize_replacements(self.pipeline, self.store, context["assets"], context["replacements"])
+                else:
+                    raise ProviderError("invalid_input")
+            # Stop heartbeat writes before committing the result transaction.
             self.finish(identifier, token, result=result)
         except ProviderError as error:
             self.finish(identifier, token, error=error, result=result)
@@ -216,8 +315,8 @@ class CorrectionWorker:
         if task.kind == "repair_layout":
             return apply_repair(session, self.contracts, task, homework, result)
         if task.kind == "recognize_homework":
-            for item in result.data["items"]:
-                self._new_question(session, homework, task, item)
+            for index, item in enumerate(result.data["items"]):
+                self._new_question(session, homework, task, {**item, "reading_order": index})
             coverage = deepcopy(result.data["coverage"])
             if not result.data["items"]:
                 coverage["collection_scope"] = "unknown"
@@ -225,6 +324,21 @@ class CorrectionWorker:
             self.contracts.validate("Coverage", coverage)
             homework.coverage_json = coverage
             homework.revision += 1
+            if self.settings.auto_check_after_recognition:
+                # Recognition and the complete per-question check set share
+                # this finish transaction. The shared helper is idempotent,
+                # so retries and a concurrent client cannot create duplicate
+                # current checks.
+                cases = session.scalars(select(Entity).where(
+                    Entity.homework_id == homework.id,
+                    Entity.kind == "case",
+                )).all()
+                for case in cases:
+                    if case.document["lifecycle"] != "active":
+                        continue
+                    question = get_entity(session, case.document["question_id"], "question")
+                    attempt = get_entity(session, case.document["current_attempt_id"], "attempt")
+                    enqueue_check_task(session, self.contracts, homework, case, question, attempt)
             return {"resource_type": "homework", "resource_id": homework.id}
         if task.kind == "recognize_attempt":
             attempt = get_entity(session, task.inputs["attempt_id"], "attempt")
@@ -253,6 +367,9 @@ class CorrectionWorker:
             doc = {**attempt.document, "revision": attempt.revision + 1, "recognition_revision": attempt.document["recognition_revision"] + 1, "answer_text": item["answer_text"] if same_question else None, "answer_regions": item["answer_regions"] if same_question else [], "answer_status": item["answer_status"] if same_question else "unclear", "recognition_uncertainties": list(item.get("uncertainties", [])) if same_question else ["订正照片与目标题目未能可靠对应。"], "recognition_status": "ready" if ready else "needs_revision"}
             save_entity(session, self.contracts, homework.id, "attempt", doc, row=attempt)
             attempt.annotations = {"answer_status": item["answer_status"] if same_question else "unclear", "target_binding": "matched_stem" if same_question else "needs_staff"}
+            if same_question:
+                attempt.annotations.update(answer_slots=deepcopy(item.get("answer_slots", [])),
+                                           slots_recognition_revision=doc["recognition_revision"], slots_question_revision=question.revision)
             update_case(session, self.contracts, case, progress="paused" if case.document["progress"] == "paused" else "pending")
             return {"resource_type": "attempt", "resource_id": attempt.id}
         case = get_entity(session, task.inputs["case_id"], "case")
@@ -269,7 +386,26 @@ class CorrectionWorker:
                        correction_method=candidate.get("correction_method"),
                        correct_answer=candidate.get("correct_answer"),
                        uncertainties=list(candidate.get("uncertainties", [])))
-            if attempt.document["recognition_status"] != "ready":
+            answer_text = attempt.document.get("answer_text")
+            recognition_status = attempt.document.get("recognition_status")
+            answer_text_present = (
+                isinstance(answer_text, str)
+                and bool(normalize_field_for_comparison(answer_text, "answer_text"))
+            )
+            needs_revision_verified = (
+                recognition_status == "needs_revision"
+                and candidate.get("evidence_verified") is True
+                and answer_text_present
+                and bool(normalize_field_for_comparison(question.document.get("stem_text"), "stem_text"))
+                and (attempt.annotations or {}).get("target_binding") != "needs_staff"
+            )
+            # A ready attempt keeps the historical behavior, including blank
+            # answers. A needs_revision attempt must pass the explicit model
+            # evidence review before its verdict can be used.
+            usable_answer = recognition_status == "ready" or needs_revision_verified
+            if candidate.get("answer_checks") and usable_answer:
+                doc["answer_checks"] = deepcopy(candidate["answer_checks"])
+            if not usable_answer:
                 doc.update(verdict="unable_to_judge", reason_code="recognition_conflict", correct_answer=None, first_error_region=None, basis=[{"kind": "model_hypothesis", "summary": "本次作答识别或目标题对应尚待核实，不能据此判断对错。", "source_ref": None, "regions": []}])
             doc.update(id=new_id("decision"), revision=1, case_id=case.id, check_id=check.id, input_versions=versions, origin="model", validity="needs_review" if doc["verdict"] == "unable_to_judge" else "candidate", confirmation_source=None, confirmed_by=None, confirmed_at=None, replaces_decision_id=(case.document["current_decision"] or {}).get("id"), invalidated_by_event_id=None, created_at=iso())
             save_entity(session, self.contracts, homework.id, "decision", doc)
@@ -301,15 +437,19 @@ class CorrectionWorker:
     def _new_question(self, session, homework, task, item):
         question_id, case_id, attempt_id = new_id("question"), new_id("case"), new_id("attempt")
         timestamp = iso()
-        question = {"question_id": question_id, "revision": 1, "homework_id": homework.id, "label": item["label"], "stem_text": item["stem_text"], "question_type": item.get("question_type", "unknown"), "options": list(item.get("options", [])), "blank_count": item.get("blank_count", 0), "recognition_uncertainties": list(item.get("uncertainties", [])), "regions": item["regions"], "source": "recognizer", "source_actor_id": None, "bank_question_id": None, "knowledge_point_ids": None, "created_at": timestamp, "lifecycle": "active", "replacement_question_ids": []}
+        question = {"question_id": question_id, "revision": 1, "homework_id": homework.id, "label": item["label"], "stem_text": item["stem_text"], "question_type": item.get("question_type", "unknown"), "subject": canonical_subject(item.get("subject")), "options": list(item.get("options", [])), "blank_count": item.get("blank_count", 0), "recognition_uncertainties": list(item.get("uncertainties", [])), "regions": item["regions"], "source": "recognizer", "source_actor_id": None, "bank_question_id": None, "knowledge_point_ids": None, "created_at": timestamp, "lifecycle": "active", "replacement_question_ids": []}
         question_row = save_entity(session, self.contracts, homework.id, "question", question)
-        question_row.annotations = {"label": item["label"]}
+        question_row.annotations = {"label": item["label"], "diagram": item.get("diagram"), "diagram_revision": 1,
+                                    "has_diagram": item.get("has_diagram", bool(item.get("diagram"))),
+                                    "reading_order": item.get("reading_order")}
         ids = list(dict.fromkeys([r["asset_id"] for r in item["regions"]] + [r["asset_id"] for r in item["answer_regions"]]))
         attempt = {"id": attempt_id, "revision": 1, "case_id": case_id, "question_id": question_id, "captured_question_revision": 1, "parent_attempt_id": None, "root_attempt_id": attempt_id, "asset_ids": ids, "recognition_revision": 1, "answer_text": item["answer_text"], "answer_regions": item["answer_regions"], "answer_status": item["answer_status"], "recognition_uncertainties": list(item.get("uncertainties", [])), "recognition_status": item.get("recognition_status", "needs_revision"), "help_condition": "unknown", "occurred_at": iso(homework.occurred_at), "created_at": timestamp}
         attempt_row = save_entity(session, self.contracts, homework.id, "attempt", attempt)
-        attempt_row.annotations = {"answer_status": item["answer_status"]}
+        attempt_row.annotations = {"answer_status": item["answer_status"], "answer_slots": deepcopy(item.get("answer_slots", [])),
+                                   "slots_recognition_revision": 1, "slots_question_revision": 1}
         case = {"id": case_id, "revision": 1, "scope": {"tenant_id": homework.tenant_id, "campus_id": homework.campus_id, "student_id": homework.student_id}, "homework_id": homework.id, "question_id": question_id, "current_question_revision": 1, "root_attempt_id": attempt_id, "current_attempt_id": attempt_id, "progress": "pending", "current_decision": None, "attempt_ids": [attempt_id], "check_ids": [], "hint_ids": [], "help_request_ids": [], "review_ids": [], "created_at": timestamp, "updated_at": timestamp, "lifecycle": "active", "replacement_case_ids": []}
-        save_entity(session, self.contracts, homework.id, "case", case)
+        case_row = save_entity(session, self.contracts, homework.id, "case", case)
+        return question_row, attempt_row, case_row
 
 
 def run_round(*runners) -> bool:

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createStudentClient, remoteDraftId, safeError, type EditChange } from './core'
 import { type CorrectionTarget } from './presentation'
 import type { Account, CaseDetail, CreateHelp, DraftSummary, DraftView, Hint, HomeworkDetail, HomeworkSession, HomeworkSummary, IdentityContext } from './core/types'
+import type { StudentCurriculum } from './core/learning'
+import type { CurriculumContext } from './core/student'
 
 const helpDefaults: Record<CreateHelp['kind'], string> = { question: '我需要老师帮我看看这道题。', recognition: '识别文字与照片不一致，请老师核对。', judgment: '这道题的判断我看不懂，请老师看看。', appeal: '我觉得这道题的判断可能不对，请老师重新看看。' }
 const helpNotices: Record<CreateHelp['kind'], string> = { question: '求助已提交，等坐班老师过来一起看。', recognition: '已请老师核对识别结果。', judgment: '已请老师看看这次判断。', appeal: '重查申请已提交。老师处理前，当前结果保持不变。' }
@@ -15,6 +17,7 @@ export function useStudentWorkspace() {
   const [account, setAccount] = useState<Account | null>(null)
   const [identity, setIdentity] = useState<IdentityContext | null>(null)
   const [studentId, setStudentId] = useState<string | null>(null)
+  const [studentCurriculum, setStudentCurriculum] = useState<StudentCurriculum | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
   const busyRef = useRef(false)
@@ -33,8 +36,10 @@ export function useStudentWorkspace() {
   const activeDraft = useRef<string | null>(null)
   const syncSequence = useRef(0)
   const summaryRun = useRef(0)
+  const autoPollTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const autoPollRunning = useRef(false)
 
-  const clearWork = useCallback(() => { ++syncSequence.current; ++summaryRun.current; activeDraft.current = null; setDraft(null); setDetail(null); setDrafts([]); setHistory([]); setCursor(null); setHint(null); setSummaries({}); setSummaryFailed([]) }, [])
+  const clearWork = useCallback(() => { ++syncSequence.current; ++summaryRun.current; activeDraft.current = null; setDraft(null); setDetail(null); setDrafts([]); setHistory([]); setCursor(null); setHint(null); setSummaries({}); setSummaryFailed([]); setStudentCurriculum(null) }, [])
   const fail = useCallback((failure: unknown) => {
     setError(safeError(failure).message)
     setAccount(client.account); setIdentity(client.identity); setStudentId(client.selectedStudentId)
@@ -52,6 +57,7 @@ export function useStudentWorkspace() {
     if (current && currentId === activeDraft.current) { setDraft(current); setDetail(current.detail) }
   }, [client, clearWork])
   const deviceNotice = useCallback(async () => { if (!client.selectedStudentId) return; const text = await client.takeDeviceNotice().catch(() => null); if (text) setNotice(text) }, [client])
+  const refreshCurriculum = useCallback(async () => { if (!client.selectedStudentId) { setStudentCurriculum(null); return }; setStudentCurriculum(await client.studentCurriculum()) }, [client])
   const action = useCallback(async (label: string, task: () => Promise<void>) => {
     if (busyRef.current) return false
     busyRef.current = true; setBusy(label); setError(null); setNotice(null)
@@ -78,16 +84,51 @@ export function useStudentWorkspace() {
   }, [client, remember, selectDraft, show])
   useEffect(() => {
     let live = true
-    void client.restore().then(async () => { if (live) { await sync(); await deviceNotice(); await resumeActive() } }).catch((e: unknown) => { if (live) fail(e) }).finally(() => { if (live) setLoading(false) })
+    void client.restore().then(async () => { if (live) { await sync(); await deviceNotice(); await refreshCurriculum(); await resumeActive() } }).catch((e: unknown) => { if (live) fail(e) }).finally(() => { if (live) setLoading(false) })
     const unsubscribe = client.subscribe(() => { void sync().catch(fail) })
     return () => { live = false; unsubscribe() }
-  }, [client, deviceNotice, fail, resumeActive, sync])
+  }, [client, deviceNotice, fail, refreshCurriculum, resumeActive, sync])
   const [online, setOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine !== false)
   useEffect(() => {
     const update = () => setOnline(navigator.onLine !== false)
     window.addEventListener('online', update); window.addEventListener('offline', update)
     return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update) }
   }, [])
+  // A bounded client run returns a waiting draft when work is still active;
+  // keep observing that draft while it remains open in this page.
+  useEffect(() => {
+    const id = draft?.id
+    const activeStage = !!id && ['waiting', 'recognizing', 'checking'].includes(draft.stage)
+    if (!id || !activeStage || !identity || !studentId) {
+      if (autoPollTimer.current) { clearTimeout(autoPollTimer.current); autoPollTimer.current = null }
+      return
+    }
+    let live = true
+    const schedule = () => {
+      if (!live || autoPollTimer.current || activeDraft.current !== id) return
+      autoPollTimer.current = setTimeout(() => { autoPollTimer.current = null; void poll() }, autoPollRunning.current ? 250 : 1200)
+    }
+    const poll = async () => {
+      if (!live || autoPollRunning.current || activeDraft.current !== id || !identity || !studentId) return
+      if (busyRef.current) { schedule(); return }
+      autoPollRunning.current = true
+      try {
+        const next = await client.runDraft(id)
+        if (!live || activeDraft.current !== id) return
+        setDraft(next); setDetail(next.detail); setRecordVersion(version => version + 1)
+      } catch (e) {
+        if (live && activeDraft.current === id) fail(e)
+      } finally {
+        autoPollRunning.current = false
+        schedule()
+      }
+    }
+    schedule()
+    return () => {
+      live = false
+      if (autoPollTimer.current) { clearTimeout(autoPollTimer.current); autoPollTimer.current = null }
+    }
+  }, [client, draft?.id, draft?.stage, fail, identity, studentId])
   // Background, read-only and cancelled by sign-out; one failing homework does not hide the others.
   const loadSummaries = useCallback((items: HomeworkSession[], known: Record<string, HomeworkSummary | undefined>) => {
     const run = ++summaryRun.current, queue = items.filter(h => known[h.id]?.revision !== h.revision)
@@ -103,18 +144,25 @@ export function useStudentWorkspace() {
     const next = await client.openHomework(homeworkId); setDetail(next); await sync(); setDetail(next); setRecordVersion(v => v + 1)
   }, [client, detail?.homework.id, draft?.homeworkId, sync])
   return {
-    client, account, identity, studentId, loading, busy, error, notice, drafts, history, cursor, draft, detail, hint, summaries, summaryFailed, recordVersion, online,
+    client, account, identity, studentId, studentCurriculum, loading, busy, error, notice, drafts, history, cursor, draft, detail, hint, summaries, summaryFailed, recordVersion, online,
     clearError: () => setError(null),
     showNotice: (text: string | null) => setNotice(text),
     /** Learning panels handle their own errors; one that signed the account out is shown like any other. */
     report: (failure: unknown) => { if (!client.identity) fail(failure) },
-    login: (username: string, password: string) => action('正在登录', async () => { clearWork(); await client.login(username, password); await sync(); await deviceNotice(); await resumeActive() }),
+    login: (username: string, password: string) => action('正在登录', async () => { clearWork(); await client.login(username, password); await sync(); await deviceNotice(); await refreshCurriculum(); await resumeActive() }),
     changePassword: (currentPassword: string, newPassword: string) => action('正在保存新密码', async () => { await client.changePassword(currentPassword, newPassword); await sync(); setNotice('密码已更新，以后用新密码登录同一个作业本。') }),
     reconnect: () => action('正在恢复连接', async () => { await client.restore(); await sync(); await deviceNotice() }),
     logout: () => action('正在退出登录', async () => { remember(null); try { await client.logout() } finally { clearWork() } await sync(); setError(null); setNotice(null) }),
     newWork: () => { if (busyRef.current) return; remember(null); activeDraft.current = null; setDraft(null); setDetail(null); setHint(null); setError(null); setNotice(null) },
     /** A correction takes exactly one photo; homework takes one or more pages. */
-    importPhotos: (files: File[], correction?: CorrectionTarget) => action(files.length > 1 ? `正在准备 ${files.length} 张照片` : '正在准备照片', async () => { const next = correction ? await client.createCorrection(correction.caseId, files[0], 'unknown', correction.parentAttemptId) : await client.createDraft(files); show(next); await sync() }),
+    importPhotos: (files: File[], correction?: CorrectionTarget, curriculum?: CurriculumContext | null) => action(files.length > 1 ? `正在准备 ${files.length} 张照片` : '正在准备照片', async () => { const next = correction ? await client.createCorrection(correction.caseId, files[0], 'unknown', correction.parentAttemptId) : await client.createDraft(files, '学校作业', curriculum ?? null); show(next); await sync() }),
+    setStudentGrade: (grade: number) => action('正在保存年级', async () => { const next = await client.setStudentGrade(grade); setStudentCurriculum(next); setNotice('年级已保存，课程范围按对应教材出版社更新。') }),
+    setQuestionSubject: (row: CaseDetail, subject: string) => action('正在按所选学科重新判题', async () => {
+      if (!draft?.homeworkId) throw new Error('当前作业无法重新判题，请刷新后重试。')
+      await client.setQuestionSubject(row.question.question_id, row.question.revision, subject)
+      const next = await client.runDraft(draft.id, { forceCheckCaseIds: [row.case.id], forceCheckToken: crypto.randomUUID() })
+      setDraft(next); setDetail(next.detail); setRecordVersion(v => v + 1); await sync()
+    }),
     addPages: (files: File[]) => action('正在加入照片', async () => { if (!draft) return; show(await client.addPages(draft.id, files)); await sync() }),
     removePage: (pageId: string) => action('正在删除这一页', async () => { if (!draft) return; const next = await client.removePage(draft.id, pageId); show(next); if (!next) setNotice('最后一页已删除，这份草稿也一起移除了。'); await sync() }),
     movePage: (pageId: string, delta: number) => action('正在调整页序', async () => { if (!draft) return; show(await client.movePage(draft.id, pageId, delta)); await sync() }),

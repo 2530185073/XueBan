@@ -16,6 +16,42 @@ BACKEND = Path(__file__).resolve().parents[1]
 REPO = BACKEND.parents[1]
 sys.path.insert(0, str(BACKEND))
 
+MODEL_CONFIG_NAMES = frozenset({
+    "ARK_BASE_URL",
+    "ARK_API_KEY",
+    "ARK_MODEL",
+    "ARK_FALLBACK_MODEL",
+})
+
+# Keep removing the retired review switch from inherited environments even
+# though it is no longer accepted from the private model configuration. This
+# prevents an old shell setting from reaching either API or Worker.
+LEGACY_MODEL_ENVIRONMENT_NAMES = frozenset({"REVIEW_PROTOCOL"})
+
+
+def _is_model_environment_name(name):
+    return (name in MODEL_CONFIG_NAMES or name in LEGACY_MODEL_ENVIRONMENT_NAMES
+            or name.startswith(("ARK_", "OPENAI_", "ZYAI_")))
+
+
+def without_model_environment(environment):
+    """Keep model credentials and routing variables inside the Worker only."""
+    return {name: value for name, value in environment.items()
+            if not _is_model_environment_name(name)}
+
+
+def _read_model_environment(path):
+    values = {}
+    for raw_line in read_private(path).splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, separator, value = line.partition("=")
+        name = name.strip()
+        if separator and name in MODEL_CONFIG_NAMES:
+            values[name] = value.strip()
+    return values
+
 
 def write_private(path, value):
     with os.fdopen(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600), "w") as file:
@@ -33,22 +69,21 @@ def load(runtime, *, require_model=False):
     config = json.loads(read_private(runtime / "runtime.json"))
     env = os.environ.copy()
     env.update(config["environment"])
+    env = without_model_environment(env)
     env["PYTHONPATH"] = str(BACKEND)
     web_dist = REPO / "apps/student-web/dist"
     if (web_dist / "index.html").is_file():
         env.setdefault("STUDENT_WEB_DIST", str(web_dist))
     if require_model:
         # Shutdown, status and revocation remain usable when model credentials are removed.
-        for line in read_private(Path(config["model_config"])).splitlines():
-            name, separator, value = line.partition("=")
-            if separator and name in {"ARK_BASE_URL", "ARK_API_KEY", "ARK_MODEL"}:
-                env[name] = value.strip()
+        env.update(_read_model_environment(Path(config["model_config"])))
         if not env.get("ARK_BASE_URL") or not env.get("ARK_API_KEY"):
             raise ValueError("Model configuration is incomplete")
     return config, env
 
 
 def run(args, *, env=None, log=None):
+    env = without_model_environment(os.environ if env is None else env)
     if log:
         with log.open("ab") as output:
             result = subprocess.run(args, cwd=REPO, env=env, stdout=output, stderr=subprocess.STDOUT)
@@ -104,7 +139,8 @@ def initialize(args):
 
 
 def start_postgres(runtime, config):
-    status = subprocess.run(pg_args(runtime, config, "status"), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    status = subprocess.run(pg_args(runtime, config, "status"), env=without_model_environment(os.environ),
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if status.returncode:
         run(pg_args(runtime, config, "start") + ["-l", str(runtime / "logs/postgres.log"), "-o",
             f"-p {config['pg_port']} -h 127.0.0.1 -k {shlex.quote(str(runtime))}"], log=runtime / "logs/postgres-control.log")
@@ -121,7 +157,8 @@ def alive(pid):
 def spawn(runtime, name, args, env):
     pidfile = runtime / (name + ".pid")
     if pidfile.exists() and alive(int(pidfile.read_text())):
-        command = subprocess.check_output(["ps", "-p", pidfile.read_text().strip(), "-o", "command="], text=True)
+        command = subprocess.check_output(["ps", "-p", pidfile.read_text().strip(), "-o", "command="],
+                                          env=without_model_environment(os.environ), text=True)
         expected = "xueban_backend.worker" if name == "worker" else "xueban_backend.app:create_app"
         if expected not in command:
             raise RuntimeError("PID was reused; refusing to reuse another process")
@@ -185,7 +222,7 @@ def main():
     if args.command in {"start", "migrate"}:
         run([sys.executable, "-m", "alembic", "-c", str(BACKEND / "alembic.ini"), "upgrade", "head"], env=env)
     if args.command == "start":
-        api_env = {key: value for key, value in env.items() if not key.startswith("ARK_")}
+        api_env = without_model_environment(env)
         spawn(runtime, "api", [sys.executable, "-m", "uvicorn", "xueban_backend.app:create_app", "--factory", "--host",
               config["host"], "--port", str(config["api_port"]), "--no-access-log"], api_env)
         spawn(runtime, "worker", [sys.executable, "-m", "xueban_backend.worker"], env)
@@ -199,7 +236,8 @@ def main():
             if pidfile.exists():
                 pid = int(pidfile.read_text())
                 if alive(pid):
-                    command = subprocess.check_output(["ps", "-p", str(pid), "-o", "command="], text=True)
+                    command = subprocess.check_output(["ps", "-p", str(pid), "-o", "command="],
+                                                      env=without_model_environment(os.environ), text=True)
                     if ("xueban_backend.worker" if name == "worker" else "xueban_backend.app:create_app") not in command:
                         raise RuntimeError("PID was reused; refusing to stop another process")
                     os.kill(pid, signal.SIGTERM)
@@ -215,7 +253,8 @@ def main():
         for name in ("api", "worker"):
             pidfile = runtime / (name + ".pid")
             print(name, "running" if pidfile.exists() and alive(int(pidfile.read_text())) else "stopped")
-        status = subprocess.run(pg_args(runtime, config, "status"), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        status = subprocess.run(pg_args(runtime, config, "status"), env=env,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         print("postgres", "running" if status.returncode == 0 else "stopped")
 
 

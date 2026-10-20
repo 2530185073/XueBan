@@ -4,6 +4,19 @@
   "title": "Phase 1 persisted records and response resources",
   "description": "draft-0.1; contract only, not an implemented service.",
   "$defs": {
+    "AnswerCheck": {
+      "type": "object",
+      "properties": {
+        "index": {"type": "integer", "minimum": 1, "maximum": 32},
+        "prompt": {"type": "string", "minLength": 1, "maxLength": 600},
+        "student_answer": {"anyOf": [{"type": "string", "minLength": 1, "maxLength": 1200}, {"type": "null"}]},
+        "verdict": {"enum": ["correct", "incorrect", "unanswered", "unable_to_judge"]},
+        "correct_answer": {"anyOf": [{"type": "string", "minLength": 1, "maxLength": 1200}, {"type": "null"}]},
+        "explanation": {"type": "string", "minLength": 1, "maxLength": 600}
+      },
+      "required": ["index", "prompt", "student_answer", "verdict", "correct_answer", "explanation"],
+      "additionalProperties": false
+    },
     "Scope": {
       "type": "object",
       "properties": {
@@ -31,16 +44,24 @@
       "type": "object",
       "properties": {
         "stage": {
-          "const": "junior_middle"
+          "anyOf": [
+            {"enum": ["primary", "junior_middle"]},
+            {"type": "null"}
+          ]
         },
         "publisher_code": {
-          "const": "PEP"
+          "anyOf": [
+            {"enum": ["PEP", "BNUP", "PM", "PFA", "CSP", "ECSP", "JSFST", "SSTP"]},
+            {"type": "null"}
+          ]
         },
         "grade": {
           "anyOf": [
             {
               "type": "integer",
               "enum": [
+                5,
+                6,
                 7,
                 8,
                 9
@@ -98,6 +119,49 @@
         "subject",
         "volume",
         "edition"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "grade": {
+                "enum": [
+                  5,
+                  6
+                ]
+              }
+            },
+            "required": ["grade"]
+          },
+          "then": {
+            "properties": {
+              "stage": {
+                "const": "primary"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "grade": {
+                "enum": [
+                  7,
+                  8,
+                  9
+                ]
+              }
+            },
+            "required": ["grade"]
+          },
+          "then": {
+            "properties": {
+              "stage": {
+                "const": "junior_middle"
+              }
+            }
+          }
+        }
       ],
       "additionalProperties": false
     },
@@ -504,6 +568,18 @@
             "application",
             "proof",
             "unknown"
+          ]
+        },
+        "subject": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "options": {
@@ -919,6 +995,11 @@
           },
           "maxItems": 3,
           "uniqueItems": true
+        },
+        "answer_checks": {
+          "type": "array",
+          "items": {"$ref": "data.schema.json#/$defs/AnswerCheck"},
+          "maxItems": 32
         },
         "correction_method": {
           "anyOf": [

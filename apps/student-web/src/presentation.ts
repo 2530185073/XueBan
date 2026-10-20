@@ -1,7 +1,7 @@
 import type { CaseDetail, DraftStage, DraftSummary, DraftView } from './core/types'
 
 export type Tone = 'neutral' | 'green' | 'red' | 'amber'
-export type StudentResultState = 'correct' | 'incorrect' | 'uncertain'
+export type StudentResultState = 'correct' | 'incorrect' | 'uncertain' | 'processing' | 'unprocessed' | 'service_failure'
 
 /** Remove the printed source label from the student-facing copy. */
 export function studentQuestionText(stem: string | null, label?: string) {
@@ -26,26 +26,38 @@ function currentStudentDecision(row: CaseDetail) {
 /** A star marks evidence uncertainty without turning a usable verdict into a pending bucket. */
 export function studentResultUncertain(row: CaseDetail): boolean {
   const decision = currentStudentDecision(row)
-  return row.attempt.recognition_status !== 'ready'
-    || !!row.question.recognition_uncertainties?.length
+  return !!row.question.recognition_uncertainties?.length
     || !!row.attempt.recognition_uncertainties?.length
-    || !decision
-    || decision.verdict === 'unable_to_judge'
-    || !!decision.uncertainties?.length
+    || row.attempt.recognition_status === 'needs_revision' && !!decision
+    || decision?.verdict === 'unable_to_judge'
+    || decision?.validity === 'needs_review'
+    || !!decision?.uncertainties?.length
 }
 
 /** Compact student-facing state: usable model verdicts are shown as right/wrong even when starred. */
 export function studentResultState(row: CaseDetail): StudentResultState {
   const decision = currentStudentDecision(row)
-  if (!decision || row.attempt.recognition_status !== 'ready' || decision.verdict === 'unable_to_judge') return 'uncertain'
-  return decision?.verdict === 'correct' ? 'correct' : decision?.verdict === 'incorrect' || decision?.verdict === 'partially_correct' || decision?.verdict === 'unanswered' ? 'incorrect' : 'uncertain'
+  if (decision && decision.validity !== 'needs_review' && decision.verdict !== 'unable_to_judge') {
+    return decision.verdict === 'correct' ? 'correct' : decision.verdict === 'incorrect' || decision.verdict === 'partially_correct' || decision.verdict === 'unanswered' ? 'incorrect' : 'uncertain'
+  }
+  if (decision) return 'uncertain'
+  if (row.checkJob && ['failed', 'superseded', 'cancelled'].includes(row.checkJob.status)) return 'service_failure'
+  if (row.checkJob && ['queued', 'running', 'retryable_failed'].includes(row.checkJob.status)) return 'processing'
+  if (row.attempt.recognition_status === 'pending') return 'processing'
+  if (row.attempt.recognition_status === 'failed') return 'service_failure'
+  return 'unprocessed'
 }
 
 export function casePresentation(row: CaseDetail): { label: string; tone: Tone; note: string } {
-  if (row.attempt.recognition_status === 'needs_revision' || row.attempt.recognition_status === 'failed') return { label: '识别待核实', tone: 'amber', note: '这道题还没有检查。请拍清题干和作答，或请老师一起看。' }
-  if (row.attempt.recognition_status !== 'ready') return { label: '正在读题', tone: 'neutral', note: '正在读取题目和你的作答。' }
   const decision = row.case.current_decision
-  if (!decision) return { label: '等待检查', tone: 'neutral', note: '还没有这次作答的判断结果。' }
+  if (!decision) {
+    if (row.attempt.recognition_status === 'failed') return { label: '识别服务失败', tone: 'amber', note: '这道题没有生成判断，服务处理没有完成。请稍后重试，或请老师一起看。' }
+    if (row.checkJob && ['failed', 'superseded', 'cancelled'].includes(row.checkJob.status)) return { label: '检查服务失败', tone: 'amber', note: '这道题已读到作答，但检查服务没有完成。请稍后重试，或请老师一起看。' }
+    if (row.checkJob && ['queued', 'running', 'retryable_failed'].includes(row.checkJob.status)) return { label: '正在检查', tone: 'neutral', note: '正在检查这道题的作答。' }
+    if (row.attempt.recognition_status === 'needs_revision') return { label: '识别待核实', tone: 'amber', note: '这道题还没有检查，识别中的不确定之处不会被当成正确。请结合原图核对，必要时请老师一起看。' }
+    if (row.attempt.recognition_status !== 'ready') return { label: '正在读题', tone: 'neutral', note: '正在读取题目和你的作答。' }
+    return { label: '等待检查', tone: 'neutral', note: '还没有这次作答的判断结果。' }
+  }
   const input = decision.input_versions
   if (['stale', 'retracted'].includes(decision.validity) || input.question_id !== row.case.question_id || input.attempt_id !== row.case.current_attempt_id || input.question_revision !== row.case.current_question_revision || input.attempt_recognition_revision !== row.attempt.recognition_revision) return { label: '结果待更新', tone: 'amber', note: '题目或作答已有变化，请刷新后查看。' }
   if (decision.validity === 'needs_review') return { label: '暂时看不准', tone: 'amber', note: '这份判断还需要核实，请老师一起看看。' }
