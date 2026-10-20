@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, Copy, FileText, Send, Share2, TriangleAlert } from 'lucide-react'
 import type { FocusItem, Report, ReportSnapshot } from '../api/learningTypes'
-import { dateTime, openQuestionLabels, periodLabel, regeneratedLabels, reportStatusLabels, shareUrl, statusLabel } from '../learning'
+import { dateTime, evidenceSourceCounts, openQuestionLabels, periodLabel, regeneratedLabels, reportStatusLabels, shareUrl, statusLabel } from '../learning'
 import { LoadNote, RefreshButton, useLoad, type LearningContext } from './LearningCommon'
 import { ShareLinkList } from './ShareLinkList'
 
@@ -10,7 +10,8 @@ const helpKinds: Record<string, string> = { question: '作业答疑', recognitio
 function Focus({ item }: { item: FocusItem }) {
   return <section className="report-block">
     <h4>{item.name} <span className="tag muted">期末观察：{statusLabel(item.status_at_period_end)}</span></h4>
-    <p>本期在 <strong>{item.denominator}</strong> 次已核实作答中出错 <strong>{item.errors}</strong> 次（其中独立完成时出错 {item.independent_errors} 次），答对 {item.counter_evidence} 次。</p>
+    <p>本期在 <strong>{item.denominator}</strong> 次有效作答中出错 <strong>{item.errors}</strong> 次（其中独立完成时出错 {item.independent_errors} 次），答对 {item.counter_evidence} 次。</p>
+    <p className="subtle">{evidenceSourceCounts(item)}</p>
     <p className="chip-row">{Object.entries(item.assistance).map(([label, n]) => <span key={label} className="chip">{label} × {n}</span>)}</p>
     {item.verified_scope.map(scope => <p key={scope}><span className="tag">已核实范围</span> {scope}</p>)}
     {item.possible_causes.map(cause => <p key={cause} className="subtle"><span className="tag amber">可能原因（未核实）</span> {cause}</p>)}
@@ -36,14 +37,16 @@ export function SnapshotView({ snap }: { snap: ReportSnapshot }) {
         <dt>拍照作业</dt><dd>{coverage.homeworks} 份，共 {tasks.questions} 道题</dd>
         <dt>老师已核实</dt><dd>{tasks.staff_verified} / {tasks.questions} 道</dd>
         <dt>已核实中</dt><dd>答对 {tasks.verdicts.correct} · 需要订正 {tasks.verdicts.incorrect} · 部分正确 {tasks.verdicts.partially_correct} · 未作答 {tasks.verdicts.unanswered}</dd>
+        {tasks.ai_verdicts && <><dt>AI 初判（未核实）</dt><dd>{tasks.ai_judged ?? 0} 道：答对 {tasks.ai_verdicts.correct} · 需要订正 {tasks.ai_verdicts.incorrect} · 部分正确 {tasks.ai_verdicts.partially_correct} · 未作答 {tasks.ai_verdicts.unanswered}</dd></>}
         <dt>订正</dt><dd>完成 {tasks.corrected_resolved} 道 · 仍在订正 {tasks.correction_open} 道</dd>
+        {!!tasks.ai_corrected_pending && <><dt>订正 AI 初判通过</dt><dd>{tasks.ai_corrected_pending} 道，尚未经老师核实</dd></>}
         <dt>待老师核实</dt><dd>{tasks.awaiting_verification} 道 AI 候选待确认 · {tasks.not_judged} 道尚无判断</dd>
       </dl>
     </section>
     {snap.focus.length > 0 && <><h3 className="block-title">具体问题</h3>{snap.focus.map(item => <Focus key={item.knowledge_id} item={item} />)}</>}
     {snap.steady.length > 0 && <section className="report-block"><h4>本期做得好的</h4><ul className="plain-list">{snap.steady.map(item =>
-      <li key={item.knowledge_id}>{item.name}：答对 {item.correct} 次（独立完成 {item.independent_correct} 次）</li>)}</ul></section>}
-    {!snap.sufficient && <section className="report-block"><h4>学科证据</h4><p>本期暂无足够的已核实作答来判断具体知识点情况。这不表示孩子有薄弱，也不需要为此加做测验。</p></section>}
+      <li key={item.knowledge_id}>{item.name}：答对 {item.correct} 次（独立完成 {item.independent_correct} 次；{evidenceSourceCounts(item)}）</li>)}</ul></section>}
+    {!snap.sufficient && <section className="report-block"><h4>学科证据</h4><p>本期暂无足够的有效作答来判断具体知识点情况。这不表示孩子有薄弱，也不需要为此加做测验。</p></section>}
     {snap.unknown_current.length > 0 && <section className="report-block"><h4>还不知道的</h4><p>近期课程中的 {snap.unknown_current.map(item => item.name).join('、')} 本期没有足够作答记录，暂不判断。</p></section>}
     <section className="report-block"><h4>现场帮助</h4>
       <p>本期求助 {help.requests} 次（{Object.entries(help.by_kind).map(([kind, n]) => `${helpKinds[kind] ?? kind} ${n}`).join('、') || '无'}），帮助已结束 {help.resolved} 次；查看提示 {help.hints_viewed} 次，其中含答案 {help.answers_shown} 次。</p>

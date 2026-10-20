@@ -223,6 +223,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if type(grade) is int and grade in {5, 6, 7, 8}:
                 curriculum = {**curriculum, "stage": "primary" if grade <= 6 else "junior_middle",
                               "edition": "publisher_latest"}
+        binding = (profile.document.get("curriculum_binding") or {}) if profile else {}
+        if binding and (curriculum.get("subject") is None or curriculum.get("subject") == binding.get("subject")):
+            if curriculum.get("subject") is not None and curriculum.get("publisher_code") != binding["publisher_code"]:
+                raise Problem(409, "conflict", "course_unknown", "作业教材与当前所选教材不一致，请先确认教材。")
+            curriculum = {**curriculum, "publisher_code": binding["publisher_code"],
+                          "edition": "isbn:" + binding["isbn"],
+                          "volume": {"up": "first", "down": "second", "full": "full_year"}[binding["term"]]}
         occurred_at = parse_time(payload["occurred_at"])
         payload_hash = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
         operation = "POST /v1/students/{student_id}/homeworks"

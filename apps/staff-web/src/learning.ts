@@ -1,7 +1,7 @@
 import type { AttemptRead, Hint } from './api/contracts.generated'
 import type {
   AgentRun, AssistanceInput, Certainty, Delivery, Evidence, GateReason, KnowledgeLink, KnowledgeNode, LearningStatus, LinkRole, Memory, MemoryInput, MemoryStatus,
-  Report, StaffMemoryCategory,
+  Report, StaffMemoryCategory, EvidenceSources,
 } from './api/learningTypes'
 
 // Mastery is only ever shown as these words, never as a percentage or score.
@@ -12,9 +12,19 @@ export const statusTone: Record<LearningStatus, string> = { needs_help_now: 'ros
 export const statusLabel = (status: string) => statusLabels[status as LearningStatus] ?? '暂不判断'
 
 export const reasonLabels: Record<string, string> = {
-  single_error_needs_diagnosis: '一次经核实的错误，需要先诊断原因', repeated_errors: '多次经核实的错误',
+  single_error_needs_diagnosis: '记录到一次错误，需要先诊断原因', repeated_errors: '记录到多次错误',
   independent_success_awaiting_more_dates: '已独立做对，等待不同日期再次确认', corrected_with_help_awaiting_new_school_item: '在帮助下订正正确，等待新的学校题目',
-  assisted_or_unverified_only: '只有帮助下或未核实独立性的作答', no_scorable_evidence: '暂无可评分的已核实作答',
+  assisted_or_unverified_only: '只有帮助下或未核实独立性的作答', no_scorable_evidence: '暂无可用于判断的作答',
+}
+export function evidenceSourceLabel(source: string | null | undefined): string {
+  return source === 'model' ? 'AI 初判，尚未经老师核实' : source === 'sitting_teacher' ? '老师已核实' : '来源未标注'
+}
+export function evidenceSourceCounts(sources: EvidenceSources): string {
+  const parts = [
+    sources.model_evidence_count !== undefined && `AI 初判 ${sources.model_evidence_count} 次`,
+    sources.staff_verified_evidence_count !== undefined && `老师核实 ${sources.staff_verified_evidence_count} 次`,
+  ].filter(Boolean)
+  return parts.length ? parts.join(' · ') : '作答来源尚未分列'
 }
 export const openQuestionLabels: Record<string, string> = { independence_unverified: '独立完成情况未核实', cause_not_diagnosed: '错误原因尚未诊断' }
 export const sufficiencyLabels: Record<string, string> = { substantial: '证据较充分', limited: '证据有限', insufficient: '证据不足' }
@@ -35,7 +45,7 @@ export const memoryCategoryLabels: Record<string, string> = {
   progress_milestone: '进步记录', interface_preference: '界面偏好',
 }
 export const staffMemoryCategories: StaffMemoryCategory[] = ['effective_support', 'support_agreement', 'learning_goal', 'recurring_difficulty']
-export const memorySourceLabels: Record<Memory['source'], string> = { system_rule: '系统规则（依据已核实作答）', model: 'AI 提议', staff: '老师', student: '孩子本人' }
+export const memorySourceLabels: Record<Memory['source'], string> = { system_rule: '系统规则（依据有效作答记录）', model: 'AI 提议', staff: '老师', student: '孩子本人' }
 export const memoryStatusLabels: Record<MemoryStatus, string> = {
   proposed: '待老师确认', confirmed: '有效', expired: '已过期', superseded: '已被新记忆取代', invalidated: '已失效', retracted: '已撤回',
 }

@@ -173,7 +173,7 @@ def build_snapshot(session, student: Student, start: date, end: date, cadence: s
                                "question": (question.get("stem_text") or "")[:80], "outcome": doc["status"],
                                "note": doc["resolution_note"][:300]})
     hints = [doc for _, doc in entities["hint"].values() if doc.get("first_shown_at") and inside(_parse(doc["first_shown_at"]))]
-    graph = published_graph(session)
+    graph = published_graph(session, student.id)
     names = {n.id: n for n in session.scalars(select(KnowledgeNode).where(KnowledgeNode.graph_version == graph.version))} if graph else {}
     valid = defaultdict(list)
     for row in session.scalars(select(LearningEvidence).where(LearningEvidence.student_id == student.id,
@@ -426,9 +426,9 @@ class ConfirmSentInput(Strict):
 def delivery(report: LearningReport, period_links: list[ReportShareLink]) -> dict:
     """What staff did with this version and whether any link of its period was opened afterwards."""
     own = [link for link in period_links if link.report_id == report.id]
-    confirmed = [link.sent_confirmed_at for link in own if link.sent_confirmed_at]
-    opened = [link.last_viewed_at for link in period_links
-              if link.last_viewed_at and report.published_at and link.last_viewed_at >= report.published_at]
+    confirmed = [utc(link.sent_confirmed_at) for link in own if link.sent_confirmed_at]
+    opened = [utc(link.last_viewed_at) for link in period_links
+              if link.last_viewed_at and report.published_at and utc(link.last_viewed_at) >= utc(report.published_at)]
     return {"links": len(own), "copied": any(link.message_copied_at for link in own),
             "sent_confirmed_at": iso(max(confirmed)) if confirmed else None,
             "opened_at": iso(max(opened)) if opened else None}
@@ -453,7 +453,11 @@ def resolve_link(session, token: str):
 
 def public_body(session, current, shown):
     student = session.get(Student, current.student_id)
+    # An old link may display a newer report. Its earlier send confirmation
+    # does not establish that the new version has been sent.
+    links = list(session.scalars(select(ReportShareLink).where(ReportShareLink.report_id == current.id)))
     return {"student_name": student.display_name, "report": report_dict(current, public=True),
+            "delivery": {"sent_confirmed_at": delivery(current, links)["sent_confirmed_at"]},
             "corrections": [{"version": r.version, "published_at": iso(r.published_at),
                              "correction_note": r.correction_note} for r in shown if r.version > 1 and r.status in ("published", "superseded")]}
 
@@ -691,6 +695,7 @@ def render_report(body):
              f"<meta name=robots content=noindex><title>学伴半月报告</title><style>{STYLE}</style><main>",
              f"<p class=muted>学伴 · 托管班半月学习报告</p><h1>{e(body['student_name'])} · {e(period['start'])} 至 {e(end_inclusive)}</h1>",
              f"<p class=muted>第 {e(report['version'])} 版 · 发布于 {e((report['published_at'] or '')[:10])}</p>"]
+    parts.append(render_send_confirmation(body))
     if body["corrections"]:
         notes = "".join(f"<li>第 {e(c['version'])} 版（{e((c['published_at'] or '')[:10])}）：{e(c['correction_note'])}</li>"
                         for c in body["corrections"])
@@ -742,6 +747,14 @@ def render_report(body):
     return "".join(parts)
 
 
+def render_send_confirmation(body):
+    confirmed_at = (body.get("delivery") or {}).get("sent_confirmed_at")
+    if not confirmed_at:
+        return ""
+    recorded = _parse(confirmed_at).astimezone(SHANGHAI).strftime("%Y-%m-%d %H:%M")
+    return f"<p class=muted>老师确认发送记录：{html.escape(recorded)}（老师手动确认）</p>"
+
+
 def render_daily(body):
     e = lambda value: html.escape(str(value)) if value is not None else ""  # noqa: E731
     report, snap = body["report"], body["report"]["snapshot"]
@@ -749,11 +762,12 @@ def render_daily(body):
     parts = [f"<!doctype html><html lang=zh-CN><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
              f"<meta name=robots content=noindex><title>学伴今日反馈</title><style>{STYLE}</style><main>",
              f"<p class=muted>学伴 · 托管班今日学习反馈</p><h1>{e(body['student_name'])} · {e(snap['period']['start'])}</h1>",
-             f"<p class=muted>老师核对后发送于 {e(_parse(report['published_at']).astimezone(SHANGHAI).strftime('%H:%M') if report['published_at'] else '')}"
+             f"<p class=muted>发布于 {e(_parse(report['published_at']).astimezone(SHANGHAI).strftime('%Y-%m-%d %H:%M') if report['published_at'] else '')}"
              + (f" · 第 {e(report['version'])} 版" if report["version"] > 1 else "") + "</p>"]
+    parts.append(render_send_confirmation(body))
     if body["corrections"]:
         notes = "".join(f"<li>{e(c['correction_note'])}</li>" for c in body["corrections"] if c["correction_note"])
-        parts.append("<section class=notice><p>老师发送后又更新了今天的情况，以下为最新内容。</p>"
+        parts.append("<section class=notice><p>老师更新了今天的情况，以下为最新发布内容。</p>"
                      + (f"<ul>{notes}</ul>" if notes else "") + "</section>")
     if report["staff_note"] or report["next_step"]:
         parts.append(f"<section><h2 style='margin-top:0'>老师的话</h2><p>{e(report['staff_note'])}</p>"

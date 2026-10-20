@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Camera, Check, ChevronDown, CircleAlert, CircleX, Clock3, Lightbulb, LoaderCircle } from 'lucide-react'
+import { Camera, Check, ChevronDown, CircleAlert, CircleX, Clock3, Lightbulb, LoaderCircle, Shuffle } from 'lucide-react'
 import type { CaseDetail } from '../core/types'
 import type { CurriculumScope } from '../core/learning'
 import type { Workspace } from '../useStudentWorkspace'
@@ -16,6 +16,8 @@ interface RecognitionResultsProps {
   onSelect: (row: CaseDetail) => void
   onCorrection: (row: CaseDetail, camera: boolean) => void
   onSelectSubject: (row: CaseDetail, subject: string) => void
+  onVariant?: (row: CaseDetail) => void
+  variantBusy?: string
 }
 
 const stateLabels: Record<StudentResultState, string> = {
@@ -48,7 +50,7 @@ function ResultIcon({ state }: { state: StudentResultState }) {
   return <CircleAlert size={17} strokeWidth={2.2} />
 }
 
-export function QuestionCard({ row, index, open, onToggle, subjects = [], onSelectSubject = () => {}, workspace, onCorrection, onContinue }: { row: CaseDetail; index: number; open: boolean; onToggle: () => void; subjects?: CurriculumScope[]; onSelectSubject?: (subject: string) => void; workspace?: Workspace; onCorrection?: (camera: boolean) => void; onContinue?: () => void }) {
+export function QuestionCard({ row, index, open, onToggle, subjects = [], onSelectSubject = () => {}, workspace, onCorrection, onContinue, onVariant, variantBusy = false }: { row: CaseDetail; index: number; open: boolean; onToggle: () => void; subjects?: CurriculumScope[]; onSelectSubject?: (subject: string) => void; workspace?: Workspace; onCorrection?: (camera: boolean) => void; onContinue?: () => void; onVariant?: () => void; variantBusy?: boolean }) {
   const state = studentResultState(row)
   const decision = effectiveDecision(row)
   const usable = state !== 'processing' && decision && decision.validity !== 'needs_review' && decision.verdict !== 'unable_to_judge'
@@ -103,11 +105,12 @@ export function QuestionCard({ row, index, open, onToggle, subjects = [], onSele
       </div>
       {uncertainties.length > 0 && <p className="recognition-uncertainty">{state === 'uncertain' ? casePresentation(row).note : state === 'processing' ? '正在检查这道题的作答，可以先继续其他题。' : controlledServiceMessage ?? '* AI 对这道题的识别或判断存在不确定，请结合原图核对。'}</p>}
       {workspace && onCorrection && <QuestionDetail row={row} workspace={workspace} embedded onCorrection={() => onCorrection(true)} onUpload={() => onCorrection(false)} onContinue={onContinue} />}
+      {onVariant && usable && decision && ['incorrect', 'partially_correct'].includes(decision.verdict) && <div className="recognition-variant-action"><button type="button" className="button secondary" disabled={variantBusy || !!workspace?.busy} onClick={onVariant}>{variantBusy ? <LoaderCircle className="spin" size={16} /> : <Shuffle size={16} />}{variantBusy ? '正在提交生成请求' : '选做一道同题型'}</button><span className="muted small">AI 生成并核验一道，想试试时再开始。</span></div>}
     </div>}
   </article>
 }
 
-export function RecognitionResults({ rows, workspace, onNext, onSelectSubject, selectedCaseId, onSelect, onCorrection }: RecognitionResultsProps) {
+export function RecognitionResults({ rows, workspace, onNext, onSelectSubject, selectedCaseId, onSelect, onCorrection, onVariant, variantBusy }: RecognitionResultsProps) {
   const [openId, setOpenId] = useState<string | null>(selectedCaseId)
   useEffect(() => { setOpenId(selectedCaseId) }, [selectedCaseId])
   const subjects = workspace.studentCurriculum?.subjects.filter(subject => subject.catalog_status === 'available') ?? []
@@ -115,7 +118,7 @@ export function RecognitionResults({ rows, workspace, onNext, onSelectSubject, s
   return <div className="recognition-results">
     <ResultsSummary rows={rows} detail={null} compact />
     <p className="recognition-legend">点击题目，对照原图核对作答。AI 初判带 * 时仍有不确定之处；你可以先订正清楚的题，原作答会保留。</p>
-    <div className="recognition-card-list" aria-label="本次识别的题目">{rows.map((row, index) => <QuestionCard key={row.case.id} row={row} index={index} workspace={workspace} subjects={subjects} onSelectSubject={subject => onSelectSubject(row, subject)} open={openId === row.case.id} onToggle={() => { onSelect(row); setOpenId(openId === row.case.id ? null : row.case.id) }} onCorrection={camera => onCorrection(row, camera)} onContinue={rows.length > 1 ? () => select(rows[(index + 1) % rows.length]) : undefined} />)}</div>
+    <div className="recognition-card-list" aria-label="本次识别的题目">{rows.map((row, index) => <QuestionCard key={row.case.id} row={row} index={index} workspace={workspace} subjects={subjects} onVariant={onVariant ? () => onVariant(row) : undefined} variantBusy={!!variantBusy} onSelectSubject={subject => onSelectSubject(row, subject)} open={openId === row.case.id} onToggle={() => { onSelect(row); setOpenId(openId === row.case.id ? null : row.case.id) }} onCorrection={camera => onCorrection(row, camera)} onContinue={rows.length > 1 ? () => select(rows[(index + 1) % rows.length]) : undefined} />)}</div>
     <div className="next-capture-wrap"><button className="button primary next-capture" type="button" disabled={!!workspace.busy} onClick={onNext}><Camera size={18} />拍下一份作业</button></div>
   </div>
 }

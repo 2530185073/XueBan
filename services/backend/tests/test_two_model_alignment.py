@@ -96,8 +96,8 @@ def test_alignment_preserves_audit_labels_and_routes_visual_review_to_primary_an
     flow = TwoModelWholePagePipeline(
         FakeClient("deepseek", {"items": [first]}), FakeClient("glm", {"items": [second]}),
         reconciliation_client=FakeClient("reconciler", {"items": [
-            review(label="5#1", resolution="visual_resolution")]}),
-        visual_client=FakeClient("astra", {"items": [item("5#1", stem_text=first["stem_text"], answer_text="4")]}))
+            review(source=first, label="5#1", resolution="visual_resolution")]}),
+        visual_client=FakeClient("astra", {"items": [item("5#1", stem_text=first["stem_text"], answer_text="4", options=[])]}))
     result = flow.recognize(images=(picture(),))
     assert len(result.data["items"]) == 1
     row = result.data["items"][0]
@@ -109,3 +109,73 @@ def test_alignment_preserves_audit_labels_and_routes_visual_review_to_primary_an
     assert json.loads(flow.visual_client.calls[0]["text"])["task_input"]["labels"] == ["5#1"]
     target = json.loads(flow.reconciliation_client.calls[0]["text"])["task_input"]["items"][0]
     assert target["label"] == "5#1" and target["secondary"]["label"] == "6#1"
+
+
+def test_semantic_pairing_still_reviews_changed_stem_even_when_both_judges_agree():
+    from test_semantic_alignment import pair, response
+    first = correct("2#3", stem_text="57.2÷55=____", answer_text="1.04")
+    second = correct("1(7)", stem_text="列竖式计算：57.2÷55=____", answer_text="1.04")
+    def respond(request):
+        task = json.loads(request["text"])["task_input"]
+        if "primary" in task:
+            return response(pair(first, second))
+        assert "stem_disagreement" in task["items"][0]["reason_codes"]
+        return {"items": [review(source=first, label="2#3", comparison={
+            "observations_same": True, "conditions_same": True, "difference_type": "presentation",
+            "explanation": "完整短题干被另一源包含，只有公共标题范围不同。"})]}
+    client = FakeClient("pairer", respond)
+    flow = TwoModelWholePagePipeline(
+        FakeClient("a", {"items": [first]}), FakeClient("b", {"items": [second]}),
+        reconciliation_client=client)
+    result = flow.recognize(images=(picture(),))
+    assert len(result.data["items"]) == 1
+    row = result.data["items"][0]
+    assert row["assessment"]["verdict"] == "correct"
+    assert row["assessment"]["verification"]["independent_judgments"] == 2
+    assert len(client.calls) == 2
+    assert row["assessment"]["verification"]["status"] == "reviewed"
+    payload = json.loads(client.calls[0]["text"])["task_input"]
+    assert "answer_text" not in json.dumps(payload) and "verdict" not in json.dumps(payload)
+    audit = result.data["multimodel_audit"]
+    assert audit["calls"][0]["items"][0] == first
+    assert audit["calls"][1]["items"][0] == second
+    assert audit["label_alignments"][0]["basis"] == "model_same_atomic_target"
+    assert [call["stage"] for call in audit["calls"]] == [
+        "primary", "secondary", "semantic_alignment", "reconciliation"]
+
+
+def test_semantic_pairing_cannot_release_chinese_condition_conflict_without_readback():
+    from test_semantic_alignment import pair, response
+    first = correct("一(1)", stem_text="小红10岁，小明比小红多3岁，求小明年龄。", answer_text="13")
+    second = correct("二(1)", stem_text="小红10岁，小明比小红少3岁，求小明年龄。", answer_text="13")
+    def respond(request):
+        task = json.loads(request["text"])["task_input"]
+        if "primary" in task:
+            # A mistaken pairing claim must not become an answer judgment.
+            return response(pair(first, second))
+        return {"items": [review(source=first, label=first["label"])]}
+    blind = item(first["label"], stem_text=first["stem_text"], answer_text="[不清]",
+                 answer_status="unclear", uncertainties=["字迹不清"], options=[])
+    flow = TwoModelWholePagePipeline(
+        FakeClient("a", {"items": [first]}), FakeClient("b", {"items": [second]}),
+        reconciliation_client=FakeClient("pairer", respond),
+        visual_client=FakeClient("reader", {"items": [blind]}))
+    result = flow.recognize(images=(picture(),))
+    row = result.data["items"][0]
+    assert row["assessment"]["verdict"] == "unable_to_judge"
+    assert row["recognition_status"] == "needs_revision"
+    assert "stem_disagreement" in row["assessment"]["verification"]["reason_codes"]
+    assert [call["stage"] for call in result.data["multimodel_audit"]["calls"]] == [
+        "primary", "secondary", "semantic_alignment", "reconciliation", "visual_readback"]
+
+
+def test_semantic_pairing_failure_preserves_both_unmatched_observations():
+    first = correct("2#3", stem_text="57.2÷55=____", answer_text="1.04")
+    second = correct("1(7)", stem_text="列竖式计算：57.2÷55=", answer_text="1.04")
+    flow = TwoModelWholePagePipeline(
+        FakeClient("a", {"items": [first]}), FakeClient("b", {"items": [second]}),
+        reconciliation_client=FakeClient("pairer", {"not_a_pairing_response": True}))
+    result = flow.recognize(images=(picture(),))
+    assert len(result.data["items"]) == 2
+    assert all(row["assessment"]["verdict"] == "unable_to_judge" for row in result.data["items"])
+    assert result.metadata.attempts[-1].code == "invalid_output"

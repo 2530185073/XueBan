@@ -3,7 +3,7 @@ import { valid } from './validation'
 
 const accountErrorStatus: Record<string, number> = { invalid_credentials: 401, login_rate_limited: 429, password_change_required: 403, username_conflict: 409 }
 // Codes of the later-phase learning endpoints that the phase-one Problem enum does not list.
-export const learningErrorStatus: Record<string, number> = { forbidden: 403, optional_gate_closed: 409, practice_not_needed: 409, course_unknown: 409, subject_already_recognized: 409, no_reviewed_items: 409, hints_disabled: 409, practice_active: 409 }
+export const learningErrorStatus: Record<string, number> = { forbidden: 403, optional_gate_closed: 409, practice_not_needed: 409, course_unknown: 409, curriculum_mismatch: 409, subject_already_recognized: 409, no_reviewed_items: 409, hints_disabled: 409, practice_active: 409, unsupported_source_type: 409, stale_source: 409, source_not_eligible: 409, generation_not_ready: 409, assessment_pending: 409 }
 
 export class StudentApi {
   constructor(readonly origin: string, private token: () => string | null, private revoked: () => void, private transport: typeof fetch = (...args) => globalThis.fetch(...args)) {}

@@ -70,17 +70,17 @@ def register_periodic(interval: timedelta):
     return decorator
 
 
-def published_graph(session) -> CurriculumGraph | None:
-    return session.scalar(select(CurriculumGraph).where(CurriculumGraph.status == "published")
-                          .order_by(CurriculumGraph.published_at.desc()))
+def published_graph(session, student_id=None) -> CurriculumGraph | None:
+    from .curriculum_binding import resolve_graph
+    return resolve_graph(session, student_id)
 
 
 OptionalKey = Annotated[str | None, Header(alias="Idempotency-Key", min_length=8, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")]
 
 
-def require_published_graph(session) -> CurriculumGraph:
+def require_published_graph(session, student_id=None) -> CurriculumGraph:
     from .errors import Problem
-    graph = published_graph(session)
+    graph = published_graph(session, student_id)
     if graph is None:
         raise Problem(503, "service", "service_unavailable", "尚未发布课程知识图谱。")
     return graph
@@ -103,7 +103,6 @@ def _digest(parts) -> str:
 
 def fingerprints(session, student_ids=None) -> dict[str, str]:
     """One grouped query per input table, not one query per learner."""
-    graph = published_graph(session)
     parts = defaultdict(list)
     events = (select(Homework.student_id, func.count(CorrectionEvent.id), func.max(CorrectionEvent.created_at))
               .join(Homework, Homework.id == CorrectionEvent.homework_id).where(Homework.processing_blocked.is_(False))
@@ -122,8 +121,16 @@ def fingerprints(session, student_ids=None) -> dict[str, str]:
             query = query.where(model.student_id.in_(student_ids))
         for student_id, count, latest in session.execute(query):
             parts[student_id].append(f"{model.__tablename__}{count}:{latest}")
-    return {student_id: _digest([graph.version if graph else None, RULE_VERSION, *sorted(values)])
-            for student_id, values in parts.items()}
+    profiles = select(StudentLearningProfile)
+    if student_ids is not None:
+        profiles = profiles.where(StudentLearningProfile.student_id.in_(student_ids))
+    for profile in session.scalars(profiles):
+        parts[profile.student_id].append(f"profile:{profile.revision}:{profile.updated_at}")
+    output = {}
+    for student_id, values in parts.items():
+        graph = published_graph(session, student_id)
+        output[student_id] = _digest([graph.version if graph else None, RULE_VERSION, *sorted(values)])
+    return output
 
 
 def dirty_students(session) -> list[tuple[str, str]]:
@@ -141,7 +148,8 @@ def _records(session, student_id):
         rows[entity.kind].append(entity.document)
     stale = {e.id: (e.payload or {}).get("reason") for e in session.scalars(
         select(CorrectionEvent).where(CorrectionEvent.homework_id.in_(homeworks), CorrectionEvent.kind == "evidence.invalidated"))}
-    links = [{"id": l.id, "question_id": l.question_id, "knowledge_id": l.knowledge_id, "role": l.role, "status": l.status,
+    links = [{"id": l.id, "question_id": l.question_id, "question_revision": l.question_revision,
+              "graph_version": l.graph_version, "knowledge_id": l.knowledge_id, "role": l.role, "status": l.status,
               "created_at": l.created_at.isoformat()} for l in session.scalars(
         select(QuestionKnowledgeLink).where(QuestionKnowledgeLink.student_id == student_id))]
     conditions = {}
@@ -156,10 +164,16 @@ def project_student(session: Session, tenant_id: str, student_id: str) -> dict:
     student = session.get(Student, student_id)
     if student is None or student.tenant_id != tenant_id:
         return {"status": "skipped"}
-    graph = published_graph(session)
+    graph = published_graph(session, student_id)
     if graph is None:
         return {"status": "no_published_graph"}
     session.scalar(select(Student).where(Student.id == student_id).with_for_update())
+    # The correction worker's immediate hook historically handled wrong
+    # answers only. The projection path also maps clear first-time successes,
+    # so positive evidence does not depend on a later mistake or a UI read.
+    from .learning_mapping import auto_confirm_model_links
+    auto_confirm_model_links(session, tenant_id, student_id)
+    session.flush()
     digest = fingerprints(session, [student_id]).get(student_id, _digest([graph.version if graph else None, RULE_VERSION]))
     projection = session.get(LearningProjection, student_id)
     if projection is None:
@@ -170,7 +184,7 @@ def project_student(session: Session, tenant_id: str, student_id: str) -> dict:
     known = set(session.scalars(select(KnowledgeNode.id).where(KnowledgeNode.graph_version == graph.version)))
     derived = [d for d in derive_evidence(cases=rows["case"], attempts=rows["attempt"], decisions=rows["decision"],
                                           hints=rows["hint"], questions={q["question_id"]: q for q in rows["question"]},
-                                          links=links, conditions=conditions, stale_reasons=stale)
+                                          links=links, conditions=conditions, stale_reasons=stale, graph_version=graph.version)
                if d["knowledge_id"] in known]
     existing = {row.source_key: row for row in session.scalars(
         select(LearningEvidence).where(LearningEvidence.student_id == student_id, LearningEvidence.validity == "valid"))}
@@ -208,6 +222,7 @@ def project_student(session: Session, tenant_id: str, student_id: str) -> dict:
     targets = set(valid) | set(diagnoses) | set(states)
     computed = {k: compute_state(k, valid.get(k, []), diagnoses.get(k, []), timestamp) for k in targets}
     state_changed = any(states.get(k) is None or states[k].document != doc or states[k].rule_version != RULE_VERSION
+                        or states[k].graph_version != graph.version
                         for k, doc in computed.items())
     if state_changed:
         projection.state_version += 1
@@ -217,7 +232,7 @@ def project_student(session: Session, tenant_id: str, student_id: str) -> dict:
                 session.add(StudentKnowledgeState(student_id=student_id, knowledge_id=knowledge_id, tenant_id=tenant_id,
                                                   graph_version=graph.version, rule_version=RULE_VERSION,
                                                   state_version=projection.state_version, document=document, computed_at=timestamp))
-            elif row.document != document or row.rule_version != RULE_VERSION:
+            elif row.document != document or row.rule_version != RULE_VERSION or row.graph_version != graph.version:
                 row.document, row.rule_version, row.graph_version = document, RULE_VERSION, graph.version
                 row.state_version, row.computed_at = projection.state_version, timestamp
     projection.source_fingerprint, projection.projected_at = digest, timestamp
@@ -301,6 +316,12 @@ class LearningWorker:
             with Session(self.engine) as session, session.begin():
                 job = session.get(LearningOutbox, job_id)
                 if job is not None and job.lease_token == token:
+                    # Mapping calls use the same bounded retry policy, retaining
+                    # sanitized provider metadata even when the transaction rolls back.
+                    audit = getattr(error, "learning_audit", None)
+                    if job.kind == "map_model_batch" and isinstance(audit, dict):
+                        job.payload = {**job.payload, "failed_executions":
+                                       [*job.payload.get("failed_executions", []), audit][-MAX_TRIES:]}
                     job.last_error, job.lease_token, job.lease_expires_at = code, None, None
                     job.status = "dead" if job.tries >= MAX_TRIES else "queued"
                     job.available_at = now() + timedelta(seconds=min(300, 5 * 2 ** job.tries))

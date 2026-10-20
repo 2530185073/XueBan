@@ -1,15 +1,20 @@
 import { describe, expect, it, vi } from 'vitest'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { StaffApi } from './api/client'
 import { LearningApi } from './api/learning'
 import {
-  isAgentRun, isCreatedShareLink, isGate, isGenerationStatus, isKnowledgeDetail, isKnowledgeLinkList, isLinkQueue, isMemoryList, isReport, isReportQueue, isShareLink, isStudentKnowledge, type AgentRun, type KnowledgeLink,
+  isAgentRun, isCreatedShareLink, isEvidence, isGate, isGenerationStatus, isKnowledgeDetail, isKnowledgeLinkList, isLinkQueue, isMemoryList, isReport, isReportQueue, isShareLink, isStudentKnowledge, type AgentRun, type KnowledgeLink,
 } from './api/learningTypes'
 import {
   diagnosisIssue, finishedPeriods, helpSeen, lastFinishedPeriod, memoryIssue, parseAnswerValues, periodFinished, periodFromStart, periodLabel, primaryConflict,
-  dailyMessage, dayLabel, deliveryLabel, recentDays, runView, shareState, shareUrl, statusLabel, statusLabels,
+  dailyMessage, dayLabel, deliveryLabel, evidenceSourceCounts, evidenceSourceLabel, recentDays, runView, shareState, shareUrl, statusLabel, statusLabels,
 } from './learning'
 import { sampleWorkspace } from './sample'
 import { generationText } from './components/PracticeArea'
+import { DailySnapshotView } from './components/DailyFeedbackArea'
+import { SnapshotView } from './components/ReportDetail'
+import { EvidenceRow } from './components/KnowledgeDetailPanel'
 
 const at = '2026-10-16T08:00:00+00:00'
 const link = (overrides: Partial<KnowledgeLink> = {}): KnowledgeLink => ({
@@ -47,8 +52,8 @@ const report = {
 
 describe('学情接口的手写校验', () => {
   it('知识点关联与待确认队列', () => {
-    expect(isKnowledgeLinkList({ question_id: 'question_a', items: [link(), link({ id: 'qkl_2', status: 'candidate', source: 'model', rationale: '整数加法' })] })).toBe(true)
-    expect(isKnowledgeLinkList({ question_id: 'question_a', items: [{ ...link(), role: 'main' }] })).toBe(false)
+    expect(isKnowledgeLinkList({ question_id: 'question_a', question_revision: 2, graph_version: 'graph-1', items: [link(), link({ id: 'qkl_2', status: 'candidate', source: 'model', rationale: '整数加法' })] })).toBe(true)
+    expect(isKnowledgeLinkList({ question_id: 'question_a', question_revision: 2, graph_version: 'graph-1', items: [{ ...link(), role: 'main' }] })).toBe(false)
     expect(isLinkQueue({ items: [{ case_id: 'case_a', question_id: 'question_a', student_id: 'student_a', homework_title: null, question_text: null, verdict: 'incorrect', candidates: [] }] })).toBe(true)
     expect(isLinkQueue({ items: [{ case_id: 'case_a' }] })).toBe(false)
   })
@@ -60,6 +65,10 @@ describe('学情接口的手写校验', () => {
     expect(isStudentKnowledge({ ...body, states: [{ ...body.states[0], learning_status: 'mastered' }] })).toBe(false)
     expect(isStudentKnowledge({ ...body, chapters: [{ ...body.chapters[0], status_counts: { mastery: 0.6 } }] })).toBe(false)
     expect(isStudentKnowledge({ ...body, projection: { ...body.projection, pending: 'no' } })).toBe(false)
+    expect(isStudentKnowledge({ ...body, graph_version: null, graph_review_status: 'not_ready_latest_edition', states: [], chapters: [] })).toBe(true)
+    expect(isStudentKnowledge({ ...body, graph_version: undefined })).toBe(false)
+    expect(isStudentKnowledge({ ...body, states: [{ ...body.states[0], model_evidence_count: -1 }] })).toBe(false)
+    expect(isStudentKnowledge({ ...body, states: [{ ...body.states[0], assessment_source: 'parent' }] })).toBe(false)
   })
   it('知识点详情含证据、前置与失效原因', () => {
     const detail = { node, state, evidence: [evidence, { ...evidence, id: 'evidence_0', validity: 'invalidated', invalidation_reason: 'superseded' }],
@@ -67,6 +76,9 @@ describe('学情接口的手写校验', () => {
     expect(isKnowledgeDetail(detail)).toBe(true)
     expect(isKnowledgeDetail({ ...detail, evidence: [{ ...evidence, validity: 'maybe' }] })).toBe(false)
     expect(isKnowledgeDetail({ ...detail, state: null })).toBe(true)
+    expect(isKnowledgeDetail({ ...detail, evidence: [{ ...evidence, source_role: 'model' }] })).toBe(true)
+    expect(isKnowledgeDetail({ ...detail, evidence: [{ ...evidence, source_role: 'unknown' }] })).toBe(true)
+    expect(isKnowledgeDetail({ ...detail, evidence: [{ ...evidence, source_role: 'unknown_provider' }] })).toBe(false)
   })
   it('记忆与 AI 摘要', () => {
     const memory = { id: 'memory_1', category: 'effective_support', content: '先口述符号法则再计算', knowledge_id: null, evidence_ids: ['evidence_1'], source: 'model', status: 'proposed',
@@ -111,6 +123,40 @@ describe('学情接口的手写校验', () => {
 })
 
 describe('状态文字', () => {
+  it('旧记录不猜老师来源，AI 与老师记录按来源计数', () => {
+    expect(evidenceSourceLabel(undefined)).toBe('来源未标注')
+    expect(evidenceSourceLabel('model')).toBe('AI 初判，尚未经老师核实')
+    expect(evidenceSourceCounts({})).toBe('作答来源尚未分列')
+    expect(evidenceSourceCounts({ model_evidence_count: 2, staff_verified_evidence_count: 1 })).toBe('AI 初判 2 次 · 老师核实 1 次')
+  })
+  it('知识证据与每日/半月预览不会把 AI 记录写成老师判断', () => {
+    const item: unknown = { ...evidence, source_role: 'model' }
+    if (!isEvidence(item)) throw new Error('Invalid evidence fixture')
+    const evidenceHtml = renderToStaticMarkup(createElement(EvidenceRow, { item }))
+    expect(evidenceHtml).toContain('AI 初判，尚未经老师核实')
+    expect(evidenceHtml).not.toContain('老师已核实')
+    const body: unknown = { ...report, cadence: 'daily', snapshot: {
+      ...snapshot,
+      school_tasks: { ...snapshot.school_tasks, staff_verified: 0, awaiting_verification: 1,
+        verdicts: { correct: 0, incorrect: 0, partially_correct: 0, unanswered: 0 },
+        ai_judged: 1, ai_corrected_pending: 1, ai_verdicts: { correct: 0, incorrect: 1, partially_correct: 0, unanswered: 0 } },
+      focus: [{ ...snapshot.focus[0], model_evidence_count: 1, staff_verified_evidence_count: 0,
+        cards: [{ ...snapshot.focus[0].cards[0], source_role: 'model', certainty: 'AI 初判，尚未经老师核实', staff_explanation: null }] }],
+      mistakes: [{ case_id: 'case_a', homework_title: null, page: 1, question: '1 + 1 = ?', verdict: '答错',
+        progress: 'needs_correction', correction: '还没订正', source_role: 'model', certainty: 'AI 初判，尚未经老师核实' }],
+    } }
+    if (!isReport(body) || !body.snapshot) throw new Error('Invalid report fixture')
+    const dailyHtml = renderToStaticMarkup(createElement(DailySnapshotView, { snap: body.snapshot }))
+    const reportHtml = renderToStaticMarkup(createElement(SnapshotView, { snap: body.snapshot }))
+    for (const html of [dailyHtml, reportHtml]) {
+      expect(html).toContain('AI 初判（未核实）')
+      expect(html).toContain('AI 初判 1 次')
+      expect(html).toContain('老师核实 0 次')
+      expect(html).toContain('订正 AI 初判通过')
+      expect(html).not.toContain('次已核实作答中出错')
+    }
+    expect(dailyHtml).not.toContain('<dt>老师判断</dt>')
+  })
   it('四种学习状态都有中文且不含百分比', () => {
     expect(statusLabels).toEqual({ needs_help_now: '当前需要帮助', consolidating: '正在巩固', stable_for_now: '阶段性较稳', no_judgment: '暂不判断' })
     expect(Object.values(statusLabels).join('')).not.toMatch(/[%％\d]/)
@@ -267,6 +313,12 @@ describe('学情接口请求', () => {
     await learning.editReport('report_1', { expected_revision: 3, staff_note: '认真', next_step: null })
     expect(transport.mock.calls[1][1].method).toBe('PATCH')
     await expect(learning.report('report_1')).rejects.toMatchObject({ status: 502 })
+  })
+  it('最新版目录待审核时空图谱是正常响应，不转为 502', async () => {
+    const body = { student_id: 'student_a', graph_version: null, graph_review_status: 'not_ready_latest_edition',
+      projection: { state_version: 0, projected_at: null, pending: false }, states: [], chapters: [], notice: '目录待审核。' }
+    const { learning } = await signedIn(response(body))
+    await expect(learning.knowledge('student_a')).resolves.toEqual(body)
   })
   it('每日反馈按日期取队列，生成时带 cadence', async () => {
     const queued = { ...report, cadence: 'daily', snapshot: null, focus_count: 0, mistake_count: 2, sufficient: false, student_name: '合成学生' }

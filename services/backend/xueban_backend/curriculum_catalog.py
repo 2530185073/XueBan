@@ -23,6 +23,14 @@ class CurriculumScope:
     # catalogue.  It must never fall back to the older GitHub scans.
     revision_policy: str = "publisher_latest"
     textbook_revision: str = "publisher_latest"
+    isbn: str | None = None
+    term: str | None = None
+    graph_version: str | None = None
+
+
+BOOK_IDENTITY = {"grade": 7, "subject": "数学", "publisher_code": "PEP",
+                 "publisher_name": "人民教育出版社", "isbn": "9787107382468", "term": "up",
+                 "title": "义务教育教科书·数学七年级上册"}
 
 
 _PUBLISHERS = {
@@ -108,6 +116,10 @@ def supported_scope(grade: object, subject: object, publisher: object) -> Curric
     code = publisher_code(publisher)
     if not subject_key or code is None:
         return None
+    # Explicit PEP selection is supported without changing the legacy default
+    # BNUP scope used by already enrolled students.
+    if grade == 7 and subject_key == _key("数学") and code == "PEP":
+        return CurriculumScope(grade, "数学", code, "人民教育出版社")
     for item_grade, item_subject, item_publisher in _SPECS:
         if item_grade == grade and _key(item_subject) == subject_key and _PUBLISHERS[item_publisher][0] == code:
             name = _PUBLISHERS[item_publisher][1]
@@ -134,6 +146,33 @@ def scopes_for_grade(grade: object) -> tuple[CurriculumScope, ...]:
     return tuple(scope_for_subject(grade, subject) for item_grade, subject, _ in _SPECS if item_grade == grade)
 
 
+def scope_for_profile(document: dict | None, subject: object) -> CurriculumScope | None:
+    document = document or {}
+    binding = document.get("curriculum_binding") or {}
+    canonical = canonical_subject(subject)
+    if binding and canonical == binding.get("subject"):
+        if document.get("grade") != binding.get("grade") or any(
+                binding.get(key) != BOOK_IDENTITY[key] for key in ("grade", "subject", "publisher_code", "isbn", "term")):
+            return None
+        return CurriculumScope(binding["grade"], canonical, binding["publisher_code"], BOOK_IDENTITY["publisher_name"],
+                               "explicit_book", "isbn:" + binding["isbn"], binding["isbn"], binding["term"],
+                               binding.get("graph_version"))
+    return scope_for_subject(document.get("grade"), subject)
+
+
+def scopes_for_profile(document: dict | None) -> tuple[CurriculumScope, ...]:
+    document = document or {}
+    return tuple(scope for previous in scopes_for_grade(document.get("grade"))
+                 if (scope := scope_for_profile(document, previous.subject)) is not None)
+
+
+def curriculum_matches_scope(curriculum: dict, scope: CurriculumScope) -> bool:
+    return (curriculum.get("grade") == scope.grade
+            and curriculum.get("edition") == scope.textbook_revision
+            and (curriculum.get("subject") is None or canonical_subject(curriculum["subject"]) == scope.subject)
+            and (curriculum.get("publisher_code") is None or curriculum["publisher_code"] == scope.publisher_code))
+
+
 def curriculum_stage(grade: int | None) -> str | None:
     if grade is None:
         return None
@@ -141,6 +180,17 @@ def curriculum_stage(grade: int | None) -> str | None:
 
 
 def scope_payload(scope: CurriculumScope) -> dict:
+    if scope.isbn:
+        # This identifies a source-verified resource snapshot. It does not
+        # assert the publisher's latest edition or any teacher approval.
+        return {"grade": scope.grade, "subject": scope.subject, "publisher_code": scope.publisher_code,
+                "publisher_name": scope.publisher_name, "revision_policy": "explicit_book",
+                "textbook_revision": scope.textbook_revision, "stage": curriculum_stage(scope.grade),
+                "catalog_status": "available", "catalog_verified_at": "2026-10-21",
+                "catalog_candidates": [], "isbn": scope.isbn, "graph_version": scope.graph_version,
+                "books": [{"term": scope.term, "title": BOOK_IDENTITY["title"], "isbn": scope.isbn,
+                           "catalog_year": None, "updated_at": None, "revised_2022_standard": True,
+                           "contents_review_status": "source_verified_ai_reviewed"}]}
     catalog = _official_catalog()
     requested = next((item for item in catalog.get("requested_scopes", [])
                       if item.get("grade") == scope.grade
@@ -216,6 +266,24 @@ def graph_is_latest_reviewed(graph) -> bool:
     return graph is not None and graph.review_status == "publisher_latest_reviewed"
 
 
+def graph_is_usable(graph) -> bool:
+    if graph_is_latest_reviewed(graph) and not getattr(graph, "book_identity", None):
+        return True
+    if graph is None or graph.review_status != "source_verified_ai_reviewed" or graph.status != "published":
+        return False
+    book, review = getattr(graph, "book_identity", None) or {}, getattr(graph, "review_metadata", None) or {}
+    approval = review.get("publication_review") or {}
+    digest = getattr(graph, "import_digest", None)
+    return (all(book.get(key) == BOOK_IDENTITY[key] for key in ("grade", "subject", "publisher_code", "isbn", "term"))
+            and review.get("validation_version") == "book-graph-v1"
+            and isinstance(digest, str) and len(digest) == 64 and review.get("candidate_sha256") == digest
+            and bool(review.get("sources"))
+            and approval.get("status") == "source_verified_ai_reviewed"
+            and approval.get("candidate_sha256") == digest
+            and approval.get("review_kind") == "independent_ai_content_review"
+            and approval.get("teacher_review") is False and approval.get("student_edition_confirmed") is False)
+
+
 def node_matches_scope(node, scope: CurriculumScope) -> bool:
     refs = node.curriculum_refs if isinstance(node.curriculum_refs, list) else []
     for ref in refs:
@@ -225,7 +293,8 @@ def node_matches_scope(node, scope: CurriculumScope) -> bool:
         ref_grade = ref.get("grade")
         if (ref_publisher == scope.publisher_code and ref_grade == scope.grade
                 and canonical_subject(ref.get("subject")) == scope.subject
-                and ref.get("textbook_revision") == "publisher_latest"
+                and ref.get("textbook_revision") == scope.textbook_revision
+                and (scope.isbn is None or (ref.get("isbn") == scope.isbn and ref.get("term") == scope.term))
                 and ref.get("stage") == curriculum_stage(scope.grade)):
             return True
     return False

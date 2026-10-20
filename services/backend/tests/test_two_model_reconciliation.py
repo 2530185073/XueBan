@@ -16,7 +16,11 @@ def pipeline(primary, secondary, output):
     return TwoModelWholePagePipeline(
         FakeClient("deepseek", {"items": primary}),
         FakeClient("astra", {"items": secondary}),
-        reconciliation_client=FakeClient("astra-review", output))
+        reconciliation_client=FakeClient("astra-review", output),
+        visual_client=FakeClient("blind", lambda request: {"items": [
+            {key: value for key, value in row.items()
+             if key in {"label", "stem_text", "answer_text", "answer_status", "uncertainties", "options"}}
+            for row in primary if row["label"] in json.loads(request["text"])["task_input"]["labels"]]}))
 
 
 def different_stem(label="1", **changes):
@@ -44,9 +48,11 @@ def test_one_batch_review_only_for_conflicts_keeps_both_blind_reads_and_private_
     audit = result.data["multimodel_audit"]["calls"]
     assert audit[0]["items"] == first and audit[1]["items"] == second
     assert audit[2]["applications"][0]["original_reason_codes"] == ["stem_disagreement"]
-    assert audit[2]["applications"][0]["resolved_reason_codes"] == ["semantic_review_equivalent"]
-    assert len(result.metadata.attempts) == 3
-    assert result.metadata.usage.total_tokens == 90
+    resolved = [application for application in audit[2]["applications"] if application["resolved"]]
+    assert len(resolved) == 2
+    assert all(application["resolved_reason_codes"] == ["semantic_review_equivalent"] for application in resolved)
+    assert len(result.metadata.attempts) == 4
+    assert result.metadata.usage.total_tokens == 120
 
 
 def test_review_does_not_call_when_both_reads_match_or_a_service_is_unavailable():
@@ -81,7 +87,8 @@ def test_review_timeout_is_audited_not_retried_and_not_called_image_blur():
     assert row["assessment"]["verification"]["reason_codes"] == ["stem_disagreement", "reconciliation_unavailable"]
     assert "服务暂未完成" in row["assessment"]["basis_summary"]
     assert len(flow.reconciliation_client.calls) == 1
-    assert [a.code for a in result.metadata.attempts] == ["ok", "ok", "deadline_exceeded"]
+    assert [a.code for a in result.metadata.attempts] == ["ok", "ok", "deadline_exceeded", "ok"]
+    assert len(flow.visual_client.calls) == 1  # Began alongside review; no paid retry.
     assert result.metadata.usage is None
 
 
@@ -93,7 +100,7 @@ def test_review_timeout_is_audited_not_retried_and_not_called_image_blur():
 def test_invalid_review_cannot_release_conflict_and_keeps_paid_attempt(output):
     result = pipeline([correct()], [different_stem()], output).recognize(images=(picture(),))
     assert result.data["items"][0]["assessment"]["verdict"] == "unable_to_judge"
-    assert result.metadata.attempts[-1].code == "invalid_output"
+    assert result.metadata.attempts[2].code == "invalid_output"
 
 
 def test_review_missing_one_item_leaves_only_that_item_pending():
@@ -110,7 +117,7 @@ def test_review_cannot_echo_another_clients_secret_into_audit():
     flow.reconciliation_client.output = {"items": [review(visual_evidence=flow.client.settings.api_key)]}
     result = flow.recognize(images=(picture(),))
     assert flow.client.settings.api_key not in str(result.data)
-    assert result.metadata.attempts[-1].code == "provider_credential_echo"
+    assert result.metadata.attempts[2].code == "provider_credential_echo"
 
 
 def test_visual_resolution_keeps_selected_original_student_answer_and_changes_judgment():
@@ -152,7 +159,7 @@ def test_four_pages_review_concurrently_with_exactly_one_batch_for_each_page():
         f"asset_page{i}" for i in range(4)}
     assert all(len(json.loads(request["text"])["task_input"]["items"]) == 1 for request in requests)
     assert all(row["assessment"]["verification"]["status"] == "reviewed" for row in result.data["items"])
-    assert len(result.metadata.attempts) == 12
+    assert len(result.metadata.attempts) == 16
 
 
 @pytest.mark.parametrize("text", ["36+[不清]+9=81", "36+（涂改不清）+9=81", "36+[illegible]+9=81"])
@@ -188,7 +195,7 @@ def test_inferred_overwritten_step_is_not_released_by_original_candidate_selecti
     assert row["assessment"]["verdict"] == "unable_to_judge"
     assert row["assessment"]["knowledge_points"] == []
     assert row["recognition_status"] == "needs_revision"
-    application = result.data["multimodel_audit"]["calls"][-1]["applications"][0]
+    application = result.data["multimodel_audit"]["calls"][2]["applications"][0]
     assert application["rejection_code"] == "inferred_student_transcription"
 
 
@@ -210,13 +217,13 @@ def test_initial_agreement_cannot_hide_unreadable_printed_conditions(changes):
 
 def test_missing_stems_stay_pending_even_if_visual_reviewer_claims_correct():
     first = correct(stem_text=None)
-    flow = pipeline([first], [first], {"items": [review(resolution="visual_resolution")]})
+    flow = pipeline([first], [first], {"items": [review(source=first, resolution="visual_resolution")]})
     result = flow.recognize(images=(picture(),))
     row = result.data["items"][0]
     assert row["assessment"]["verdict"] == "unable_to_judge"
     assert row["recognition_status"] == "needs_revision"
     assert row["assessment"]["knowledge_points"] == []
-    assert result.data["multimodel_audit"]["calls"][-1]["applications"][0]["rejection_code"] == "missing_question_text"
+    assert result.data["multimodel_audit"]["calls"][2]["applications"][0]["rejection_code"] == "visual_question_missing"
 
 
 @pytest.mark.parametrize("label,text", [("3(2)", "1/2ah"), ("3(8)", "0.8a")])
@@ -224,7 +231,7 @@ def test_clear_current_fill_answer_does_not_require_reconstructing_deleted_histo
     a = correct(label, question_type="fill_blank", answer_text=text)
     b = correct(label, question_type="fill_blank", answer_text=text, answer_status="unclear",
                 verdict="unable_to_judge", uncertainties=["可辨认当前答案，但无法确定覆盖的旧笔迹下是否另有数字"])
-    choice = review(label=label, resolution="visual_resolution", answer_text=text,
+    choice = review(source=a, label=label, resolution="visual_resolution", answer_text=text,
                     visual_evidence="旧字已明确划去，横线上方当前有效字迹完整清楚，新答案与旧字归属可区分。")
     row = pipeline([a], [b], {"items": [choice]}).recognize(images=(picture(),)).data["items"][0]
     assert row["assessment"]["verdict"] == "correct"

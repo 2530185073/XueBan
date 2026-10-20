@@ -1,4 +1,4 @@
-import { MAX_PRACTICE_ITEMS, type AgentContext, type AgentTip, type ChapterRollup, type EvidenceResult, type ExitReason, type KnowledgeMap, type KnowledgeState, type LearningStatus, type Memory, type OptionalActivities, type PracticeResult, type PracticeSession, type PracticeStatus, type PreviewOffer, type VariantOffer } from './core/learning'
+import { MAX_PRACTICE_ITEMS, type AgentContext, type AgentTip, type ChapterRollup, type EvidenceResult, type ExitReason, type KnowledgeGraphEdge, type KnowledgeGraphNode, type KnowledgeMap, type KnowledgeState, type LearningStatus, type Memory, type OptionalActivities, type PracticeResult, type PracticeSession, type PracticeStatus, type PreviewOffer, type VariantOffer } from './core/learning'
 import { StudentError } from './core/errors'
 import type { Tone } from './presentation'
 
@@ -40,7 +40,7 @@ export function dayLabel(value: string, now = new Date()): string { const d = ne
 
 /** The map entry appears only when the server has at least one knowledge state. */
 export const hasKnowledgeMap = (map: KnowledgeMap | null | undefined): map is KnowledgeMap => !!map && map.states.length > 0
-export const PENDING_NOTICE = '老师刚更新了批改，地图稍后刷新'
+export const PENDING_NOTICE = '新的作答正在整理，知识地图更新中。更新完成前，先不显示旧判断。'
 export function chapterCounts(chapter: ChapterRollup): { status: LearningStatus; label: string; count: number }[] {
   return statusOrder.filter(s => (chapter.status_counts[s] ?? 0) > 0).map(s => ({ status: s, label: statusLabels[s].label, count: chapter.status_counts[s]! }))
 }
@@ -52,6 +52,87 @@ export function groupStates(states: KnowledgeState[]): ChapterGroup[] {
     group.states.push(state); groups.set(key, group)
   }
   return [...groups.values()]
+}
+
+/** Pending is an invalidation boundary, not evidence that the student forgot. */
+export function knowledgeNodes(map: KnowledgeMap): KnowledgeGraphNode[] {
+  if (!['publisher_latest_reviewed', 'source_verified_ai_reviewed'].includes(map.graph_review_status ?? '')) return []
+  return (map.nodes ?? []).filter(node => ['concept', 'skill'].includes(node.node_type)).map(node => map.projection.pending ? {
+    ...node, learning_status: 'no_judgment', reason_codes: [], valid_evidence_count: 0,
+    model_evidence_count: 0, staff_verified_evidence_count: 0, assessment_source: 'none',
+  } : node)
+}
+
+export interface KnowledgeChapter { id: string; name: string; nodes: KnowledgeGraphNode[] }
+export function knowledgeChapters(nodes: KnowledgeGraphNode[]): KnowledgeChapter[] {
+  const chapters = new Map<string, KnowledgeChapter>()
+  for (const node of [...nodes].sort((a, b) => a.sort_order - b.sort_order || a.id.localeCompare(b.id))) {
+    const id = node.chapter_id ?? 'unassigned'
+    const chapter = chapters.get(id) ?? { id, name: node.chapter_name || '其他知识点', nodes: [] }
+    chapter.nodes.push(node); chapters.set(id, chapter)
+  }
+  return [...chapters.values()]
+}
+
+export const GRAPH_WIDTH = 660
+export const GRAPH_NODE_WIDTH = 192
+export const GRAPH_NODE_HEIGHT = 102
+export interface PositionedKnowledge { node: KnowledgeGraphNode; x: number; y: number }
+/** Stable prerequisite layers, not a force simulation or an invented learning path. */
+export function layoutKnowledgeGraph(nodes: KnowledgeGraphNode[], edges: KnowledgeGraphEdge[]) {
+  const ordered = [...nodes].sort((a, b) => a.sort_order - b.sort_order || a.id.localeCompare(b.id))
+  const ids = new Set(ordered.map(node => node.id))
+  const unique = new Set<string>()
+  const visibleEdges = edges.filter(edge => {
+    const key = `${edge.from_id}\0${edge.to_id}`
+    if (edge.relation_type !== 'prerequisite_of' || !ids.has(edge.from_id) || !ids.has(edge.to_id) || edge.from_id === edge.to_id || unique.has(key)) return false
+    unique.add(key); return true
+  })
+  const indegree = new Map(ordered.map(node => [node.id, 0]))
+  const outgoing = new Map<string, string[]>()
+  for (const edge of visibleEdges) {
+    indegree.set(edge.to_id, (indegree.get(edge.to_id) ?? 0) + 1)
+    outgoing.set(edge.from_id, [...(outgoing.get(edge.from_id) ?? []), edge.to_id])
+  }
+  const ranks = new Map(ordered.map(node => [node.id, 0]))
+  const queue = ordered.filter(node => !indegree.get(node.id)).map(node => node.id)
+  for (let i = 0; i < queue.length; i++) {
+    for (const next of outgoing.get(queue[i]) ?? []) {
+      ranks.set(next, Math.max(ranks.get(next) ?? 0, (ranks.get(queue[i]) ?? 0) + 1))
+      indegree.set(next, (indegree.get(next) ?? 1) - 1)
+      if (!indegree.get(next)) queue.push(next)
+    }
+  }
+  // Cycles do not hang rendering or create status propagation.
+  const layers = new Map<number, KnowledgeGraphNode[]>()
+  for (const node of ordered) {
+    const rank = ranks.get(node.id) ?? 0
+    layers.set(rank, [...(layers.get(rank) ?? []), node])
+  }
+  const positions: PositionedKnowledge[] = []
+  let y = 28
+  for (const [, layer] of [...layers].sort(([a], [b]) => a - b)) {
+    for (let offset = 0; offset < layer.length; offset += 3) {
+      const row = layer.slice(offset, offset + 3)
+      const left = (GRAPH_WIDTH - row.length * GRAPH_NODE_WIDTH - (row.length - 1) * 24) / 2
+      row.forEach((node, index) => positions.push({ node, x: left + index * (GRAPH_NODE_WIDTH + 24), y }))
+      y += GRAPH_NODE_HEIGHT + 54
+    }
+  }
+  const byId = new Map(positions.map(point => [point.node.id, point]))
+  const paths = visibleEdges.map(edge => {
+    const a = byId.get(edge.from_id)!, b = byId.get(edge.to_id)!
+    const fromX = a.x + GRAPH_NODE_WIDTH / 2, toX = b.x + GRAPH_NODE_WIDTH / 2
+    const fromY = a.y + GRAPH_NODE_HEIGHT, toY = b.y
+    return { edge, path: `M ${fromX} ${fromY} C ${fromX} ${fromY + 28}, ${toX} ${toY - 28}, ${toX} ${toY}` }
+  })
+  return { positions, paths, width: GRAPH_WIDTH, height: Math.max(184, y - 26) }
+}
+
+export function nodeNameLines(name: string): string[] {
+  const chars = Array.from(name)
+  if (chars.length <= 10) return [name]
+  return [chars.slice(0, 10).join(''), chars.slice(10, chars.length > 20 ? 19 : 20).join('') + (chars.length > 20 ? '…' : '')]
 }
 
 export const MAX_TIPS = 3
@@ -104,7 +185,7 @@ export const exitChoices: { reason: ExitReason; label: string }[] = [
 export const answerFeedback: Record<PracticeResult, { title: string; text: string; tone: Tone }> = {
   correct: { title: '做对了', text: '可以看看解析，确认自己的思路。', tone: 'green' },
   incorrect: { title: '这次没对上，没关系', text: '对照解析看看哪一步不一样，想明白就是收获。', tone: 'amber' },
-  unscorable: { title: '没法自动判断，可以对照解析', text: '学伴读不准这个写法，自己对照一下就好。', tone: 'neutral' },
+  unscorable: { title: '暂时没有确认对错', text: '这次作答已保留，没有记成答错；可以对照解析看看思路。', tone: 'neutral' },
 }
 export const choiceLetters = ['A', 'B', 'C', 'D'] as const
 
@@ -112,7 +193,13 @@ const startMessages: Record<string, string> = {
   optional_gate_closed: '现在先不开始额外活动。等学校任务完成、老师开放时间后才可以选。今天就到这里也很好。',
   practice_not_needed: '这个知识点现在不需要额外练习，休息一下也很好。',
   course_unknown: '老师还没告诉学伴下一课学什么，预习先不开放。',
-  no_reviewed_items: '这个知识点还没有老师看过的练习题，先休息一下吧。',
+  no_reviewed_items: '这类题暂时没有可用的变式题，可以先回到自己的作业。',
+  curriculum_mismatch: '这道题来自之前的教材，暂不放进当前教材的练习。原来的作答记录仍会保留。',
+  unsupported_source_type: '这道原题的题型暂时还不能可靠识别，可以先回到自己的作业。',
+  stale_source: '原题记录已经更新，请刷新后从最新的错题开始。',
+  source_not_eligible: '这道题目前不需要额外生成练习，可以先回到自己的作业。',
+  generation_not_ready: '这道题还没有完成核验，请稍后刷新查看。',
+  assessment_pending: '这道题的上次作答正在核验，已提交的答案会保留，请等待结果。',
   practice_active: '你还有一个没结束的活动，可以接着做，也可以直接结束。',
   hints_disabled: '小测里不提供提示，可以直接写，也可以随时结束。',
 }

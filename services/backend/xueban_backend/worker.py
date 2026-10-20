@@ -27,8 +27,8 @@ from .correction_models import Asset, Entity, Task
 from .db import create_database_engine
 from .errors import Problem
 from .learning_models import CurriculumGraph, KnowledgeNode, StudentLearningProfile
-from .curriculum_catalog import (canonical_subject, graph_is_latest_reviewed, node_matches_scope,
-                                 scope_for_subject, scope_payload)
+from .curriculum_catalog import (canonical_subject, graph_is_usable, node_matches_scope,
+                                 scope_for_profile, scope_payload, curriculum_matches_scope)
 from .layout_repair import apply_repair, recognize_replacements
 from .models import Homework, Student
 from .providers import ProviderError
@@ -143,7 +143,7 @@ class CorrectionWorker:
         if subject is None:
             context["curriculum_context"]["status"] = "unresolved_subject"
             return context
-        scoped = scope_for_subject(grade, subject)
+        scoped = scope_for_profile(profile.document if profile else {}, subject)
         if scoped is None:
             return context
         curriculum = homework.curriculum if isinstance(homework.curriculum, dict) else {}
@@ -153,15 +153,14 @@ class CorrectionWorker:
                     and curriculum["publisher_code"] != scoped.publisher_code)):
             return context
         scope = scope_payload(scoped)
-        context["curriculum_context"].update(scope=scope, status="unverified_edition")
-        if (curriculum.get("grade") != grade or curriculum.get("edition") != "publisher_latest"
+        context["curriculum_context"].update(scope=scope, status="unverified_edition", revision_policy=scoped.revision_policy)
+        if (not curriculum_matches_scope(curriculum, scoped)
                 or scope["catalog_status"] != "available"):
             return context
         context["curriculum_context"]["status"] = "available"
-        graph = session.scalar(select(CurriculumGraph).where(
-            CurriculumGraph.status == "published"
-        ).order_by(CurriculumGraph.published_at.desc()).limit(1))
-        if graph is None or not graph_is_latest_reviewed(graph):
+        from .learning_projection import published_graph
+        graph = published_graph(session, student.id)
+        if graph is None or not graph_is_usable(graph):
             return context
         nodes = session.scalars(select(KnowledgeNode).where(
             KnowledgeNode.graph_version == graph.version,

@@ -1,0 +1,159 @@
+{
+  "schema_version": "curriculum-independent-audit-1",
+  "candidate_id": "pep-math-g7-up-9787107382468-candidate-20261021",
+  "candidate_revision": 2,
+  "candidate_sha256": "bb514e01492d067df83417f0cd410cf55ec6475ec5ce7b109ded9091c79efab4",
+  "status": "source_verified_ai_reviewed",
+  "review_kind": "independent_ai_content_review",
+  "reviewer": "/root/curriculum_independent_audit",
+  "author_agent": "/root/pr3_frontend_review",
+  "reviewed_at": "2026-10-20T18:13:30Z",
+  "answer_blind": false,
+  "teacher_review": false,
+  "student_edition_confirmed": false,
+  "human_reviewer": null,
+  "human_reviewed_at": null,
+  "review_document": "docs/curriculum/PEP_G7_UP_AUDIT_20261021.md",
+  "scope": {
+    "publisher_code": "PEP",
+    "subject": "数学",
+    "grade": 7,
+    "term": "up",
+    "isbn": "9787107382468",
+    "platform_id": "540ac93d-67fc-4353-9e49-1ef20d02b5a4",
+    "platform_asset_revision": "1787023107563",
+    "official_catalog_chapters_verified": 6,
+    "official_catalog_main_sections_verified": 15,
+    "project_authored_knowledge_nodes_reviewed": 25,
+    "project_authored_relations_reviewed": 37,
+    "primary_chapter_numbers": [3, 4],
+    "primary_section_ids": [
+      "pep-g7-up-3.1",
+      "pep-g7-up-3.2",
+      "pep-g7-up-4.1",
+      "pep-g7-up-4.2"
+    ],
+    "prerequisite_chapter_numbers": [1, 2],
+    "not_yet_modeled_chapter_numbers": [5, 6],
+    "detailed_textbook_body_reviewed": false,
+    "student_evidence_reviewed": false,
+    "live_photo_recognition_evaluated": false
+  },
+  "checks": {
+    "official_metadata_and_catalog": {
+      "status": "passed",
+      "method": "Refetched official public sources with system TLS verification; inspected cover, credits page and three table-of-contents images.",
+      "matching_source_hashes": 8,
+      "catalog_titles_and_start_pages_match": true,
+      "isbn_basis": "official_source_filename",
+      "physical_edition_confirmed": false
+    },
+    "curriculum_standard_scope": {
+      "status": "passed",
+      "source_id": "math-standard-2022",
+      "printed_pages_inspected": [54, 55],
+      "pdf_pages_inspected_one_based": [61, 62],
+      "limitation": "Supports grade-band scope, not official authorship of project nodes or exact textbook-body placement."
+    },
+    "revision_requests": [
+      {
+        "id": "A1",
+        "status": "resolved",
+        "evidence": "Necessary-parenthesis semantics replace character-presence grading; validation cases 05 and 22 form a positive/negative pair."
+      },
+      {
+        "id": "A2",
+        "status": "resolved",
+        "evidence": "Monomial and polynomial boundary rules cover numerical denominators, variable denominators, pi, implicit coefficients, nonzero constants, nonnegative integer variable exponents and excluded zero-degree convention."
+      },
+      {
+        "id": "A3",
+        "status": "resolved",
+        "evidence": "Degree after simplification uses remaining nonzero terms; explicit displayed-term questions are distinguished."
+      },
+      {
+        "id": "A4",
+        "status": "resolved",
+        "evidence": "Edge 01 is supports, not a required prerequisite or classification gate."
+      },
+      {
+        "id": "A5",
+        "status": "resolved",
+        "evidence": "Edge 35 is conditional on the actually used distribution method; valid common-expression simplification is accepted."
+      },
+      {
+        "id": "A6",
+        "status": "resolved",
+        "evidence": "Edge 37 requires substitution only when variables remain after valid simplification."
+      }
+    ],
+    "original_review_cases": {
+      "count": 25,
+      "status": "passed_independent_derivation_nonblind",
+      "answer_blind": false,
+      "is_human_gold": false
+    },
+    "validation_cases": {
+      "count": 22,
+      "status": "passed_content_and_expected_behavior_review_nonblind",
+      "answer_blind": false,
+      "is_human_gold": false,
+      "case_ids": [
+        "draft-boundary-01",
+        "draft-boundary-02",
+        "draft-boundary-03",
+        "draft-boundary-04",
+        "draft-boundary-05",
+        "draft-boundary-06",
+        "draft-boundary-07",
+        "draft-boundary-08",
+        "draft-boundary-09",
+        "draft-boundary-10",
+        "draft-boundary-11",
+        "draft-boundary-12",
+        "draft-boundary-13",
+        "draft-boundary-14",
+        "draft-boundary-15",
+        "draft-boundary-16",
+        "draft-boundary-17",
+        "draft-boundary-18",
+        "draft-boundary-19",
+        "draft-boundary-20",
+        "draft-boundary-21",
+        "draft-boundary-22"
+      ]
+    },
+    "relation_safety": {
+      "status": "passed",
+      "relation_type_counts": {
+        "prerequisite_of": 35,
+        "supports": 1,
+        "specializes_to": 1
+      },
+      "all_gates_learning_false": true,
+      "all_requires_whole_source_node_mastery_false": true,
+      "all_propagate_mastery_or_weakness_false": true,
+      "dispatch_on_relation_type_required": true
+    },
+    "like_terms_section_alignment": {
+      "status": "passed_project_alignment",
+      "primary_section_id": "pep-g7-up-4.2",
+      "related_background_section_id": "pep-g7-up-4.1",
+      "exact_textbook_body_position_verified": false
+    },
+    "source_supports_scope": {
+      "status": "passed",
+      "evidence": "Catalogue version entry is limited to module version and fragment addresses; resource identity is supported by official details."
+    }
+  },
+  "notes": [
+    "Review applies only to the exact candidate bytes named by candidate_sha256; changed candidates require a new review record.",
+    "Source-verified means official bibliographic and main-table-of-contents facts were checked; the 25 knowledge nodes and 37 relations remain project-authored.",
+    "Original answers were visible during initial reading. This is independent nonblind content review, not blinded model evaluation or human gold labeling.",
+    "Do not reinterpret this status as teacher review, publisher endorsement, complete textbook-body alignment, student mastery or actual student textbook confirmation.",
+    "Preserve candidate generation-time statuses as history; this sidecar records the later independent review event without editing the reviewed candidate.",
+    "Import must honor relation_type and non-gating/non-propagation conditions. The prerequisite_edges container includes supports and specializes_to.",
+    "Publication and student edition binding remain separate operations; no automatic student reassignment or legacy-evidence migration is authorized by this review record.",
+    "This repository review record is not a cryptographic signature."
+  ]
+}

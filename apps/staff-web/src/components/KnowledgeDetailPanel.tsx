@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Check, ClipboardList, Stethoscope, Undo2 } from 'lucide-react'
 import type { Diagnosis, Evidence } from '../api/learningTypes'
 import {
-  assistanceLabels, dateTime, diagnosisIssue, eventLabels, invalidationLabels, openQuestionLabels, orderEvidence, reasonLabels, resultLabels, roleLabels,
+  assistanceLabels, dateTime, diagnosisIssue, eventLabels, evidenceSourceCounts, evidenceSourceLabel, invalidationLabels, openQuestionLabels, orderEvidence, reasonLabels, resultLabels, roleLabels,
   sufficiencyLabels,
 } from '../learning'
 import { LoadNote, RefreshButton, StatusTag, useLoad, type LearningContext } from './LearningCommon'
@@ -11,7 +11,7 @@ export function EvidenceRow({ item }: { item: Evidence }) {
   const valid = item.validity === 'valid'
   return <div className={`evidence-row ${valid ? '' : 'invalid'}`}>
     <div className="help-row"><span className={`tag ${item.result === 'correct' ? '' : item.result === 'unscorable' ? 'muted' : 'rose'}`}>{resultLabels[item.result] ?? item.result}</span>
-      <span className="tag muted">{eventLabels[item.event_type] ?? item.event_type}</span>{item.independent && <span className="tag">独立完成</span>}
+      <span className="tag muted">{eventLabels[item.event_type] ?? item.event_type}</span><span className="tag muted">{evidenceSourceLabel(item.source_role)}</span>{item.independent && <span className="tag">独立完成</span>}
       {!valid && <span className="tag muted">已失效</span>}<time>{dateTime(item.occurred_at)}</time></div>
     <p>{item.question_text ?? '（题干待识别）'}</p>
     <small>{item.homework_title ?? '未命名作业'} · {assistanceLabels[item.assistance_level] ?? item.assistance_level} · {roleLabels[item.link_role]}
@@ -47,9 +47,10 @@ export default function KnowledgeDetailPanel({ ctx, studentId, knowledgeId, pend
       {state ? <div className="state-summary">
         <div className="help-row"><StatusTag status={state.learning_status} /><span className="tag muted">{sufficiencyLabels[state.evidence_sufficiency] ?? state.evidence_sufficiency}</span></div>
         <ul className="plain-list">{state.reason_codes.map(code => <li key={code}>{reasonLabels[code] ?? code}</li>)}</ul>
-        <p className="subtle">{state.sufficiency_explanation} · 已核实作答 {state.scorable_evidence_count} 次，其中独立完成 {state.independent_evidence_count} 次、出错 {state.observed_error_count} 次</p>
+        <p className="subtle">{state.sufficiency_explanation} · 有效作答 {state.scorable_evidence_count} 次，其中独立完成 {state.independent_evidence_count} 次、出错 {state.observed_error_count} 次</p>
+        <p className="subtle">{evidenceSourceCounts(state)}</p>
         {state.open_questions.length > 0 && <p className="warning-text">还不知道：{state.open_questions.map(q => `${openQuestionLabels[q.code] ?? q.code}（${q.count}）`).join('；')}</p>}
-      </div> : <p className="subtle">暂无状态：还没有经老师核实并关联到此知识点的作答。</p>}
+      </div> : <p className="subtle">暂无状态：还没有可用于判断且已关联到此知识点的作答。</p>}
       <p className="subtle">{data.notice}</p>
       {(data.prerequisites.length > 0 || data.leads_to.length > 0) && <div className="related">
         {data.prerequisites.length > 0 && <p><span className="field-title">前置：</span>{data.prerequisites.map(node => <span key={node.id} className="related-node">{node.name} <StatusTag status={node.learning_status} /></span>)}</p>}

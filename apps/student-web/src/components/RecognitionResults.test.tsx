@@ -188,3 +188,19 @@ describe('correction controls in each result card', () => {
     expect(html).not.toContain('正确答案</span>')
   })
 })
+
+describe('voluntary same-type practice entry', () => {
+  const renderWithPractice = (value: CaseDetail) => renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} onVariant={() => {}} />)
+  it('offers one voluntary question only from a current usable incorrect decision', () => {
+    expect(renderWithPractice(row())).toContain('选做一道同题型')
+    const uncertain = row()
+    uncertain.case.current_decision!.validity = 'needs_review'
+    expect(renderWithPractice(uncertain)).not.toContain('选做一道同题型')
+    const stale = row()
+    stale.attempt.recognition_revision = 2
+    expect(renderWithPractice(stale)).not.toContain('选做一道同题型')
+    const correct = row()
+    correct.case.current_decision!.verdict = 'correct'
+    expect(renderWithPractice(correct)).not.toContain('选做一道同题型')
+  })
+})

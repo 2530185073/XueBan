@@ -274,11 +274,11 @@ class FakeClient:
         return SimpleNamespace(data={"links": self.links}, metadata=Metadata("m", "m", None, None, None, 1, ()))
 
 
-def test_model_proposes_candidate_links_only_after_staff_decision(flow):
+def test_staff_reviewed_question_retains_candidate_only_suggestion_path(flow):
     case = reviewed(flow)
     client = FakeClient([{"knowledge_id": "kp-rational-add-sub", "role": "primary", "rationale": "整数加法"},
                          {"knowledge_id": "kp-rational-compare", "role": "primary", "rationale": "比较"}])
-    learning(flow, client).drain()
+    learning(flow).drain()
     assert client.calls == []
     teacher(flow)
     review(flow, case)

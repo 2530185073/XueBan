@@ -26,8 +26,8 @@
 | 账号与归属 | 一学员一账号（用户名＋密码），账号绑定固定 `student_id`；首登强制改密；坐班老师由校区管理员在管理控制台开通、重置、调整校区授权和停用；管理员网页仍需按 W1-01 现场验收 | [ACCOUNT_FOUNDATION](ACCOUNT_FOUNDATION.md)、`services/backend/tests/test_account_auth.py` |
 | 接口与数据结构 | `contracts/phase1` 已有 32 个操作、4 份 JSON Schema；`Problem` 列出对应错误码；前端校验器由契约生成。完整网页新增/扩展接口需同步纳入契约和校验范围 | `contracts/phase1/validate.py`、两端 `contracts:check` |
 | 数据库迁移 | Alembic 链 `0001 → 0011`，已有 SQLite 与 PostgreSQL 双库验证记录 | `services/backend/migrations/versions/` |
-| 纠错规则 | 模型输出只作候选；老师确认才成为正式结论；看过提示后的作答不能记为独立；订正永不算独立 | [blueprint-v3/10](../blueprint-v3/10-纠错核心流程与首发验收.md)、`test_c0_acceptance.py` |
-| 学习规则版本 | `r1.2-custody`，规则变更触发重算；图谱、记忆、报告等已有工程实现，教研审核与实际质量仍待验收 | `services/backend/xueban_backend/learning_rules.py`、[LEARNING_LAYER](LEARNING_LAYER.md) |
+| 纠错规则 | AI 初判与老师核实分别保留来源；符合证据条件的 AI 记录可参与临时学情，未解决疑点不进入知识状态。看过提示后的作答不能记为独立，订正永不算独立 | `services/backend/xueban_backend/learning_rules.py`、`test_learning_evidence_closure.py` |
+| 学习规则版本 | `r1.4-versioned-knowledge`，规则变更触发重算；关联绑定题目与图谱版本，唯一精确映射涵盖可靠的首次答对证据，保留 AI 来源。个人接口提供当前教材节点/前置边，重算期间隐藏旧结论；家长页区分发布时间和当前版本的人工发送确认。内置试点目录尚未通过当前教材审核，目录真实性与现场效果仍待验收 | `services/backend/xueban_backend/learning_rules.py`、[LEARNING_LAYER](LEARNING_LAYER.md) |
 | 模型服务 | BytePlus ModelArk AP，五角色统一模型 `deepseek-v4-1-flash-260910`，严格 JSON 解析与本地 Schema 校验 | [MODEL_SERVICE_PLAN](../MODEL_SERVICE_PLAN.md) |
 | 评测口径 | 固定分母、模型与人工分列、按题型/图像条件切片；当前 `gates.json` 为 `provisional`。`max_regression=0` 仅表示相对基线不得退化，不是绝对零错误率；原图识别/切题到再检的端到端评测仍需补齐 | [evals/correction](../evals/correction/README.md)、`gates.json` |
 | 部署与恢复 | 已有部署、迁移、备份、恢复和回滚脚本及 CI 记录；带实际业务关系的数据恢复、生产运行与现场交接仍待演练 | [HANDOVER](HANDOVER.md)、[BACKUP_RESTORE](runbooks/BACKUP_RESTORE.md) |
@@ -40,7 +40,7 @@
 | 首发题型 | 年级、册次、修订版及首批题型逐项列出；未列入的题只保存和求助，不显示未经验证的成功结论 | 学科负责人 | C0 计分范围、R1 纠错质量 |
 | 独立保留集 | 授权的真实学生作业、标注规范、双人复核、开发/校准/保留组隔离；冻结保留组后不用于调参 | 学科负责人＋评测 | R1 纠错质量 |
 | 发布阈值 | **查看保留集结果前**冻结各上线切片的绝对误伤/误放行限制、可判断覆盖、最小样本量和置信要求，并把发布门槛从 `provisional` 改为 `frozen`；不能凭相对回归通过代替绝对质量验收 | 产品＋学科负责人 | R1、R2；样本不足的切片不得宣称已验证 |
-| 坐班容量 | 每日峰值提交题数、实测平均复核秒数、排班人数、求助与复核响应时限、每日家长反馈工时；按当前全量老师确认规则核算 | 现场负责人 | R1 试点准备、R2 服务容量 |
+| 坐班容量 | 每日峰值提交题数、实测平均复核秒数、排班人数、求助与复核响应时限、每日家长反馈工时；分别核算 AI 自动处理、待核实与现场答疑数量 | 现场负责人 | R1 试点准备、R2 服务容量 |
 | 账号与管理 | 管理员/老师开户、重置、授权范围、学员教材档案维护、校区学情及运行指标的网页流程和责任人 | 项目方＋现场负责人 | W1-01、W1-07、R2；R1 必须具备其试点所需管理流程 |
 | 课程图谱与记忆 | `pilot_seed_unreviewed` 图谱的教研审核、教材与知识点对应、证据映射、撤销传播及长期 AI 事实边界 | 教研＋学科负责人 | W1-02、W1-03、R2；R1 若开放这些模块，须先通过对应审核 |
 | 题库与选做活动 | 举一反三、系统额外预习和自愿小测题库审核；学校任务完成、老师确认有余力、孩子自愿的门禁，跳过/退出不增负担；学校布置的预习照常可用 | 教研＋现场负责人 | W1-05、W1-06、R2；R1 中未审核内容不开放 |

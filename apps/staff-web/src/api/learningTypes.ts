@@ -40,10 +40,10 @@ export interface KnowledgeLink {
   id: string; question_id: string; knowledge_id: string; knowledge_name: string | null; role: LinkRole; source: string; status: LinkStatus
   rationale: string | null; actor_id: string | null; supersedes_id: string | null; created_at: string
 }
-export interface KnowledgeLinkList { question_id: string; items: KnowledgeLink[] }
+export interface KnowledgeLinkList { question_id: string; question_revision: number; graph_version: string; items: KnowledgeLink[] }
 export interface LinkQueueItem { case_id: string; question_id: string; student_id: string; homework_title: string | null; question_text: string | null; verdict: string; candidates: KnowledgeLink[] }
 export interface LinkQueue { items: LinkQueueItem[] }
-export interface LinkDecision { knowledge_id: string; role: LinkRole; status: 'confirmed' | 'rejected'; expected_link_id: string | null; rationale: string | null }
+export interface LinkDecision { knowledge_id: string; role: LinkRole; status: 'confirmed' | 'rejected'; expected_link_id: string | null; rationale: string | null; expected_question_revision: number; expected_graph_version: string }
 
 export function isKnowledgeLink(value: unknown): value is KnowledgeLink {
   return record(value) && id(value.id) && id(value.question_id) && id(value.knowledge_id) && optStr(value.knowledge_name) &&
@@ -51,7 +51,7 @@ export function isKnowledgeLink(value: unknown): value is KnowledgeLink {
     optStr(value.rationale) && optStr(value.actor_id) && optStr(value.supersedes_id) && time(value.created_at)
 }
 export function isKnowledgeLinkList(value: unknown): value is KnowledgeLinkList {
-  return record(value) && id(value.question_id) && list(value.items, isKnowledgeLink, 200)
+  return record(value) && id(value.question_id) && Number.isInteger(value.question_revision) && (value.question_revision as number) >= 1 && text(value.graph_version, 64) && list(value.items, isKnowledgeLink, 200)
 }
 export function isLinkQueue(value: unknown): value is LinkQueue {
   return record(value) && list(value.items, item => record(item) && id(item.case_id) && id(item.question_id) && id(item.student_id) &&
@@ -75,7 +75,17 @@ export function isConditionRead(value: unknown): value is ConditionRead {
 
 export interface Diagnosis { id: string; kind: 'suspected_cause' | 'verified_weak_scope'; scope_text: string; evidence_ids: string[] }
 export interface OpenQuestion { code: string; count: number }
-export interface KnowledgeState {
+export interface EvidenceSources {
+  model_evidence_count?: number; staff_verified_evidence_count?: number
+  assessment_source?: 'model' | 'staff' | 'mixed' | 'none'
+}
+const isEvidenceSources = (value: Record<string, unknown>) =>
+  (value.model_evidence_count === undefined || count(value.model_evidence_count)) &&
+  (value.staff_verified_evidence_count === undefined || count(value.staff_verified_evidence_count)) &&
+  (value.assessment_source === undefined || oneOf(['model', 'staff', 'mixed', 'none'] as const)(value.assessment_source))
+type EvidenceSourceRole = 'model' | 'sitting_teacher' | 'unknown'
+const isSourceRole = (value: unknown) => value === undefined || oneOf(['model', 'sitting_teacher', 'unknown'] as const)(value)
+export interface KnowledgeState extends EvidenceSources {
   knowledge_id: string; learning_status: LearningStatus; reason_codes: string[]; evidence_sufficiency: string; sufficiency_explanation: string
   valid_evidence_count: number; scorable_evidence_count: number; independent_evidence_count: number; independent_dates_count: number; observed_error_count: number
   last_error_at: string | null; last_independent_success_at: string | null; review_due_at: string | null
@@ -84,7 +94,7 @@ export interface KnowledgeState {
 export interface NamedKnowledgeState extends KnowledgeState { name: string; chapter_id: string | null; chapter_name: string | null }
 export interface ChapterRollup { chapter_id: string; name: string; objectives: number; status_counts: Partial<Record<LearningStatus, number>> }
 export interface StudentKnowledge {
-  student_id: string; graph_version: string; graph_review_status: string
+  student_id: string; graph_version: string | null; graph_review_status: string
   projection: { pending: boolean; projected_at: string | null; state_version: number }
   states: NamedKnowledgeState[]; chapters: ChapterRollup[]; notice: string
 }
@@ -92,7 +102,7 @@ export interface StudentKnowledge {
 const isDiagnosis = (value: unknown): value is Diagnosis => record(value) && id(value.id) && oneOf(['suspected_cause', 'verified_weak_scope'] as const)(value.kind) &&
   text(value.scope_text, 500) && ids(value.evidence_ids)
 export function isKnowledgeState(value: unknown): value is KnowledgeState {
-  return record(value) && id(value.knowledge_id) && status(value.learning_status) && list(value.reason_codes, item => text(item, 64), 20) &&
+  return record(value) && isEvidenceSources(value) && id(value.knowledge_id) && status(value.learning_status) && list(value.reason_codes, item => text(item, 64), 20) &&
     text(value.evidence_sufficiency, 32) && str(value.sufficiency_explanation, 500) &&
     [value.valid_evidence_count, value.scorable_evidence_count, value.independent_evidence_count, value.independent_dates_count, value.observed_error_count].every(count) &&
     optTime(value.last_error_at) && optTime(value.last_independent_success_at) && optTime(value.review_due_at) &&
@@ -102,7 +112,7 @@ const isNamedState = (value: unknown): value is NamedKnowledgeState => isKnowled
 const isRollup = (value: unknown): value is ChapterRollup => record(value) && id(value.chapter_id) && text(value.name, 200) && count(value.objectives) &&
   record(value.status_counts) && Object.entries(value.status_counts).every(([key, n]) => status(key) && count(n))
 export function isStudentKnowledge(value: unknown): value is StudentKnowledge {
-  return record(value) && id(value.student_id) && text(value.graph_version, 64) && str(value.graph_review_status, 64) &&
+  return record(value) && id(value.student_id) && (value.graph_version === null || text(value.graph_version, 64)) && str(value.graph_review_status, 64) &&
     record(value.projection) && typeof value.projection.pending === 'boolean' && optTime(value.projection.projected_at) && count(value.projection.state_version) &&
     list(value.states, isNamedState, 2000) && list(value.chapters, isRollup, 500) && str(value.notice, 500)
 }
@@ -110,7 +120,7 @@ export function isStudentKnowledge(value: unknown): value is StudentKnowledge {
 export interface Evidence {
   id: string; attempt_id: string; case_id: string; homework_id: string; question_id: string; verdict: string; event_type: string; result: string
   assistance_level: string; independent: boolean; link_role: LinkRole; occurred_at: string; validity: 'valid' | 'invalidated'
-  invalidation_reason: string | null; question_text: string | null; homework_title: string | null
+  invalidation_reason: string | null; question_text: string | null; homework_title: string | null; source_role?: EvidenceSourceRole
 }
 export interface RelatedNode { id: string; name: string; learning_status: LearningStatus }
 export interface KnowledgeDetail { node: KnowledgeNode; state: KnowledgeState | null; evidence: Evidence[]; prerequisites: RelatedNode[]; leads_to: RelatedNode[]; notice: string }
@@ -119,7 +129,7 @@ export function isEvidence(value: unknown): value is Evidence {
   return record(value) && id(value.id) && id(value.attempt_id) && id(value.case_id) && id(value.homework_id) && id(value.question_id) &&
     text(value.verdict, 32) && text(value.event_type, 32) && text(value.result, 32) && text(value.assistance_level, 32) && typeof value.independent === 'boolean' &&
     oneOf<LinkRole>(['primary', 'secondary'])(value.link_role) && time(value.occurred_at) && oneOf(['valid', 'invalidated'] as const)(value.validity) &&
-    optStr(value.invalidation_reason) && optStr(value.question_text) && optStr(value.homework_title)
+    optStr(value.invalidation_reason) && optStr(value.question_text) && optStr(value.homework_title) && isSourceRole(value.source_role)
 }
 const isRelated = (value: unknown): value is RelatedNode => record(value) && id(value.id) && text(value.name, 200) && status(value.learning_status)
 export function isKnowledgeDetail(value: unknown): value is KnowledgeDetail {
@@ -196,18 +206,18 @@ export const runEvidence = (run: AgentRun) => run.context.evidence_ids ?? []
 
 export type ReportStatus = 'draft' | 'published' | 'superseded'
 export type ReportCadence = 'half_month' | 'daily'
-export interface DailyMistake { case_id: string; homework_title: string | null; page: number | null; question: string; verdict: string | null; progress: string; correction: string }
-export interface EvidenceCard { evidence_id: string; date: string; homework_title: string | null; page: number | null; question: string; result: string; assistance: string; staff_explanation: string | null; certainty: string }
-export interface FocusItem {
+export interface DailyMistake { case_id: string; homework_title: string | null; page: number | null; question: string; verdict: string | null; progress: string; correction: string; source_role?: EvidenceSourceRole | null; certainty?: string }
+export interface EvidenceCard { evidence_id: string; date: string; homework_title: string | null; page: number | null; question: string; result: string; assistance: string; staff_explanation: string | null; certainty: string; source_role?: EvidenceSourceRole }
+export interface FocusItem extends EvidenceSources {
   knowledge_id: string; name: string; errors: number; denominator: number; independent_errors: number; counter_evidence: number; assistance: Record<string, number>
   status_at_period_end: LearningStatus; status_label: string; verified_scope: string[]; possible_causes: string[]; unknown: string[]; cards: EvidenceCard[]; next_step: string
 }
 export interface ReportSnapshot {
   period: { start: string; end_exclusive: string }
   coverage: { observed_days: number; observed_dates: string[]; homeworks: number; partial_period: boolean; first_seen_date: string | null }
-  school_tasks: { questions: number; staff_verified: number; awaiting_verification: number; not_judged: number; verdicts: Record<'correct' | 'incorrect' | 'partially_correct' | 'unanswered', number>; corrected_resolved: number; correction_open: number }
+  school_tasks: { questions: number; staff_verified: number; awaiting_verification: number; not_judged: number; verdicts: Record<'correct' | 'incorrect' | 'partially_correct' | 'unanswered', number>; corrected_resolved: number; correction_open: number; ai_judged?: number; ai_corrected_pending?: number; ai_verdicts?: Record<'correct' | 'incorrect' | 'partially_correct' | 'unanswered', number> }
   help: { requests: number; by_kind: Record<string, number>; resolved: number; hints_viewed: number; answers_shown: number; staff_help: { date: string; kind: string; question: string; outcome: string; note: string }[] }
-  focus: FocusItem[]; steady: { knowledge_id: string; name: string; correct: number; independent_correct: number }[]; unknown_current: { knowledge_id: string; name: string }[]
+  focus: FocusItem[]; steady: (EvidenceSources & { knowledge_id: string; name: string; correct: number; independent_correct: number })[]; unknown_current: { knowledge_id: string; name: string }[]
   sufficient: boolean; sections: { optional_activity?: { summary: string; answered?: number; correct?: number } }; limitations: string
   mistakes?: DailyMistake[]; activity_kinds?: { preview: number; variant: number }
 }
@@ -221,10 +231,11 @@ export interface QueuedReport extends Report { focus_count: number; mistake_coun
 const isDelivery = (value: unknown): value is Delivery => record(value) && count(value.links) && typeof value.copied === 'boolean' && optTime(value.sent_confirmed_at) && optTime(value.opened_at)
 
 const isCard = (value: unknown): value is EvidenceCard => record(value) && id(value.evidence_id) && day(value.date) && optStr(value.homework_title) &&
-  (value.page === null || count(value.page)) && str(value.question, 500) && text(value.result, 32) && text(value.assistance, 64) && optStr(value.staff_explanation) && text(value.certainty, 32)
+  (value.page === null || count(value.page)) && str(value.question, 500) && text(value.result, 32) && text(value.assistance, 64) && optStr(value.staff_explanation) && text(value.certainty, 32) && isSourceRole(value.source_role)
 const isMistake = (value: unknown): value is DailyMistake => record(value) && id(value.case_id) && optStr(value.homework_title) &&
-  (value.page === null || count(value.page)) && str(value.question, 500) && optStr(value.verdict) && text(value.progress, 32) && text(value.correction, 64)
-const isFocus = (value: unknown): value is FocusItem => record(value) && id(value.knowledge_id) && text(value.name, 200) &&
+  (value.page === null || count(value.page)) && str(value.question, 500) && optStr(value.verdict) && text(value.progress, 32) && text(value.correction, 64) &&
+  (value.source_role === null || isSourceRole(value.source_role)) && (value.certainty === undefined || text(value.certainty, 64))
+const isFocus = (value: unknown): value is FocusItem => record(value) && isEvidenceSources(value) && id(value.knowledge_id) && text(value.name, 200) &&
   [value.errors, value.denominator, value.independent_errors, value.counter_evidence].every(count) && counts(value.assistance) && status(value.status_at_period_end) &&
   text(value.status_label, 32) && list(value.verified_scope, item => text(item, 500), 50) && list(value.possible_causes, item => text(item, 500), 50) &&
   list(value.unknown, item => text(item, 64), 20) && list(value.cards, isCard, 20) && text(value.next_step, 500)
@@ -236,9 +247,11 @@ export function isReportSnapshot(value: unknown): value is ReportSnapshot {
     count(coverage.observed_days) && list(coverage.observed_dates, day, 31) && count(coverage.homeworks) && typeof coverage.partial_period === 'boolean' && nullable(day)(coverage.first_seen_date) &&
     [tasks.questions, tasks.staff_verified, tasks.awaiting_verification, tasks.not_judged, tasks.corrected_resolved, tasks.correction_open].every(count) &&
     record(verdicts) && ['correct', 'incorrect', 'partially_correct', 'unanswered'].every(key => count(verdicts[key])) &&
+    (tasks.ai_judged === undefined || count(tasks.ai_judged)) && (tasks.ai_corrected_pending === undefined || count(tasks.ai_corrected_pending)) &&
+    (tasks.ai_verdicts === undefined || (record(tasks.ai_verdicts) && ['correct', 'incorrect', 'partially_correct', 'unanswered'].every(key => count((tasks.ai_verdicts as Record<string, unknown>)[key])))) &&
     count(help.requests) && counts(help.by_kind) && count(help.resolved) && count(help.hints_viewed) && count(help.answers_shown) &&
     list(help.staff_help, item => record(item) && day(item.date) && text(item.kind, 32) && str(item.question, 200) && text(item.outcome, 32) && str(item.note, 500), 20) &&
-    list(value.focus, isFocus, 500) && list(value.steady, item => record(item) && id(item.knowledge_id) && text(item.name, 200) && count(item.correct) && count(item.independent_correct), 500) &&
+    list(value.focus, isFocus, 500) && list(value.steady, item => record(item) && isEvidenceSources(item) && id(item.knowledge_id) && text(item.name, 200) && count(item.correct) && count(item.independent_correct), 500) &&
     list(value.unknown_current, item => record(item) && id(item.knowledge_id) && text(item.name, 200), 50) && typeof value.sufficient === 'boolean' &&
     (sections.optional_activity === undefined || (record(sections.optional_activity) && text(sections.optional_activity.summary, 500))) && text(value.limitations, 2000) &&
     (value.mistakes === undefined || list(value.mistakes, isMistake, 30)) &&

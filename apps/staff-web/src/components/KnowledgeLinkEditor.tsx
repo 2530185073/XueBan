@@ -1,16 +1,20 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Bot, Check, Link2, Replace, UserCheck, X } from 'lucide-react'
-import type { KnowledgeLink, LinkDecision, LinkRole } from '../api/learningTypes'
+import type { KnowledgeLink, KnowledgeLinkList, LinkDecision, LinkRole } from '../api/learningTypes'
 import { primaryConflict, roleLabels, selectableNodes } from '../learning'
-import { chapterNames, LoadNote, NodePicker, RefreshButton, useGraph, useLoad, type LearningContext } from './LearningCommon'
+import { chapterNames, LoadNote, NodePicker, RefreshButton, useLoad, type LearningContext } from './LearningCommon'
 
-const decision = (link: Pick<KnowledgeLink, 'knowledge_id' | 'id'> | null, knowledgeId: string, role: LinkRole, status: LinkDecision['status'], rationale: string | null = null): LinkDecision =>
+type LinkChoice = Omit<LinkDecision, 'expected_question_revision' | 'expected_graph_version'>
+export function withLinkVersions(snapshot: KnowledgeLinkList, choice: LinkChoice): LinkDecision {
+  return { ...choice, expected_question_revision: snapshot.question_revision, expected_graph_version: snapshot.graph_version }
+}
+const decision = (link: Pick<KnowledgeLink, 'knowledge_id' | 'id'> | null, knowledgeId: string, role: LinkRole, status: LinkDecision['status'], rationale: string | null = null): LinkChoice =>
   ({ knowledge_id: knowledgeId, role, status, expected_link_id: link?.id ?? null, rationale })
 
 export default function KnowledgeLinkEditor({ ctx, questionId, locked }: { ctx: LearningContext; questionId: string; locked?: string | null }) {
   const { learning, act, busy, version } = ctx
   const links = useLoad(questionId, signal => learning.links(questionId, signal), version)
-  const graph = useGraph(learning)
+  const graph = useLoad(`${questionId}:${links.data?.graph_version ?? ''}`, () => learning.graph(questionId), version)
   const nodes = useMemo(() => selectableNodes(graph.data?.nodes ?? []), [graph.data])
   const chapters = useMemo(() => chapterNames(graph.data?.nodes ?? []), [graph.data])
   const [adding, setAdding] = useState<string | null>(null)
@@ -18,29 +22,33 @@ export default function KnowledgeLinkEditor({ ctx, questionId, locked }: { ctx: 
   const [rationale, setRationale] = useState('')
   const [replacing, setReplacing] = useState<KnowledgeLink | null>(null)
   const [issue, setIssue] = useState<string | null>(null)
+  useEffect(() => { setAdding(null); setReplacing(null); setIssue(null) }, [questionId, links.data?.question_revision, links.data?.graph_version])
   const items = links.data?.items ?? []
   const current = (knowledgeId: string) => items.find(link => link.knowledge_id === knowledgeId) ?? null
-  const disabled = busy || !!locked || !links.data
+  const scopeMismatch = !!links.data && !!graph.data && links.data.graph_version !== graph.data.graph_version
+  const disabled = busy || !!locked || links.loading || !!links.error || !links.data || graph.loading || !!graph.error || !graph.data || scopeMismatch
   const confirmed = items.filter(link => link.status === 'confirmed').sort((a, b) => Number(b.role === 'primary') - Number(a.role === 'primary'))
   const candidates = items.filter(link => link.status === 'candidate')
   const rejected = items.filter(link => link.status === 'rejected')
 
-  async function decide(payload: LinkDecision, success: string) {
+  async function decide(payload: LinkChoice, success: string) {
+    if (disabled || !links.data) return
     const conflict = payload.status === 'confirmed' ? primaryConflict(items, payload.knowledge_id, payload.role) : null
     setIssue(conflict)
     if (conflict) return
-    await act(() => learning.decideLink(questionId, payload), success)
+    await act(() => learning.decideLink(questionId, withLinkVersions(links.data!, payload)), success)
   }
   async function add() {
-    if (!adding) return
+    if (!adding || disabled || !links.data) return
+    const snapshot = links.data
     const target = replacing
     const conflict = primaryConflict(items, adding, role, target?.knowledge_id ?? null)
     setIssue(conflict)
     if (conflict) return
     const done = await act(async () => {
       // Reject the old link first so the question never holds two primaries.
-      if (target && target.knowledge_id !== adding) await learning.decideLink(questionId, decision(target, target.knowledge_id, target.role, 'rejected', '替换为其他知识点'))
-      return learning.decideLink(questionId, decision(current(adding), adding, role, 'confirmed', rationale.trim() || null))
+      if (target && target.knowledge_id !== adding) await learning.decideLink(questionId, withLinkVersions(snapshot, decision(target, target.knowledge_id, target.role, 'rejected', '替换为其他知识点')))
+      return learning.decideLink(questionId, withLinkVersions(snapshot, decision(current(adding), adding, role, 'confirmed', rationale.trim() || null)))
     }, target ? '已替换知识点关联。' : '已确认知识点关联。')
     if (done) { setAdding(null); setRationale(''); setReplacing(null) }
   }
@@ -49,6 +57,7 @@ export default function KnowledgeLinkEditor({ ctx, questionId, locked }: { ctx: 
     <div className="section-heading"><span><Link2 size={17} />题目知识点</span><RefreshButton state={links} label="刷新知识点关联" /></div>
     <p className="subtle">只有老师确认的关联才会让已核实的作答成为该知识点的证据。一道题最多一个主要知识点（定位错误的那一个），其余为次要。</p>
     {locked && <div className="preview-note">{locked}</div>}
+    {scopeMismatch && <p className="warning-text" role="alert">题目使用的教材范围已更新。请刷新后重新选择知识点，当前选择不会提交。</p>}
     <LoadNote state={links}>
       {confirmed.length === 0 && <p className="subtle">还没有老师确认的知识点。</p>}
       <ul className="link-list">{confirmed.map(link => <li key={link.id} className="confirmed">

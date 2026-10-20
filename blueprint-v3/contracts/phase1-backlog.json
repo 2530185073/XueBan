@@ -117,7 +117,7 @@
       "title": "真实识别、切题与识别更正",
       "owner_hint": "AI",
       "priority": "P0",
-      "status": "engineering_complete",
+      "status": "in_progress",
       "acceptance_status": "pending",
       "dependency_ids": [
         "P1-04"
@@ -130,14 +130,14 @@
       "delivery_waves": [
         "B"
       ],
-      "implementation_note": "Ark 识别适配器、题区与作答版本、坐班识别更正与重切/拆合题目已实现，旧分析随版本过期；真实手写识别准确率待冻结样本评测。"
+      "implementation_note": "2026-10-21原图28页基线暴露题目重复/错配、空白被补写、选项声调误读和供应商响应失败，重新打开工程收口；正在修复独立印刷/笔迹识读、完整源绑定与批量语义配对。未通过真实样本验收。"
     },
     {
       "id": "P1-06",
       "title": "按题型检查与可核实错误定位",
       "owner_hint": "AI",
       "priority": "P0",
-      "status": "engineering_complete",
+      "status": "in_progress",
       "acceptance_status": "pending",
       "dependency_ids": [
         "P1-05"
@@ -150,7 +150,7 @@
       "delivery_waves": [
         "B"
       ],
-      "implementation_note": "检查/再检查候选含依据与首错区域，无法判断转人工；正确率、错步定位等质量指标需冻结评测集（evals/correction）实测。"
+      "implementation_note": "2026-10-21确认存在共同识读错误导致错题判对，重新打开工程收口。已实施候选完整来源绑定、独立印刷核读及可重新核算的复核协议，正进行定向真实联网回归；不以待核下降代替准确性验收。"
     },
     {
       "id": "P1-07",
@@ -539,7 +539,7 @@
       "title": "知识图谱与证据映射",
       "owner_hint": "BE+FE+学科负责人",
       "priority": "P0",
-      "status": "engineering_complete",
+      "status": "in_progress",
       "acceptance_status": "pending",
       "dependency_ids": [
         "P1-10",
@@ -549,7 +549,7 @@
       "release_gate_ids": [
         "R2"
       ],
-      "implementation_note": "学习投影、老师确认映射、四档知识状态和双网页入口已有工程与自动化验证，参见docs/LEARNING_LAYER.md；pilot_seed_unreviewed课程图谱仍需针对声明范围教研审核，真实映射工时、证据失效传播和浏览器流程尚待验收。",
+      "implementation_note": "2026-10-21发现旧题/旧图谱映射版本未隔离、泛词子串误确认，重新打开工程收口。修复映射与正向证据、建设有出处的教材范围及节点连线界面；未审核课程种子仍不作为正式个人图谱。",
       "acceptance_success": "声明教材/单元图谱经审核；老师在网页确认映射，学生可查看有来源的状态、有效证据及未知项；知识状态可解释并从有效版本重算",
       "acceptance_failure": "未确认映射、模型候选和撤销证据不能支撑正式学情；缺映射保持未知而不阻断作业；订正或提示后正确不算独立掌握；投影落后显示待更新，不展示过期结论"
     },

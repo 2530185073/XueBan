@@ -9,7 +9,7 @@ import { valid } from './validation'
 import { bucketOfCase, countBuckets, firstUnresolved, isRetired, orderActiveCases, orderCasesByCreation, orderRowsByPhoto, retiredCases } from './cases'
 import { ObjectUrls } from './objectUrls'
 import { compareCreated } from './chronology'
-import { isCurriculumCatalog, isKnowledgeDetail, isKnowledgeMap, isStudentCurriculum, isVariantPracticeOverview, isAgentContext, isMemory, isMemoryList, isOptionalActivities, isPracticeAnswer, isPracticeHint, isPracticeSession, isPracticeSessionList, MEMORY_CONTENT_MAX, MEMORY_CONTENT_MIN, PRACTICE_ANSWER_MAX, type AgentContext, type CurriculumCatalog, type ExitReason, type KnowledgeDetail, type KnowledgeMap, type Memory, type MemoryList, type OptionalActivities, type PracticeAnswer, type PracticeHint, type PracticeSession, type StartPractice, type StudentCurriculum, type StudentMemoryCategory, type VariantPracticeOverview } from './learning'
+import { isCurriculumBooks, isCurriculumCatalog, isKnowledgeDetail, isKnowledgeMap, isStudentCurriculum, isVariantPracticeOverview, isVariantGeneration, isVariantGenerationList, isAgentContext, isMemory, isMemoryList, isOptionalActivities, isPracticeAnswer, isPracticeAssessment, isPracticeHint, isPracticeSession, isPracticeSessionList, MEMORY_CONTENT_MAX, MEMORY_CONTENT_MIN, PRACTICE_ANSWER_MAX, type AgentContext, type CurriculumBooks, type CurriculumCatalog, type ExitReason, type GenerateVariant, type VariantGeneration, type VariantGenerationList, type PracticeSubmission, type KnowledgeDetail, type KnowledgeMap, type Memory, type MemoryList, type OptionalActivities, type PracticeAnswer, type PracticeAssessment, type PracticeHint, type PracticeSession, type StartPractice, type StudentCurriculum, type StudentMemoryCategory, type VariantPracticeOverview } from './learning'
 
 export const remoteDraftId = (id: string) => `remote_${id}`
 import type { CurriculumContext } from './types'
@@ -728,6 +728,11 @@ export class StudentClient {
     if (value.student_id !== student) throw new StudentError('access_denied', 403)
     return value
   }
+  async curriculumBooks(): Promise<CurriculumBooks> { return this.owned(await this.learning(s => `/v1/students/${s}/curriculum-books`, isCurriculumBooks)) }
+  async selectCurriculumBook(graphVersion: string | null, expectedRevision: number): Promise<CurriculumBooks> {
+    if (!Number.isInteger(expectedRevision) || expectedRevision < 0 || (graphVersion !== null && (!graphVersion || graphVersion.length > 200))) throw new StudentError('invalid_curriculum_selection', 422)
+    return this.owned(await this.learning(s => `/v1/students/${s}/curriculum-books`, isCurriculumBooks, { expected_revision: expectedRevision, graph_version: graphVersion }, 'PUT'))
+  }
   async knowledgeNode(knowledgeId: string): Promise<KnowledgeDetail> { return (await this.learning(s => `/v1/students/${s}/knowledge/${encoded(knowledgeId)}`, isKnowledgeDetail)).value }
   async agentContext(caseId: string): Promise<AgentContext> {
     const { value } = await this.learning(() => `/v1/cases/${encoded(caseId)}/agent-context`, isAgentContext)
@@ -743,17 +748,46 @@ export class StudentClient {
   async retractMemory(memoryId: string): Promise<Memory> { return (await this.learning(() => `/v1/memories/${encoded(memoryId)}/retract`, isMemory, {})).value }
   async optionalActivities(): Promise<OptionalActivities> { return (await this.learning(s => `/v1/students/${s}/optional-activities`, isOptionalActivities)).value }
   async variantPractice(): Promise<VariantPracticeOverview> { return this.owned(await this.learning(s => `/v1/students/${s}/variant-practice`, isVariantPracticeOverview)) }
+  async generateVariant(request: GenerateVariant): Promise<VariantGeneration> {
+    const value = this.owned(await this.learning(s => `/v1/students/${s}/variant-generations`, isVariantGeneration, request))
+    if (value.source_case_id !== request.source_case_id) throw new StudentError('invalid_response', 502)
+    return value
+  }
+  async variantGeneration(jobId: string): Promise<VariantGeneration> {
+    const value = this.owned(await this.learning(() => `/v1/variant-generations/${encoded(jobId)}`, isVariantGeneration))
+    if (value.job_id !== jobId) throw new StudentError('invalid_response', 502)
+    return value
+  }
+  async variantGenerations(): Promise<VariantGenerationList> {
+    const value = this.owned(await this.learning(s => `/v1/students/${s}/variant-generations`, isVariantGenerationList))
+    if (value.items.some(item => item.student_id !== value.student_id)) throw new StudentError('access_denied', 403)
+    return value
+  }
   async startPractice(request: StartPractice): Promise<PracticeSession> { return this.owned(await this.learning(s => `/v1/students/${s}/practice-sessions`, isPracticeSession, request)) }
-  async practiceSession(sessionId: string): Promise<PracticeSession> { return this.owned(await this.learning(() => `/v1/practice-sessions/${encoded(sessionId)}`, isPracticeSession)) }
+  async practiceSession(sessionId: string): Promise<PracticeSession> {
+    const value = this.owned(await this.learning(() => `/v1/practice-sessions/${encoded(sessionId)}`, isPracticeSession))
+    if (value.id !== sessionId) throw new StudentError('invalid_response', 502)
+    return value
+  }
+  async practiceAssessment(assessmentId: string, sessionId: string, itemId: string): Promise<PracticeAssessment> {
+    const value = this.owned(await this.learning(() => `/v1/practice-assessments/${encoded(assessmentId)}`, isPracticeAssessment))
+    if (value.assessment_id !== assessmentId || value.session_id !== sessionId || value.item_id !== itemId) throw new StudentError('invalid_response', 502)
+    return value
+  }
   /** The student's unfinished activity, if any (e.g. after a reload or an unconfirmed start). */
   async activePractice(): Promise<PracticeSession | null> {
     const { value, student } = await this.learning(s => `/v1/students/${s}/practice-sessions`, isPracticeSessionList)
     return value.items.find(item => item.student_id === student && item.status === 'active' && Date.parse(item.budget_ends_at) > Date.now()) ?? null
   }
-  async answerPractice(sessionId: string, itemId: string, answer: string): Promise<PracticeAnswer> {
-    const trimmed = answer.trim()
+  async answerPractice(sessionId: string, itemId: string, answer: string | PracticeSubmission): Promise<PracticeAnswer> {
+    const submission = typeof answer === 'string' ? { answer_text: answer } : answer
+    const trimmed = submission.answer_text.trim()
     if (!trimmed || [...trimmed].length > PRACTICE_ANSWER_MAX) throw new StudentError('answer_length', 422, `请写下答案（不超过 ${PRACTICE_ANSWER_MAX} 个字）。`)
-    const { value } = await this.learning(() => `/v1/practice-sessions/${encoded(sessionId)}/responses`, isPracticeAnswer, { item_id: itemId, answer_text: trimmed })
+    const selected = submission.selected_options
+    const answers = submission.answers?.map(part => ({ field_id: part.field_id, answer_text: part.answer_text.trim() }))
+    if (selected && (!selected.length || selected.length > 10 || new Set(selected).size !== selected.length || selected.some(value => !value.trim() || value.length > 8))) throw new StudentError('answer_length', 422, '请重新选择答案。')
+    if (answers && (!answers.length || answers.length > 12 || new Set(answers.map(part => part.field_id)).size !== answers.length || answers.some(part => !part.field_id || part.field_id.length > 40 || !part.answer_text))) throw new StudentError('answer_length', 422, '请填好每个空，再提交。')
+    const { value } = await this.learning(() => `/v1/practice-sessions/${encoded(sessionId)}/responses`, isPracticeAnswer, { item_id: itemId, answer_text: trimmed, ...(selected ? { selected_options: selected } : {}), ...(answers ? { answers } : {}) })
     if (value.item_id !== itemId) throw new StudentError('invalid_response', 502)
     return value
   }

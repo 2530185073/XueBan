@@ -12,8 +12,10 @@ Evidence rules (blueprint 02 section 4/5):
   remains a true fact about that earlier attempt.
 * A correction is never independent evidence. A first attempt is independent
   only when staff confirmed it was done without hints, adult or peer help.
+* A knowledge link belongs to one question revision and curriculum version.
+  Old mappings remain auditable but cannot tag a revised question or graph.
 * A wrong answer on a multi-knowledge question is negative evidence only for the
-  link staff marked as primary (the located error); secondary links get it as
+  confirmed primary link (the located error); secondary links get it as
   unscorable. A correct answer supports every confirmed link.
 """
 from __future__ import annotations
@@ -24,7 +26,7 @@ import hashlib
 import json
 from zoneinfo import ZoneInfo
 
-RULE_VERSION = "r1.3-evidence-source"
+RULE_VERSION = "r1.4-versioned-knowledge"
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 STABLE_MIN_SPAN = timedelta(hours=24)
 DELAYED_AFTER = timedelta(days=7)
@@ -102,7 +104,7 @@ def assistance(attempt: dict, hints: list[dict], condition: str | None) -> str:
     return HELP_TO_ASSISTANCE.get(help_condition, "unknown")
 
 
-def derive_evidence(*, cases, attempts, decisions, hints, questions, links, conditions, stale_reasons):
+def derive_evidence(*, cases, attempts, decisions, hints, questions, links, conditions, stale_reasons, graph_version):
     """Return evidence documents keyed by a content hash of every input that matters."""
     attempts_by_id = {a["id"]: a for a in attempts}
     hints_by_case = defaultdict(list)
@@ -110,6 +112,10 @@ def derive_evidence(*, cases, attempts, decisions, hints, questions, links, cond
         hints_by_case[hint["case_id"]].append(hint)
     current_links = defaultdict(dict)
     for link in sorted(links, key=lambda row: (row["created_at"], row["id"])):
+        question = questions.get(link["question_id"])
+        if (question is None or link.get("question_revision") != question.get("revision")
+                or link.get("graph_version") != graph_version):
+            continue
         current_links[link["question_id"]][link["knowledge_id"]] = link
     output = []
     for case in cases:
@@ -147,8 +153,10 @@ def derive_evidence(*, cases, attempts, decisions, hints, questions, links, cond
                 link_result = result if (link["role"] == "primary" or result not in WRONG) else "unscorable"
                 document = {
                     "knowledge_id": link["knowledge_id"], "link_id": link["id"], "link_role": link["role"],
+                    "graph_version": graph_version,
                     "attempt_id": attempt_id, "case_id": case["id"], "homework_id": case["homework_id"],
-                    "question_id": case["question_id"], "question_revision": attempt["captured_question_revision"],
+                    "question_id": case["question_id"], "question_revision": question["revision"],
+                    "captured_question_revision": attempt["captured_question_revision"],
                     "decision_id": decision["id"], "verdict": decision["verdict"], "event_type": event_type,
                     "result": link_result, "assistance_level": level,
                     "independent": independent and link_result != "unscorable",
@@ -156,6 +164,9 @@ def derive_evidence(*, cases, attempts, decisions, hints, questions, links, cond
                     "source_role": "model" if decision["origin"] == "model" else "sitting_teacher",
                     "rule_version": RULE_VERSION,
                 }
+                # Immutable link_id already binds both versions. Keep the
+                # established key so a rules upgrade does not invalidate
+                # unchanged evidence (and staff diagnoses citing its ID).
                 document["source_key"] = _key({k: document[k] for k in (
                     "knowledge_id", "link_id", "link_role", "attempt_id", "decision_id", "result",
                     "assistance_level", "independent", "event_type", "occurred_at", "item_family_id")})

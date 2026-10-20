@@ -103,7 +103,7 @@ def rule_proposals(states: dict, evidence: dict, names: dict) -> list[dict]:
 
 @register_projection_followup
 def refresh_rule_memories(session, tenant_id, student_id, worker):
-    graph = published_graph(session)
+    graph = published_graph(session, student_id)
     if graph is None:
         return
     names = {n.id: n.name for n in session.scalars(select(KnowledgeNode).where(KnowledgeNode.graph_version == graph.version))}
@@ -168,7 +168,7 @@ def summary_schema(evidence_ids):
 
 
 def build_summary_context(session, student_id):
-    graph = require_published_graph(session)
+    graph = require_published_graph(session, student_id)
     names = {n.id: n.name for n in session.scalars(select(KnowledgeNode).where(KnowledgeNode.graph_version == graph.version))}
     projection = session.get(LearningProjection, student_id)
     states = [r.document for r in session.scalars(select(StudentKnowledgeState).where(StudentKnowledgeState.student_id == student_id))]
@@ -285,7 +285,7 @@ def install_agent(app, engine, cfg, database_session, current_actor):
         if payload.category == "recurring_difficulty" and not payload.evidence_ids:
             raise Problem(422, "validation", "invalid_request", "学科困难必须引用已核实的作答证据。")
         if payload.knowledge_id is not None and session.scalar(select(KnowledgeNode.id).where(
-                KnowledgeNode.graph_version == require_published_graph(session).version, KnowledgeNode.id == payload.knowledge_id)) is None:
+                KnowledgeNode.graph_version == require_published_graph(session, student_id).version, KnowledgeNode.id == payload.knowledge_id)) is None:
             raise Problem(422, "validation", "invalid_request", "记忆只能关联已发布的知识点。")
         stamp = now()
         previous = None
@@ -339,7 +339,7 @@ def install_agent(app, engine, cfg, database_session, current_actor):
             raise Problem(404, "not_found", "not_found", "资源不存在或不可访问。")
         homework = session.get(Homework, case.homework_id)
         student = require_student(session, actor, homework.student_id)
-        graph = require_published_graph(session)
+        graph = require_published_graph(session, student.id)
         names = {n.id: n for n in session.scalars(select(KnowledgeNode).where(KnowledgeNode.graph_version == graph.version))}
         links = [l for l in current_links(session, case.document["question_id"]).values() if l.status == "confirmed"]
         knowledge_ids = [l.knowledge_id for l in links]

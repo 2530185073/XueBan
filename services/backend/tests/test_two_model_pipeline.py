@@ -72,6 +72,23 @@ def test_two_clean_corrects_release_only_provisional_correct():
     assert row["assessment"]["correct_answer"] is None
 
 
+def test_unknown_display_taxonomy_does_not_discard_whole_page_or_change_student_facts():
+    first = correct(question_type="short_answer", guidance_code="pronunciation", reason_code="calculation_error")
+    result = flow([first], [first]).recognize(images=(picture(),))
+    row = result.data["items"][0]
+    assert row["assessment"]["verdict"] == "correct"
+    assert row["question_type"] == "unknown"
+    assert row["answer_text"] == first["answer_text"]
+    audit = result.data["multimodel_audit"]["calls"][0]
+    assert audit["category_normalizations"] == [
+        {"label": "1", "field": "question_type", "from": "short_answer", "to": "unknown"},
+        {"label": "1", "field": "reason_code", "from": "calculation_error", "to": "other"},
+    ]
+    # A judgment is not a display category and cannot receive such a fallback.
+    invalid = flow([correct(verdict="probably_correct")], [correct()]).recognize(images=(picture(),))
+    assert invalid.data["items"][0]["assessment"]["verdict"] == "unable_to_judge"
+
+
 def test_live_page_typography_can_agree_without_weakening_mathematical_evidence():
     first = [
         correct("2", stem_text="下列赋予代数式 8a 实际意义的例子中，错误的是",

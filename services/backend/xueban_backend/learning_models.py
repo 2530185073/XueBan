@@ -24,6 +24,9 @@ class CurriculumGraph(Base):
     review_status: Mapped[str] = mapped_column(String(32), nullable=False)
     source_note: Mapped[str | None] = mapped_column(Text)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    book_identity: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
+    review_metadata: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
+    import_digest: Mapped[str | None] = mapped_column(String(64))
 
 
 class KnowledgeNode(Base):
@@ -275,10 +278,23 @@ class ReportShareLink(Base):
 class PracticeItem(Base):
     """A reviewed, tenant-shared practice item tagged to one knowledge point; holds no student data."""
     __tablename__ = "practice_items"
-    __table_args__ = (Index("ix_practice_items_knowledge", "tenant_id", "knowledge_id", "status"),)
+    __table_args__ = (Index("ix_practice_items_knowledge", "tenant_id", "knowledge_id", "status"),
+                     Index("ix_practice_items_graph", "tenant_id", "graph_version", "knowledge_id", "status"),
+                     ForeignKeyConstraint(["graph_version", "knowledge_id"], ["knowledge_nodes.graph_version", "knowledge_nodes.id"],
+                                          name="fk_practice_item_knowledge_graph"),
+                     ForeignKeyConstraint(["owner_student_id", "tenant_id"], ["students.id", "students.tenant_id"],
+                                          name="fk_practice_item_owner"))
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    knowledge_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    knowledge_id: Mapped[str | None] = mapped_column(String(64))
+    graph_version: Mapped[str | None] = mapped_column(String(64))
+    owner_student_id: Mapped[str | None] = mapped_column(String(64))
+    question_type: Mapped[str | None] = mapped_column(String(32))
+    question_kind: Mapped[str | None] = mapped_column(String(16))
+    options: Mapped[list | None] = mapped_column(JSON)
+    answer_fields: Mapped[list | None] = mapped_column(JSON)
+    field_answers: Mapped[list | None] = mapped_column(JSON)
+    verification: Mapped[dict | None] = mapped_column(JSON)
     item_family_id: Mapped[str] = mapped_column(String(64), nullable=False)
     stem_text: Mapped[str] = mapped_column(Text, nullable=False)
     answer_kind: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -316,10 +332,12 @@ class OptionalWindow(Base):
 class PracticeSession(Base):
     """One voluntary activity; leaving early is recorded as not taking part, never as debt."""
     __tablename__ = "practice_sessions"
-    __table_args__ = (student_fk(), Index("ix_practice_sessions_student", "student_id", "started_at"))
+    __table_args__ = (student_fk(), Index("ix_practice_sessions_student", "student_id", "started_at"),
+                     ForeignKeyConstraint(["graph_version"], ["curriculum_graphs.version"], name="fk_practice_session_graph"))
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
     student_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    graph_version: Mapped[str | None] = mapped_column(String(64))
     purpose: Mapped[str] = mapped_column(String(16), nullable=False)
     knowledge_ids: Mapped[list] = mapped_column(JSON, nullable=False)
     source_case_id: Mapped[str | None] = mapped_column(String(64))
@@ -337,15 +355,66 @@ class PracticeResponse(Base):
     """A rule-graded voluntary answer; recorded separately and never counted toward knowledge state."""
     __tablename__ = "practice_responses"
     __table_args__ = (student_fk(), Index("ix_practice_responses_item", "session_id", "item_id", unique=True),
-                      Index("ix_practice_responses_student", "student_id", "knowledge_id"))
+                      Index("ix_practice_responses_student", "student_id", "knowledge_id"),
+                      ForeignKeyConstraint(["graph_version", "knowledge_id"], ["knowledge_nodes.graph_version", "knowledge_nodes.id"],
+                                           name="fk_practice_response_knowledge_graph"))
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
     student_id: Mapped[str] = mapped_column(String(64), nullable=False)
     session_id: Mapped[str] = mapped_column(String(64), nullable=False)
     item_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    knowledge_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    knowledge_id: Mapped[str | None] = mapped_column(String(64))
+    graph_version: Mapped[str | None] = mapped_column(String(64))
     event_type: Mapped[str] = mapped_column(String(24), nullable=False)
     answer_text: Mapped[str] = mapped_column(Text, nullable=False)
     result: Mapped[str] = mapped_column(String(16), nullable=False)
     hint_used: Mapped[bool] = mapped_column(nullable=False)
+    details: Mapped[dict | None] = mapped_column(JSON)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class VariantGeneration(Base):
+    """A child-owned one-item generation, pinned to the exact source evidence."""
+    __tablename__ = "variant_generations"
+    __table_args__ = (student_fk(), Index("ix_variant_generation_source", "student_id", "source_fingerprint", unique=True),
+                     Index("ix_variant_generation_student", "student_id", "created_at"))
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    student_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_case_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    graph_version: Mapped[str | None] = mapped_column(String(64))
+    knowledge_id: Mapped[str | None] = mapped_column(String(64))
+    question_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    question_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    failure_code: Mapped[str | None] = mapped_column(String(64))
+    item_id: Mapped[str | None] = mapped_column(String(64))
+    session_id: Mapped[str | None] = mapped_column(String(64))
+    outbox_id: Mapped[str | None] = mapped_column(String(64))
+    audit: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class PracticeAssessment(Base):
+    """Durable semantic grading; failures never become a wrong response."""
+    __tablename__ = "practice_assessments"
+    __table_args__ = (student_fk(), Index("ix_practice_assessment_item", "session_id", "item_id", "created_at"))
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    student_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    session_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    item_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    graph_version: Mapped[str | None] = mapped_column(String(64))
+    item_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    item_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    submission: Mapped[dict] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    result: Mapped[str | None] = mapped_column(String(16))
+    feedback: Mapped[str | None] = mapped_column(Text)
+    outbox_id: Mapped[str | None] = mapped_column(String(64))
+    audit: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
