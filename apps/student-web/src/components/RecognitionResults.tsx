@@ -7,6 +7,8 @@ import { effectiveDecision } from '../core'
 import { casePresentation, studentQuestionText, studentResultState, studentResultUncertain, studentUnresolvedKind, type StudentResultState } from '../presentation'
 import { ResultsSummary } from './ResultsSummary'
 import { QuestionDetail } from './QuestionDetail'
+import { MathText } from './MathText'
+import { mathPresentation } from '../mathPresentation'
 
 interface RecognitionResultsProps {
   rows: CaseDetail[]
@@ -58,6 +60,8 @@ function ResultIcon({ state }: { state: StudentResultState }) {
 }
 
 export function QuestionCard({ row, index, open, onToggle, subjects = [], onSelectSubject = () => {}, workspace, onCorrection, onContinue, onVariant, variantBusy = false }: { row: CaseDetail; index: number; open: boolean; onToggle: () => void; subjects?: CurriculumScope[]; onSelectSubject?: (subject: string) => void; workspace?: Workspace; onCorrection?: (camera: boolean) => void; onContinue?: () => void; onVariant?: () => void; variantBusy?: boolean }) {
+  const [originalMath, setOriginalMath] = useState(false)
+  const [copyStatus, setCopyStatus] = useState('')
   const state = studentResultState(row)
   const serviceIncomplete = studentUnresolvedKind(row) === 'service'
   const decision = effectiveDecision(row)
@@ -73,7 +77,32 @@ export function QuestionCard({ row, index, open, onToggle, subjects = [], onSele
     ...(row.attempt.recognition_uncertainties ?? []),
     ...(decision?.uncertainties ?? []),
   ])]
+  const displayedAnswer = serviceIncomplete ? row.attempt.answer_text || 'AI 暂未读到作答，仍需结合原图核对。' : answerText(row)
+  const displayedCorrect = decision?.correct_answer?.trim() || '暂未生成正确答案，请重新识别或请老师核对。'
+  const fields: { label: string; text: string }[] = [{ label: '题目', text: row.question.stem_text || '题干暂未读清。' }]
+  for (const option of row.question.options ?? []) fields.push({ label: option.label, text: option.text })
+  if (usable && decision?.answer_checks?.length) {
+    for (const part of decision.answer_checks) {
+      fields.push({ label: `逐空反馈 · 第${part.index}${row.question.blank_count ? '空' : '项'}`, text: part.prompt }, { label: '作答', text: part.student_answer || (part.verdict === 'unanswered' ? '未作答' : '暂未读到清楚的作答') })
+      if (part.verdict === 'incorrect' && part.correct_answer) fields.push({ label: '应填', text: part.correct_answer })
+    }
+  } else fields.push({ label: serviceIncomplete ? 'AI 识读草稿' : '我的作答', text: displayedAnswer })
+  if (state === 'incorrect') fields.push({ label: '正确答案', text: decision?.correct_answer || displayedCorrect })
+  const hasMathView = open && fields.some(field => mathPresentation(field.text) !== null)
+  const copyFields = [...fields]
+  if (usable && decision?.answer_checks?.length && typeof row.attempt.answer_text === 'string') {
+    copyFields.splice(1 + (row.question.options?.length ?? 0), 0, { label: '整段原作答（原记录）', text: row.attempt.answer_text })
+  }
+  const rawCopy = copyFields.map(field => `${field.label}\n${field.text}`).join('\n\n')
+  useEffect(() => { setCopyStatus('') }, [rawCopy])
+  const copyOriginal = async () => {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('clipboard_unavailable')
+      await navigator.clipboard.writeText(rawCopy); setCopyStatus('已复制本题原文。')
+    } catch { setCopyStatus('暂时无法复制，请切换原文后选择文字复制。') }
+  }
   return <article className={`recognition-card ${state} ${open ? 'open' : ''}`}>
+
     <button className="recognition-card-head" type="button" aria-expanded={open} onClick={onToggle}>
       <span className="recognition-index">{index + 1}</span>
       <span className="recognition-card-title">{stemText || '题干待核实'}</span>
@@ -81,25 +110,32 @@ export function QuestionCard({ row, index, open, onToggle, subjects = [], onSele
       <ChevronDown className="recognition-chevron" size={19} aria-hidden="true" />
     </button>
     {open && <div className="recognition-card-body">
+      {hasMathView && <div className="math-view-tools" aria-label="数学文字显示">
+        <button className="text-button" type="button" aria-pressed={originalMath} onClick={() => { setOriginalMath(value => !value); setCopyStatus('') }}>{originalMath ? '查看公式排版' : '查看原文'}</button>
+        <button className="text-button" type="button" onClick={() => void copyOriginal()}>复制本题原文</button>
+        <small>仅调整显示，原文字和判断保持不变。</small>
+        {copyStatus && <span className="math-copy-status" role="status">{copyStatus}</span>}
+      </div>}
       <div className="recognition-question-block">
         <span className="recognition-label">题目</span>
-        <p>{stemText || '题干暂未读清。'}</p>
+        <p><MathText text={(originalMath ? row.question.stem_text : stemText) || '题干暂未读清。'} original={originalMath} /></p>
         {!!row.question.blank_count && <span className="blank-note">填空题 · {row.question.blank_count} 个空</span>}
       </div>
+      {!!row.question.options?.length && <ol className="recognition-original-options" aria-label="原题选项">{row.question.options.map((option, optionIndex) => <li key={`${optionIndex}:${option.label}`}><strong>{option.label}</strong><span><MathText text={option.text} original={originalMath} /></span></li>)}</ol>}
       {usable && decision.answer_checks?.length ? <div className="recognition-answer-slots" aria-label="逐空判定">
         {decision.answer_checks.map(part => <div key={part.index} className={`recognition-answer ${slotFeedback[part.verdict].tone}`}>
-          <span className="recognition-label">第{part.index}{row.question.blank_count ? '空' : '项'} · {part.prompt}</span>
-          <p>{part.student_answer || (part.verdict === 'unanswered' ? '未作答' : '暂未读到清楚的作答')} <span className="slot-verdict">{slotFeedback[part.verdict].label}</span></p>
-          {part.verdict === 'incorrect' && part.correct_answer && <p className="slot-correction">应填：{part.correct_answer}</p>}
+          <span className="recognition-label">第{part.index}{row.question.blank_count ? '空' : '项'} · <MathText text={part.prompt} original={originalMath} /></span>
+          <p><MathText text={part.student_answer || (part.verdict === 'unanswered' ? '未作答' : '暂未读到清楚的作答')} original={originalMath} /> <span className="slot-verdict">{slotFeedback[part.verdict].label}</span></p>
+          {part.verdict === 'incorrect' && part.correct_answer && <p className="slot-correction">应填：<MathText text={part.correct_answer} original={originalMath} /></p>}
         </div>)}
       </div> : <div className={`recognition-answer ${state}`}>
         <span className="recognition-label">{serviceIncomplete ? 'AI 识读草稿' : '我的作答'}</span>
-        <p>{serviceIncomplete ? row.attempt.answer_text || 'AI 暂未读到作答，仍需结合原图核对。' : answerText(row)}</p>
+        <p><MathText text={displayedAnswer} original={originalMath} /></p>
         {serviceIncomplete && <small>这段文字尚未完成核对，可能与照片不同，请以原图为准。</small>}
       </div>}
       {state === 'incorrect' && <div className="recognition-correct-answer">
         <span className="recognition-label">正确答案</span>
-        <p>{decision?.correct_answer?.trim() || '暂未生成正确答案，请重新识别或请老师核对。'}</p>
+        <p><MathText text={originalMath ? decision?.correct_answer || displayedCorrect : displayedCorrect} original={originalMath} /></p>
       </div>}
       <div className="recognition-learning">
         {!row.question.subject && !serviceIncomplete && subjects.length > 0 && <div className="recognition-subject-picker">
