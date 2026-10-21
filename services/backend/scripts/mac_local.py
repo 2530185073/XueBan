@@ -130,6 +130,77 @@ def configure_models(runtime, *, mode, gateway_config=None, readback_model="kimi
         temp.unlink(missing_ok=True)
 
 
+def ledger_history_check(rows, entries):
+    """Current DB coverage only; cannot establish the history of older backups."""
+    by_id = {}
+    for entry in entries:
+        identity = (entry["tenant_id"], entry["student_id"])
+        if entry["deletion_id"] in by_id and by_id[entry["deletion_id"]] != identity:
+            raise ValueError("Conflicting deletion ledger entries")
+        by_id[entry["deletion_id"]] = identity
+    required = [row for row in rows if row["server_completed_at"] is not None
+                or row["status"] in {"waiting_devices", "completed"}
+                or row["targets"].get("backup_tombstone") == "done"
+                or row["targets"].get("sensitive_records") == "done"]
+    return {"deletion_requests": len(rows), "requires_ledger": len(required),
+            "ledger_entries": len(entries),
+            "missing_historical_entries": sum(by_id.get(row["id"]) != (row["tenant_id"], row["student_id"]) for row in required),
+            "historical_backup_compliance": "unverified"}
+
+
+def audit_deletion_ledger(runtime, ledger_path=None):
+    from sqlalchemy import create_engine, select, exists, func
+    from xueban_backend.governance_models import DeletionRequest
+    from xueban_backend.models import Student
+    from scripts.recovery_payload import validate_ledger
+    config, env = load(runtime)
+    configured = env.get("DELETION_LEDGER_PATH")
+    path = Path(ledger_path).expanduser().absolute() if ledger_path else Path(configured) if configured else None
+    entries = validate_ledger(read_private(path).encode()) if path is not None else []
+    engine = create_engine(env["DATABASE_URL"])
+    try:
+        with engine.connect() as connection:
+            rows = list(connection.execute(select(DeletionRequest.id, DeletionRequest.tenant_id, DeletionRequest.student_id,
+                            DeletionRequest.status, DeletionRequest.targets, DeletionRequest.server_completed_at)).mappings())
+            untracked = connection.scalar(select(func.count()).select_from(Student).where(
+                Student.display_name == "已删除学员", ~exists(select(DeletionRequest.id).where(DeletionRequest.student_id == Student.id))))
+    finally:
+        engine.dispose()
+    return {**ledger_history_check(rows, entries), "ledger_configured": bool(configured),
+            "candidate_file_provided": ledger_path is not None, "deleted_students_without_request": untracked}
+
+
+def configure_deletion_ledger(runtime, ledger_path):
+    from scripts.recovery_payload import validate_ledger
+    config, _ = load(runtime)
+    path = Path(ledger_path).expanduser().absolute()
+    if not path.parent.is_dir() or path.parent.stat().st_mode & 0o077:
+        raise ValueError("Ledger parent must be a private existing directory (0700)")
+    data = read_private(path)  # Never creates a missing/empty replacement ledger.
+    entries = validate_ledger(data.encode())
+    old = config["environment"].get("DELETION_LEDGER_PATH")
+    if old and Path(old).resolve() != path.resolve():
+        for service in ("api", "worker"):
+            pidfile = runtime / (service + ".pid")
+            if pidfile.exists() and alive(int(pidfile.read_text().strip())):
+                raise ValueError("Stop API and worker before moving an existing deletion ledger")
+        previous = validate_ledger(read_private(Path(old)).encode())
+        signatures = {json.dumps(e, sort_keys=True) for e in entries}
+        if any(json.dumps(e, sort_keys=True) not in signatures for e in previous):
+            raise ValueError("New ledger omits previously retained deletion entries")
+    audit = audit_deletion_ledger(runtime, path)
+    if audit["missing_historical_entries"] or audit["deleted_students_without_request"]:
+        raise ValueError("Historical deletion entries are missing; recover and audit the ledger before binding")
+    config["environment"]["DELETION_LEDGER_PATH"] = str(path)
+    temp = runtime / ("runtime-ledger-" + secrets.token_hex(8) + ".tmp")
+    try:
+        write_private(temp, json.dumps(config, indent=2))
+        os.replace(temp, runtime / "runtime.json")
+    finally:
+        temp.unlink(missing_ok=True)
+    return {**audit, "ledger_configured": True, "restart_required": True}
+
+
 def api_environment(env):
     """Only the worker needs external model credentials."""
     return without_model_environment(env)
@@ -168,6 +239,8 @@ def initialize(args):
     runtime.mkdir(parents=True, exist_ok=False, mode=0o700)
     (runtime / "assets").mkdir(mode=0o700)
     (runtime / "logs").mkdir(mode=0o700)
+    (runtime / "ledger").mkdir(mode=0o700)
+    write_private(runtime / "ledger/deletions.jsonl", "")
     initialize_issuer(runtime / "identity")
     password = secrets.token_urlsafe(32)
     write_private(runtime / "postgres-password", password)
@@ -179,6 +252,7 @@ def initialize(args):
         "SIGNING_PRIVATE_KEY_FILE": str(runtime / "identity/issuer-private.pem"),
         "DEVICE_SESSION_TTL_SECONDS": "28800", "PUBLIC_BASE_URL": base,
         "ASSET_STORAGE_DIR": str(runtime / "assets"), "WORKER_LEASE_SECONDS": "300",
+        "DELETION_LEDGER_PATH": str(runtime / "ledger/deletions.jsonl"),
         "CORS_ALLOWED_ORIGINS": "http://127.0.0.1:5173,http://localhost:5173",
     }}
     write_private(runtime / "runtime.json", json.dumps(config, indent=2))
@@ -272,12 +346,22 @@ def main():
     models.add_argument("--reconciliation-provider", choices=("primary", "secondary"), default="primary")
     models.add_argument("--visual-review-model", default="gpt-6-astra")
     models.add_argument("--visual-review-enabled", choices=("0", "1"), default="1")
+    ledger_audit = commands.add_parser("audit-deletion-ledger")
+    ledger_audit.add_argument("--ledger-path", type=Path)
+    ledger_config = commands.add_parser("configure-deletion-ledger")
+    ledger_config.add_argument("--ledger-path", type=Path, required=True)
     admin = commands.add_parser("admin")
     admin.add_argument("arguments", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     runtime = args.runtime.expanduser().resolve()
     if args.command == "init":
         initialize(args)
+        return
+    if args.command == "audit-deletion-ledger":
+        print(json.dumps(audit_deletion_ledger(runtime, args.ledger_path)))
+        return
+    if args.command == "configure-deletion-ledger":
+        print(json.dumps(configure_deletion_ledger(runtime, args.ledger_path)))
         return
     if args.command == "configure-models":
         configure_models(runtime, mode=args.mode, gateway_config=args.gateway_config,

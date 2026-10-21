@@ -95,3 +95,93 @@ def test_public_config_rejected_and_stop_status_do_not_require_model_files(local
         load(runtime, require_model=True)
     configure_models(runtime, mode="single")
     assert load(runtime)[1]["CORRECTION_MODE"] == "single"
+
+
+def test_new_local_runtime_has_private_separate_deletion_ledger(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from scripts import mac_local
+    pg = tmp_path / 'pg'; pg.mkdir()
+    for name in ('initdb', 'pg_ctl', 'createdb'):
+        (pg / name).touch()
+    model = tmp_path / 'model.env'
+    write_private(model, 'ARK_BASE_URL=https://example.invalid\nARK_API_KEY=synthetic\n')
+    monkeypatch.setattr(mac_local, 'run', lambda *a, **k: None)
+    monkeypatch.setattr(mac_local, 'start_postgres', lambda *a: None)
+    runtime = tmp_path / 'fresh'
+    mac_local.initialize(SimpleNamespace(runtime=runtime, pg_bin=pg, model_config=model,
+                        base_url='http://127.0.0.1:8000', pg_port=55432, host='127.0.0.1'))
+    config, _ = load(runtime)
+    ledger = Path(config['environment']['DELETION_LEDGER_PATH'])
+    assert ledger == runtime / 'ledger/deletions.jsonl'
+    assert ledger.read_bytes() == b''
+    assert ledger.stat().st_mode & 0o777 == 0o600
+    assert ledger.parent.stat().st_mode & 0o777 == 0o700
+    assert ledger.parent != runtime / 'assets'
+
+
+def test_existing_runtime_is_not_silently_given_empty_ledger(local_config):
+    runtime, _, _ = local_config
+    before = (runtime / 'runtime.json').read_bytes()
+    load(runtime)
+    assert (runtime / 'runtime.json').read_bytes() == before
+    assert not (runtime / 'ledger').exists()
+
+
+def test_ledger_history_missing_or_wrong_student_is_not_compliant():
+    from scripts.mac_local import ledger_history_check
+    row = {'id': 'd1', 'tenant_id': 't', 'student_id': 's', 'status': 'completed',
+           'server_completed_at': None, 'targets': {}}
+    assert ledger_history_check([row], [])['missing_historical_entries'] == 1
+    wrong = {'deletion_id': 'd1', 'tenant_id': 't', 'student_id': 'other'}
+    assert ledger_history_check([row], [wrong])['missing_historical_entries'] == 1
+    right = {**wrong, 'student_id': 's'}
+    result = ledger_history_check([row], [right])
+    assert result['missing_historical_entries'] == 0
+    assert result['historical_backup_compliance'] == 'unverified'
+    with pytest.raises(ValueError, match='Conflicting'):
+        ledger_history_check([row], [wrong, right])
+
+
+def test_ledger_bind_requires_existing_file_and_complete_history(local_config, monkeypatch):
+    from scripts import mac_local
+    runtime, _, _ = local_config
+    parent = runtime / 'ledger'; parent.mkdir(mode=0o700)
+    missing = parent / 'missing.jsonl'
+    before = (runtime / 'runtime.json').read_bytes()
+    with pytest.raises(FileNotFoundError):
+        mac_local.configure_deletion_ledger(runtime, missing)
+    assert (runtime / 'runtime.json').read_bytes() == before
+    ledger = parent / 'deletions.jsonl'; write_private(ledger, '')
+    monkeypatch.setattr(mac_local, 'audit_deletion_ledger', lambda *a: {'missing_historical_entries': 1, 'deleted_students_without_request': 0})
+    with pytest.raises(ValueError, match='Historical'):
+        mac_local.configure_deletion_ledger(runtime, ledger)
+    assert (runtime / 'runtime.json').read_bytes() == before
+    monkeypatch.setattr(mac_local, 'audit_deletion_ledger', lambda *a: {'missing_historical_entries': 0, 'deleted_students_without_request': 0, 'historical_backup_compliance': 'unverified'})
+    result = mac_local.configure_deletion_ledger(runtime, ledger)
+    assert result['restart_required']
+    assert load(runtime)[0]['environment']['DELETION_LEDGER_PATH'] == str(ledger)
+
+
+def test_ledger_binding_rejects_symlink(local_config):
+    from scripts.mac_local import configure_deletion_ledger
+    runtime, _, _ = local_config
+    parent = runtime / 'ledger'; parent.mkdir(mode=0o700)
+    source = parent / 'source.jsonl'; write_private(source, '')
+    link = parent / 'link.jsonl'; link.symlink_to(source)
+    with pytest.raises(ValueError, match='private regular file'):
+        configure_deletion_ledger(runtime, link)
+
+
+def test_moving_configured_ledger_requires_stopped_writers(local_config, monkeypatch):
+    from scripts import mac_local
+    runtime, _, _ = local_config
+    parent = runtime / 'ledger'; parent.mkdir(mode=0o700)
+    old = parent / 'old.jsonl'; write_private(old, '')
+    new = parent / 'new.jsonl'; write_private(new, '')
+    config = json.loads((runtime / 'runtime.json').read_text())
+    config['environment']['DELETION_LEDGER_PATH'] = str(old)
+    (runtime / 'runtime.json').write_text(json.dumps(config))
+    (runtime / 'worker.pid').write_text(str(os.getpid()))
+    with pytest.raises(ValueError, match='Stop API and worker'):
+        mac_local.configure_deletion_ledger(runtime, new)
+    assert load(runtime)[0]['environment']['DELETION_LEDGER_PATH'] == str(old)

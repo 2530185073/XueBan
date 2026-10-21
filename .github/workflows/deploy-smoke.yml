@@ -27,6 +27,8 @@ jobs:
         env:
           XUEBAN_DOMAIN: ':80'
         run: docker compose up -d --build --wait postgres api caddy
+      - name: Explicit deletion-ledger baseline for the fresh CI database
+        run: docker compose run --rm --no-deps -T --entrypoint python api -m scripts.recovery_payload initialize-ledger
       - name: Readiness through the reverse proxy
         run: |
           for i in $(seq 1 30); do
@@ -47,9 +49,16 @@ jobs:
           curl -fsS -o /dev/null http://localhost/learn/
       - name: Backup and restore round trip
         run: |
-          BACKUP_DIR=/tmp/xueban-backups ./scripts/backup.sh
-          ./scripts/restore.sh "$(ls -d /tmp/xueban-backups/* | tail -1)"
+          docker compose stop api worker
+          BACKUP_DIR=/tmp/xueban-backups ./scripts/backup.sh --writers-quiesced > /tmp/recovery-backup.json
           docker compose up -d --wait api
+          backup_dir=$(python3 -c 'import json; print(json.load(open("/tmp/recovery-backup.json"))["backup_directory"])')
+          RESTORE_DIR=/tmp/xueban-restores ./scripts/restore.sh "$backup_dir" > /tmp/recovery-stage.json
+          python3 -c 'import json; d=json.load(open("/tmp/recovery-stage.json")); assert d["state"] == "validated_staged" and d["automatic_cutover"] is False'
+          curl -fsS http://localhost/readyz
+          stage_dir=$(python3 -c 'import json; print(json.load(open("/tmp/recovery-stage.json"))["stage_directory"])')
+          python3 scripts/recovery.py revalidate "$stage_dir"
+          python3 scripts/recovery.py cleanup "$stage_dir"
           curl -fsS http://localhost/readyz
       - name: Logs on failure
         if: failure()

@@ -20,3 +20,7 @@ node_modules
 /infra/xueban.env
 /infra/model.env
 /infra/backups/
+
+# Private staged restore artifacts
+/infra/restores/
+/infra/compose.override.yaml

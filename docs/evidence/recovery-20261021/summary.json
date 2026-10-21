@@ -1,0 +1,68 @@
+{
+  "scope": "isolated local QA database and copied original assets; no live service restart or configuration changes",
+  "status": "passed",
+  "finished_at": "2026-10-21T03:32:23.099450+00:00",
+  "migration_revisions": [
+    "0014_student_variants"
+  ],
+  "business_tables": 42,
+  "before_deletion": {
+    "verified_assets": 57,
+    "verified_bytes": 8978666
+  },
+  "after_deletion": {
+    "verified_assets": 54,
+    "verified_bytes": 8902826
+  },
+  "backup_seconds": 2.602,
+  "restore_and_verify_seconds": 3.226,
+  "archive_sha256": {
+    "database.dump": "29c9e69cfa3297a10807783f5e8820279cc41e6b2fc014616256e04eb404680a",
+    "assets.tar": "692c39050bdca29243949bd20b7b1be8c4a45448d4bee07118d4bbaae8324817",
+    "database.json": "145775a326a9cd1a317e8aea1f4b71e9206db78f87ed939efef7d512ed619802",
+    "deletion-ledger.snapshot.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "checks": {
+    "roundtrip_asset_hashes_and_db_association": true,
+    "latest_ledger_after_backup_reapplied": true,
+    "restored_deleted_student_homeworks_zero": true,
+    "restored_deleted_student_password_accounts_zero": true,
+    "restored_deleted_student_learning_evidence_zero": true,
+    "restored_deleted_student_inactive": true,
+    "all_original_live_asset_hashes_unchanged": true,
+    "qa_source_database_not_purged": true
+  },
+  "failed_restore_cleanup": {
+    "rejected": true,
+    "database_removed": true,
+    "state": "cleaned",
+    "no_assets_remaining": true,
+    "escape_absent": true
+  },
+  "cleanup": {
+    "staged": true,
+    "qa_database": true,
+    "qa_copied_assets_and_secret_runtime": true
+  },
+  "revalidation": {
+    "automatic_cutover": false,
+    "writers_quiesced": true,
+    "reapplied_deletions": 1
+  },
+  "code_sha256": {
+    "infra/scripts/recovery.py": "4f2bd9d3cbe3a23cc3b85e14b0a27ffbae9fd1f15ca0e70a4ff816cc2e7ea8a5",
+    "services/backend/scripts/recovery_payload.py": "52372fe255fad742b08be98ea63d19e1eabbb383be0ff3090c8f745e99b483b9",
+    "services/backend/scripts/mac_local.py": "06977420e349aa37143eda799648c611a5c9afc91b102c90b54498d3b5b5de42"
+  },
+  "unit_and_postgres_tests": {
+    "passed": 56,
+    "commands": [
+      "pytest services/backend/tests/test_recovery_operations.py services/backend/tests/test_mac_local_config.py services/backend/tests/test_governance.py --require-postgres -q"
+    ]
+  },
+  "not_verified": [
+    "Docker Compose execution on this Mac (Docker unavailable)",
+    "production cutover and off-host archive retrieval",
+    "past backup deletion completeness before a retained ledger existed"
+  ]
+}
