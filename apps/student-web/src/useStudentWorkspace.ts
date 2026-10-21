@@ -4,6 +4,7 @@ import { type CorrectionTarget } from './presentation'
 import type { Account, CaseDetail, CreateHelp, DraftSummary, DraftView, Hint, HomeworkDetail, HomeworkSession, HomeworkSummary, IdentityContext } from './core/types'
 import type { StudentCurriculum } from './core/learning'
 import type { CurriculumContext } from './core/student'
+import { HistoryReader, emptyHistoryView } from './core/historyReader'
 
 const helpDefaults: Record<CreateHelp['kind'], string> = { question: '我需要老师帮我看看这道题。', recognition: '识别文字与照片不一致，请老师核对。', judgment: '这道题的判断我看不懂，请老师看看。', appeal: '我觉得这道题的判断可能不对，请老师重新看看。' }
 const helpNotices: Record<CreateHelp['kind'], string> = { question: '求助已提交，可以先继续其他题。', recognition: '已反馈文字与照片不一致，老师会帮你核对。可以先继续其他题。', judgment: '已请老师看看这次判断，可以先继续其他题。', appeal: '重查申请已提交。老师处理前，当前结果保持不变，可以先继续其他题。' }
@@ -19,13 +20,15 @@ export function useStudentWorkspace() {
   const [studentId, setStudentId] = useState<string | null>(null)
   const [studentCurriculum, setStudentCurriculum] = useState<StudentCurriculum | null>(null)
   const [loading, setLoading] = useState(true)
+  const [sessionInitializing, setSessionInitializing] = useState(false)
   const [busy, setBusy] = useState('')
   const busyRef = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<DraftSummary[]>([])
-  const [history, setHistory] = useState<HomeworkSession[]>([])
-  const [cursor, setCursor] = useState<string | null>(null)
+  const [historyView, setHistoryView] = useState(emptyHistoryView)
+  const [historyReader] = useState(() => new HistoryReader(client))
+  const { items: history, cursor, loading: historyLoading, loaded: historyLoaded } = historyView
   const [draft, setDraft] = useState<DraftView | null>(null)
   const [detail, setDetail] = useState<HomeworkDetail | null>(null)
   const [hint, setHint] = useState<Hint | null>(null)
@@ -39,7 +42,7 @@ export function useStudentWorkspace() {
   const autoPollTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const autoPollRunning = useRef(false)
 
-  const clearWork = useCallback(() => { ++syncSequence.current; ++summaryRun.current; activeDraft.current = null; setDraft(null); setDetail(null); setDrafts([]); setHistory([]); setCursor(null); setHint(null); setSummaries({}); setSummaryFailed([]); setStudentCurriculum(null) }, [])
+  const clearWork = useCallback(() => { ++syncSequence.current; ++summaryRun.current; activeDraft.current = null; setDraft(null); setDetail(null); setDrafts([]); setHistoryView(historyReader.reset()); setHint(null); setSummaries({}); setSummaryFailed([]); setStudentCurriculum(null) }, [historyReader])
   const fail = useCallback((failure: unknown) => {
     setError(safeError(failure).message)
     setAccount(client.account); setIdentity(client.identity); setStudentId(client.selectedStudentId)
@@ -63,6 +66,13 @@ export function useStudentWorkspace() {
     busyRef.current = true; setBusy(label); setError(null); setNotice(null)
     try { await task(); return true } catch (e) { fail(e); return false } finally { busyRef.current = false; setBusy('') }
   }, [fail])
+  // Identity may arrive before curriculum/draft restoration finishes. Publish
+  // usable navigation only after the whole account transition releases action().
+  const sessionAction = useCallback(async (label: string, task: () => Promise<void>) => {
+    if (busyRef.current) return false
+    setSessionInitializing(true)
+    try { return await action(label, task) } finally { setSessionInitializing(false) }
+  }, [action])
   // The open draft id per student for this tab only, so a reload lands back on the same work.
   const remember = useCallback((id: string | null) => {
     const student = client.selectedStudentId; if (!student) return
@@ -146,14 +156,14 @@ export function useStudentWorkspace() {
     const next = await client.openHomework(homeworkId); setDetail(next); await sync(); setDetail(next); setRecordVersion(v => v + 1)
   }, [client, detail?.homework.id, draft?.homeworkId, sync])
   return {
-    client, account, identity, studentId, studentCurriculum, loading, busy, error, notice, drafts, history, cursor, draft, detail, hint, summaries, summaryFailed, recordVersion, online,
+    client, account, identity, studentId, studentCurriculum, loading, sessionInitializing, busy, error, notice, drafts, history, cursor, historyLoading, historyLoaded, draft, detail, hint, summaries, summaryFailed, recordVersion, online,
     clearError: () => setError(null),
     showNotice: (text: string | null) => setNotice(text),
     /** Learning panels handle their own errors; one that signed the account out is shown like any other. */
     report: (failure: unknown) => { if (!client.identity) fail(failure) },
-    login: (username: string, password: string) => action('正在登录', async () => { clearWork(); await client.login(username, password); await sync(); await deviceNotice(); await refreshCurriculum(); await resumeActive() }),
-    changePassword: (currentPassword: string, newPassword: string) => action('正在保存新密码', async () => { await client.changePassword(currentPassword, newPassword); await sync(); setNotice('密码已更新，以后用新密码登录同一个作业本。') }),
-    reconnect: () => action('正在恢复连接', async () => { await client.restore(); await sync(); await deviceNotice() }),
+    login: (username: string, password: string) => sessionAction('正在登录', async () => { clearWork(); await client.login(username, password); await sync(); await deviceNotice(); await refreshCurriculum(); await resumeActive() }),
+    changePassword: (currentPassword: string, newPassword: string) => sessionAction('正在保存新密码', async () => { await client.changePassword(currentPassword, newPassword); await sync(); setNotice('密码已更新，以后用新密码登录同一个作业本。') }),
+    reconnect: () => sessionAction('正在恢复连接', async () => { await client.restore(); await sync(); await deviceNotice() }),
     logout: () => action('正在退出登录', async () => { remember(null); try { await client.logout() } finally { clearWork() } await sync(); setError(null); setNotice(null) }),
     newWork: () => { if (busyRef.current) return; remember(null); activeDraft.current = null; setDraft(null); setDetail(null); setHint(null); setError(null); setNotice(null) },
     /** A correction takes exactly one photo; homework takes one or more pages. */
@@ -188,11 +198,11 @@ export function useStudentWorkspace() {
       setDraft(next); setDetail(next.detail); setRecordVersion(v => v + 1)
     },
     refreshDetail: () => action('正在刷新结果', refreshOpened),
-    loadHistory: (more = false) => action('正在读取历史', async () => {
-      const page = await client.history(more ? cursor ?? undefined : undefined)
-      const merged = more ? [...history, ...page.items.filter(item => !history.some(existing => existing.id === item.id))] : page.items
-      setHistory(merged); setCursor(page.next_cursor); await sync(); loadSummaries(merged, more ? summaries : {})
-    }),
+    loadHistory: async (more = false) => {
+      // History GETs may proceed while model work owns the mutation lock.
+      try { const items = await historyReader.load(more, setHistoryView); if (items) loadSummaries(items, more ? summaries : {}); return items != null }
+      catch (error) { fail(error); return false }
+    },
     openHomework: (id: string) => action('正在打开历史', async () => { const opened = await client.openHomework(id); await selectDraft(opened.draftId ?? remoteDraftId(id)); setRecordVersion(v => v + 1); await sync() }),
     requestHint: (row: CaseDetail, level: 'direction' | 'key_step') => action('正在想一个提示', async () => { setHint(await client.requestHint(row.case.id, level)); setRecordVersion(v => v + 1); await sync() }),
     hintViewed: (value: Hint) => { void client.recordHintViewed(value.id).then(() => { setRecordVersion(v => v + 1); return sync() }).catch(fail) },

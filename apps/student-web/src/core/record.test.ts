@@ -3,8 +3,9 @@ import { IDBFactory } from 'fake-indexeddb'
 import examples from '../../../../contracts/phase1/examples.json'
 import { StudentClient } from './student'
 import { RecognitionRecoveryController } from './recognitionRecovery'
+import { HistoryReader, type HistoryView } from './historyReader'
 import { DraftStore, LOCAL_TTL_MS } from './store'
-import type { RecognitionRecoveryStatus, RecognitionRecheckAccepted, Attempt, CapturedQuestionRevision, CheckRun, CorrectionCase, Decision, HelpRequest, Hint, HomeworkSession, Job, JournalEntry, NormalizedPhoto, Review, StoredDraft } from './types'
+import type { HomeworkPage, RecognitionRecoveryStatus, RecognitionRecheckAccepted, Attempt, CapturedQuestionRevision, CheckRun, CorrectionCase, Decision, HelpRequest, Hint, HomeworkSession, Job, JournalEntry, NormalizedPhoto, Review, StoredDraft } from './types'
 
 class MemorySession implements Storage {
   private values = new Map<string, string>()
@@ -38,7 +39,7 @@ function harness(store = new DraftStore(new IDBFactory())) {
     if (path === '/v1/me') return me()
     if (path === `/v1/homeworks/${hw.id}`) return json(hw)
     if (init.method === 'POST') { const response = write?.(path, init); if (response) return response }
-    const read = reads.get(path); if (read) return json(read())
+    const read = reads.get(path); if (read) return json(await read())
     throw new Error(`Unexpected synthetic route ${path}`)
   }) as unknown as typeof fetch
   const options = { origin: 'http://localhost', storage, store, transport, normalize: async () => photo, sleep: async () => undefined }
@@ -372,5 +373,46 @@ describe('original-image recognition recovery', () => {
     const opened = await s.client.openHomework(s.hw.id)
     expect((await s.client.runDraft(opened.draftId!)).stage).toBe('waiting')
     expect(s.calls.filter(c => c.init.method === 'POST' && !c.path.includes('/auth/'))).toHaveLength(0)
+  })
+})
+
+
+describe('independent history reads', () => {
+  const route = '/v1/students/student_one/homeworks'
+  function gate() { let resolve!: (page: HomeworkPage) => void; const promise = new Promise<HomeworkPage>(done => { resolve = done }); return { promise, resolve } }
+  it('performs a history GET while a model job remains running, without restarting any model request', async () => {
+    const s = harness(); await login(s.client)
+    const { c, a } = s.addCase('case_one'); a.recognition_status = 'needs_revision'; s.hw.case_ids = [c.id]
+    const running = { ...fixture<RecognitionRecheckAccepted>('accepted_recognition_recheck').job, status: 'running' } // synthetic server has an in-flight model job
+    s.hw.job_ids = ['job_busy']; s.reads.set('/v1/jobs/job_busy', () => running)
+    s.reads.set(route, () => ({ items: [s.hw], next_cursor: null }))
+    const update = vi.fn(), reader = new HistoryReader(s.client)
+    expect((await reader.load(false, update))?.map(x => x.id)).toEqual([s.hw.id])
+    expect(s.calls.some(call => call.path === route && call.init.method === 'GET')).toBe(true)
+    expect(update.mock.lastCall?.[0]).toMatchObject({ loaded: true, loading: false, items: [{ id: s.hw.id }] })
+    expect(s.calls.filter(c => c.init.method === 'POST' && !c.path.includes('/auth/'))).toHaveLength(0)
+  })
+  it('keeps the newer refresh when two actual GET responses return out of order', async () => {
+    const s = harness(); await login(s.client)
+    const first = gate(), second = gate(); let reads = 0
+    s.reads.set(route, () => ++reads === 1 ? first.promise : second.promise)
+    const update = vi.fn(), reader = new HistoryReader(s.client)
+    const older = reader.load(false, update); await vi.waitFor(() => expect(reads).toBe(1))
+    const newer = reader.load(false, update); await vi.waitFor(() => expect(reads).toBe(2))
+    second.resolve({ items: [{ ...s.hw, id: 'homework_newer', title: '新页' }], next_cursor: 'cursor_new' }); await newer
+    first.resolve({ items: [{ ...s.hw, id: 'homework_older', title: '旧页' }], next_cursor: null }); expect(await older).toBeNull()
+    const view = update.mock.lastCall?.[0] as HistoryView
+    expect(view.items.map(x => x.id)).toEqual(['homework_newer']); expect(view.cursor).toBe('cursor_new')
+  })
+  it.each(['logout', 'relogin'] as const)('does not publish a late response after %s, even for the same student account', async transition => {
+    const s = harness(); await login(s.client); const pending = gate(); let started = false
+    s.reads.set(route, () => { started = true; return pending.promise })
+    const update = vi.fn(), reader = new HistoryReader(s.client), oldScope = s.client.historyScope
+    const read = reader.load(false, update); await vi.waitFor(() => expect(started).toBe(true))
+    await s.client.logout(); if (transition === 'relogin') await login(s.client)
+    expect(s.client.historyScope).not.toBe(oldScope)
+    const before = update.mock.calls.length
+    pending.resolve({ items: [s.hw], next_cursor: null }); expect(await read).toBeNull()
+    expect(update).toHaveBeenCalledTimes(before)
   })
 })

@@ -87,6 +87,8 @@ export class StudentClient {
   get account() { return this.currentAccount }
   get identity() { return this.currentIdentity }
   get selectedStudentId() { return this.student }
+  /** Non-secret scope fence for concurrent read-only views, including same-account re-login. */
+  get historyScope() { return this.session && this.student && this.currentIdentity ? JSON.stringify([this.epoch, this.currentIdentity.actor_id, this.student]) : null }
   subscribe(listener: () => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
   private changed() { for (const listener of this.listeners) listener() }
   private storageKey(name: string) { return `xueban:${this.origin}:${name}` }
