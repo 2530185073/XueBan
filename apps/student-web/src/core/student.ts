@@ -467,8 +467,15 @@ export class StudentClient {
   private async detail(ctx: Context, id: string): Promise<HomeworkDetail> {
     const homework = await this.read<HomeworkSession>(ctx, `/v1/homeworks/${encoded(id)}`, 'HomeworkSession')
     if (homework.scope.student_id !== ctx.student) throw new StudentError('access_denied', 403)
-    const records = await this.caseRecords(ctx, homework), cases: CaseDetail[] = [], jobs: Job[] = []
-    for (const caseId of orderActiveCases(homework.case_ids, records)) cases.push(await this.rowFor(ctx, records.get(caseId)!))
+    const records = await this.caseRecords(ctx, homework), jobs: Job[] = []
+    // Independent cases can load together while preserving each row's
+    // question-to-attempt read order and validation. Stop queuing after failure.
+    let rowFailure: { error: unknown } | undefined
+    const cases = await mapLimit(orderActiveCases(homework.case_ids, records), 4, async caseId => {
+      if (rowFailure) throw rowFailure.error
+      try { return await this.rowFor(ctx, records.get(caseId)!) }
+      catch (error) { rowFailure ??= { error }; throw error }
+    })
     for (const jobId of homework.job_ids) jobs.push(await this.read<Job>(ctx, `/v1/jobs/${encoded(jobId)}`, 'Job'))
     // A failed or queued check is row-level state. Keep it next to the row so
     // the student view can distinguish it from a missing judgment.
