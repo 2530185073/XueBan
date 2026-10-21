@@ -13,7 +13,7 @@ import json
 import re
 
 from .correction_pipeline import _object, _text
-from . import question_units
+from . import question_units, definition_enumeration
 from .reconciliation import _critical_literals, has_unreadable_marker, source_id
 from .whole_page import normalize_literal_math, normalize_page_stem
 
@@ -168,13 +168,19 @@ def material_condition_signature(source):
     """The existing printed-condition veto, computed once per observation.
 
     Compatibility is only necessary for a consumable pair, never sufficient.
-    Do not include labels, answers, slot counts or new semantic heuristics.
+    The optional definition descriptor validates a printed enumeration against
+    its existing label; it never contributes an answer or a pairing proposal.
     """
-    return (tuple(_printed_literals(source)), tuple(_options(source)))
+    return (tuple(_printed_literals(source)), tuple(_options(source)), definition_enumeration.parse(source))
 
 
 def material_conditions_compatible(first_signature, second_signature):
-    return first_signature == second_signature
+    if first_signature[:2] == second_signature[:2]:
+        return True  # Preserve every existing literal/options equality result.
+    # Only the exact closed definition grammar can use the exception. All of its
+    # non-enumeration content is Chinese text; there are no numeric operands.
+    return (first_signature[1] == second_signature[1]
+            and definition_enumeration.equivalent(first_signature[2], second_signature[2]))
 
 
 def alignment_dispatch(primary, secondary, *, target_unit="answer_slot"):
@@ -356,6 +362,8 @@ def evaluate_alignment(result, primary, secondary, *, target_unit="answer_slot")
             "canonical_label": a.get("label"), "basis": "model_same_atomic_target",
             "condition_conflict": False, "requires_visual_review": False,
             "evidence": deepcopy(pair),
+            **({"condition_presentation": definition_enumeration.evidence(signature(a_id)[2], signature(b_id)[2])}
+               if signature(a_id)[:2] != signature(b_id)[:2] else {}),
         })
     used = {identity for pair in accepted for identity in (
         pair["primary_source_id"], pair["secondary_source_id"],
