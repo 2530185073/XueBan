@@ -165,8 +165,8 @@ def _same_observation(first, second):
 def _needs_condition_readback(first, second):
     """Start an eventually necessary blind read with the first review.
 
-    An enclosing heading or equivalent arithmetic instruction can wait for
-    the presentation reviewer. This routes work; it never accepts a judgment.
+    An enclosing heading, equivalent arithmetic instruction, or bound power
+    property copula can wait for the presentation reviewer. This routes work; it never accepts a judgment.
     """
     a, b = normalize_page_stem(first), normalize_page_stem(second)
     if a == b:
@@ -174,6 +174,8 @@ def _needs_condition_readback(first, second):
     if reconciliation._condition_literals(a) != reconciliation._condition_literals(b):
         return True
     if reconciliation.instruction_presentation_same(a, b):
+        return False
+    if reconciliation.power_property_presentation_same(first, second):
         return False
     return not reconciliation.enclosing_presentation_same(a, b)
 

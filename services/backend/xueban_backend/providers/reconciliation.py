@@ -14,7 +14,7 @@ from .correction_pipeline import (
     ANSWER_STATUS, REASONS, UNCERTAINTIES, VERDICTS, _object, _text,
     normalize_field_for_comparison,
 )
-from .whole_page import _answer_equal, _usable, normalize_literal_math, normalize_page_stem
+from .whole_page import _answer_equal, _usable, canonical_label, normalize_literal_math, normalize_page_stem
 from . import review_evidence, answer_scope
 
 
@@ -354,6 +354,39 @@ def instruction_presentation_same(first, second):
     return a is not None and a == b
 
 
+
+# Full-target syntax, not a stop-word list. Parentheses, signs, division,
+# exponent order, and the base/exponent role remain part of the signature.
+_POWER_PROPERTY = re.compile(
+    r"(?P<prefix>填空:)?乘方(?P<power>(?:[0-9]+|\([+-]?[0-9]+(?:/[0-9]+)?\))\^[0-9]+)"
+    r"的(?P<property>底数|指数)(?:是|为)?____")
+
+
+def power_property_presentation_same(first, second):
+    """A copula-only routing view for one bound numeric-power fill-in target.
+
+    This does not pair table cells, rewrite a source, or judge an answer. The
+    existing source-bound image reviewer must still explicitly confirm both
+    equivalence and presentation before this can waive a third visual read.
+    """
+    signatures = []
+    for item in (first, second):
+        label = item.get("label")
+        if (item.get("question_type") != "fill_blank"
+                or item.get("target_unit", question_units.LEGACY_UNIT) != question_units.LEGACY_UNIT
+                or item.get("uncertainties") or item.get("options")
+                or not isinstance(label, str)):
+            return False
+        label = canonical_label(label)
+        if not re.fullmatch(r"[1-9][0-9]*(?:\([1-9][0-9]*\))?(?:#[1-9][0-9]*)?", label):
+            return False
+        match = _POWER_PROPERTY.fullmatch(normalize_page_stem(item))
+        if match is None:
+            return False
+        signatures.append((label, match["prefix"], match["power"], match["property"]))
+    return signatures[0] == signatures[1] and question_units.same_unit_identity(first, second)
+
+
 def enclosing_presentation_same(first, second):
     """Recognize only a complete known heading around the identical expression.
 
@@ -552,6 +585,7 @@ def evaluate_review(review, primary, secondary, visual=None, critical_visual=Non
     if comparison.get("difference_type") == "uncertain":
         return reject("comparison_unresolved")
     requires_visual_support = review["resolution"] == "visual_resolution"
+    power_property_context = False
     if review["resolution"] in {"equivalent", "non_material"}:
         def comparable(role, item):
             # This is a boolean eligibility check, not a new or rewritten source.
@@ -581,9 +615,13 @@ def evaluate_review(review, primary, secondary, visual=None, critical_visual=Non
                              and first_conditions[1:] == second_conditions[1:])
         instruction_context = (instruction_presentation_same(a_stem, b_stem)
                                and first_conditions[1:] == second_conditions[1:])
+        power_property_context = (review["resolution"] == "equivalent"
+                                  and comparison["difference_type"] == "presentation"
+                                  and power_property_presentation_same(primary, secondary))
         requires_visual_support = (
             resolved_source == "visual" or not _answer_equal(primary, secondary)
-            or (first_conditions != second_conditions and not (enclosing_context or instruction_context))
+            or (first_conditions != second_conditions and not (enclosing_context or instruction_context
+                                                                      or power_property_context))
         )
         # Do not require the original judges to agree, or to have supplied a
         # correction. This review independently judges the bound observation.
@@ -618,6 +656,8 @@ def evaluate_review(review, primary, secondary, visual=None, critical_visual=Non
         "audit": {
             "protocol_version": 4,
             "condition_comparison_policy": "contextual_literals_with_source_review",
+            **({"condition_presentation_rule": "numeric_power_property_copula_v1"}
+               if power_property_context and not requires_visual_support else {}),
             "reviewed_visual_source_id": source_id("visual", visual) if visual is not None else None,
             "observation_issue_review": deepcopy(note_review),
             "target_identity": deepcopy(identity),
