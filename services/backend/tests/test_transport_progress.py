@@ -155,21 +155,29 @@ def test_completed_response_attempt_keeps_transport_without_changing_usage_or_ca
     assert attempt.transport.decoded_body_bytes > 0 and attempt.code == "ok"
 
 
-def test_real_timeout_progress_persists_in_worker_audit_but_not_public_api(flow):
+def test_stream_timeout_progress_persists_in_worker_audit_but_not_public_api(flow):
     first, first_calls = make_client([correct()], "synthetic-primary")
     calls = []; private = "private-stream-sentinel"
+    class TimedOutStream(Stream):
+        async def __aiter__(self):
+            async for chunk in super().__aiter__():
+                yield chunk
+            raise httpx.ReadTimeout("synthetic stream interruption")
+    # Wall-clock cancellation is tested above. This worker/persistence case must
+    # reach the stream before failing: a 25 ms total budget can expire during
+    # PAGE_SCHEMA validation on a busy runner, before any HTTP attempt exists.
     def serve(request):
         calls.append(request)
-        stream = Stream([('data: '+json.dumps({'type':'response.output_text.delta','delta':private})+'\n\n').encode()], hang=True)
+        stream = TimedOutStream([('data: '+json.dumps({'type':'response.output_text.delta','delta':private})+'\n\n').encode()])
         return httpx.Response(200, stream=stream, headers={"content-type":"text/event-stream"})
-    second = ResponsesClient(settings(timeout_seconds=1,total_timeout_seconds=.025), transport=httpx.MockTransport(serve))
+    second = ResponsesClient(settings(timeout_seconds=1,total_timeout_seconds=5), transport=httpx.MockTransport(serve))
     p = TwoModelWholePagePipeline(first, second, host_call_journal_enabled=True);flow.worker.pipeline = p
     try:
         _,job=flow.recognize();assert flow.worker.run_once()
         with Session(flow.database.engine) as session:
             task=session.get(Task,job['id']);execution=task.audit['executions'][-1]
             attempts=execution['metadata']['attempts'];assert len(attempts)==2
-            failed=next(a for a in attempts if a['code']=='deadline_exceeded')
+            failed=next(a for a in attempts if a['code']=='upstream_timeout')
             assert failed['transport']['output_text_delta_chars']==len(private)
             assert failed['usage'] is None and failed['charge_status']=='unknown'
             call=next(c for c in execution['host_call_journal']['calls'] if c['stage']=='secondary')
