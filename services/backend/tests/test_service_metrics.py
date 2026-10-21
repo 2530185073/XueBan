@@ -1,9 +1,10 @@
 """Live service metrics: task latency, model abstention, staff waiting and backlog."""
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 from test_correction_flow import flow  # noqa: F401  (pytest fixture reuse)
 from test_staff import staff_setup
-from xueban_backend.service_metrics import distribution, percentile
+from xueban_backend.service_metrics import backlog, distribution, percentile
 
 
 def window():
@@ -32,7 +33,10 @@ def test_admin_sees_pipeline_and_staff_metrics(flow, tmp_path):
     assert body["help_requests"]["created"] == 1 and body["help_requests"]["unclaimed_in_window"] == 1
     assert body["help_requests"]["wait_to_claim_seconds"]["count"] == 0
     assert body["current_backlog"]["open_help_requests"] == 1
-    assert body["current_backlog"]["review_queue_total"] >= 1
+    # The student's appeal remains a help task. A readable AI result does not
+    # also create a mandatory teacher review for the same question.
+    queue = client.get("/v1/review-queue", headers=admin).json()
+    assert body["current_backlog"]["review_queue_total"] == len(queue["items"]) == 0
     assert body["percentile_method"] == "nearest_rank"
 
     other = client.get("/v1/admin/service-metrics", params={"campus_id": "campus_b", **window()}, headers=admin)
@@ -50,3 +54,17 @@ def test_percentiles_are_nearest_rank():
     assert percentile([5, 1, 3, 2, 4], 0.5) == 3
     assert percentile(list(range(1, 21)), 0.95) == 19
     assert distribution([None, 2.0, 1.0]) == {"count": 2, "p50": 1.0, "p95": 2.0, "max": 2.0}
+
+
+def test_backlog_includes_staff_layout_waiting_for_its_first_check():
+    entities = [
+        SimpleNamespace(id="case_1", kind="case", document={
+            "lifecycle": "active", "progress": "pending", "current_decision": None,
+            "current_attempt_id": "attempt_1", "question_id": "question_1", "check_ids": [],
+        }),
+        SimpleNamespace(id="attempt_1", kind="attempt", document={"recognition_status": "ready"}),
+        SimpleNamespace(id="question_1", kind="question", document={"source": "staff_layout"}),
+    ]
+    assert backlog(entities) == {
+        "open_help_requests": 0, "review_queue": {"awaiting_check": 1}, "review_queue_total": 1,
+    }
