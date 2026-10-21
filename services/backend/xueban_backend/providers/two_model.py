@@ -24,7 +24,7 @@ from .correction_pipeline import (
 from .responses import ResponsesClient
 from .readback_views import ZONES, readback_views
 from . import reconciliation, semantic_alignment, visual_readback, question_units, structure_navigation
-from . import partial_output
+from . import partial_output, answer_scope
 from .whole_page import (
     JUDGE_ITEM, JUDGE_PROMPT, PAGE_RULES, WholePageCorrectionPipeline, _answer_equal,
     _usable, canonical_label, normalize_literal_math, normalize_page_stem,
@@ -659,7 +659,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                     "alignment": {"pairs": [], "rejected": [], "unmatched_source_ids": []},
                     "metadata": metadata}
 
-    def _visual_gate(self, call, label, outcome, *, options_required=False, preflight=False):
+    def _visual_gate(self, call, label, outcome, *, options_required=False, preflight=False, scope_sources=()):
         def reject(code, cause, uncertainties=()):
             return {"resolved": False, "cause": cause, "rejection_code": code,
                     "uncertainties": _bounded_uncertainties(outcome.get("uncertainties", []), uncertainties),
@@ -667,6 +667,11 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                        if "observation_issue_review" in outcome else {})}
         if call["code"] != "ok":
             return reject("visual_service_unavailable", "reconciliation_unavailable")
+        # Defensive gate for a legacy read supplied by an external/older
+        # route: formatting cannot attest full per-position coverage. Current
+        # scope-only targets never dispatch this reader.
+        if any(answer_scope.scope_gap(source) for source in scope_sources):
+            return reject(answer_scope.REASON, "model_disagreement")
         observed = call["items"].get(label)
         if not observed:
             return reject("visual_target_missing", "model_disagreement")
@@ -751,8 +756,9 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         }[cause]
         if outcome.get("rejection_code") == "missing_context":
             summary = "本题缺少判定所需的阅读材料或其他上下文，已有原文已保留，暂不形成学习结论。"
-        elif outcome.get("rejection_code") in {"visual_observation_incomplete", "incomplete_question_unit"}:
-            summary = "本题的部分作答位置尚未完整记录，原图和已有笔迹已保留，待AI继续核对。"
+        elif (answer_scope.REASON in original_reasons or outcome.get("rejection_code") in
+              {"visual_observation_incomplete", "incomplete_question_unit", answer_scope.REASON}):
+            summary = answer_scope.SUMMARY
         row["uncertainties"] = _bounded_uncertainties(
             [summary], outcome["uncertainties"], row["uncertainties"])
         assessment["uncertainties"] = list(row["uncertainties"])
@@ -760,6 +766,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         observed = (visual_call or {}).get("items", {}).get(label)
         if (row["recognition_status"] != "ready"
                 and assessment["verdict"] == "unable_to_judge"
+                and answer_scope.REASON not in original_reasons
                 and observed and observed.get("answer_status") == "unclear"):
             printed_question_bound = (
                 bool(normalize_field_for_comparison(observed.get("answer_text")))
@@ -803,6 +810,9 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         elif review is None:
             outcome = {"resolved": False, "cause": "model_disagreement",
                        "rejection_code": "missing_review_item", "uncertainties": []}
+        elif answer_scope.review_blocked(primary, secondary):
+            outcome = {"resolved": False, "cause": "model_disagreement",
+                       "rejection_code": answer_scope.REASON, "uncertainties": []}
         else:
             observed = (visual_call or {}).get("items", {}).get(label)
             critical = ((visual_call or {}).get("corroboration") or {}).get("items", {}).get(label)
@@ -813,7 +823,8 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         if visual_call is not None:
             verification["visual_readback_model"] = visual_call["model"]
             outcome = self._visual_gate(visual_call, label, outcome,
-                                        options_required=bool(primary.get("options") or secondary.get("options")))
+                                        options_required=bool(primary.get("options") or secondary.get("options")),
+                                        scope_sources=(primary, secondary))
         elif outcome.get("requires_visual_support"):
             outcome = {"resolved": False, "cause": "model_disagreement",
                        "rejection_code": "independent_readback_required", "uncertainties": []}
@@ -929,7 +940,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         if not any(partial_output.available(call) for call in calls):
             raise ProviderError("multimodel_unavailable", attempts=metadata.attempts,
                                 latency_ms=metadata.latency_ms)
-        items, label_alignments, alignment_dispatches = [], [], []
+        items, label_alignments, alignment_dispatches, scope_dispatches = [], [], [], []
         alignment_jobs = []
         with ThreadPoolExecutor(max_workers=4, thread_name_prefix="xueban-alignment") as pool:
             for image in pages:
@@ -947,6 +958,22 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                 a = {label: item for label, item in first["items"].items() if label not in second["items"]}
                 b = {label: item for label, item in second["items"].items() if label not in first["items"]}
                 if self.reconciliation_client and semantic_alignment.can_align(a, b):
+                    if (all(answer_scope.scope_gap(source) for source in a.values())
+                            or all(answer_scope.scope_gap(source) for source in b.values())):
+                        # Every possible edge would still be blocked by the
+                        # same scope gate. Do not filter rows or send an
+                        # alignment whose results cannot be consumed.
+                        scope_dispatches.append({
+                            "asset_id": image.asset_id, "stage": "semantic_alignment",
+                            "protocol": answer_scope.PROTOCOL, "decision": "not_dispatched",
+                            "reason": "scope_resolution_unavailable", "automatic_recovery": False,
+                            "primary_count": len(a), "secondary_count": len(b),
+                            "candidate_edges": len(a) * len(b),
+                            "source_ids": [reconciliation.source_id(role, source)
+                                           for role, group in (("primary", a), ("secondary", b))
+                                           for source in group.values()],
+                        })
+                        continue
                     dispatch = semantic_alignment.alignment_dispatch(a, b, target_unit=self.target_unit)
                     alignment_dispatches.append({"asset_id": image.asset_id, **dispatch})
                     if dispatch["decision"] == "not_dispatched":
@@ -998,6 +1025,16 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                         # No claim that a malformed row is this same question:
                         # only that this page source did not fully complete.
                         reasons.extend(("provider_unavailable", "provider_item_invalid"))
+                if answer_scope.scope_gap(a) or answer_scope.scope_gap(b):
+                    reasons.append(answer_scope.REASON)
+                    # A dispatch decision is not a provider attempt or usage.
+                    scope_dispatches.append({
+                        "asset_id": image.asset_id, "label": raw["label"],
+                        "protocol": answer_scope.PROTOCOL, "decision": "not_dispatched",
+                        "reason": "scope_resolution_unavailable", "automatic_recovery": False,
+                        "source_ids": [reconciliation.source_id(role, source)
+                                       for role, source in (("primary", a), ("secondary", b)) if source],
+                    })
                 if not _usable(a) or not _usable(b):
                     reasons.append("uncertain_observation")
                 if any(reconciliation.has_unreadable_observation(row or {}) for row in (a, b)):
@@ -1032,6 +1069,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                 verdict = a["verdict"] if matched else "unable_to_judge"
                 if not matched:
                     uncertainties = _bounded_uncertainties([
+                        answer_scope.SUMMARY if answer_scope.REASON in reasons else
                         "有一路核对服务暂未完成，原图已保留；本题暂待核对，不计为答错或薄弱点。"
                         if status == "degraded" else
                         "两次独立识读或判题尚未一致，本题暂待核对，不计为答错或薄弱点。"], uncertainties)
@@ -1052,6 +1090,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                     "verdict": verdict,
                     "reason_code": "verification_conflict" if not matched else a["reason_code"] if verdict != "correct" else None,
                     "basis_summary": a["basis_summary"] if matched else
+                        answer_scope.SUMMARY if answer_scope.REASON in reasons else
                         "有一路核对服务暂未完成，原图已保留，暂不形成学习结论。" if status == "degraded" else
                         "原图的独立识读或判定存在疑点，暂不形成学习结论。",
                     "uncertainties": uncertainties, "verification": verification,
@@ -1115,6 +1154,11 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                         if (not a or not b or "independent_model_required" in reasons
                                 or "target_identity_conflict" in reasons):
                             continue
+                        # The legacy reader/review cannot certify missing slot
+                        # coverage. Do not spend a call whose result cannot be
+                        # safely consumed. Other conflicts keep their route.
+                        if answer_scope.REASON in reasons:
+                            continue
                         targets.append(reconciliation.review_target(label, a, b, reasons))
                         selected_rows.append(row)
                     if not targets:
@@ -1151,7 +1195,8 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                                 a, b = first["items"][label], second["items"][label]
                                 gate = self._visual_gate(call, label,
                                     {"resolved": False, "cause": "model_disagreement", "uncertainties": []},
-                                    options_required=bool(a.get("options") or b.get("options")), preflight=True)
+                                    options_required=bool(a.get("options") or b.get("options")), preflight=True,
+                                    scope_sources=(a, b))
                                 if gate.get("rejection_code"):
                                     # This is a readback-gate application attached
                                     # to the actual read call, not a fake review.
@@ -1221,6 +1266,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             "multimodel_audit": {"mode": "two_model", "independent_before_comparison": not structure_shared,
                                 "calls": audit, "label_alignments": label_alignments, "target_unit": self.target_unit,
                                 **({"alignment_dispatches": alignment_dispatches} if alignment_dispatches else {}),
+                                **({"scope_dispatches": scope_dispatches} if scope_dispatches else {}),
                                 **({"structure_navigation": {"protocol": structure_navigation.PROTOCOL,
                                     "enabled": True, "structure_shared": structure_shared, "content_shared": False}}
                                    if navigation_enabled else {}),

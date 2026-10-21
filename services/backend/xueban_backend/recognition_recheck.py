@@ -13,7 +13,7 @@ from .correction_core import (assets_for, conflict, create_task, event, expect,
     fingerprint, get_entity, input_versions, invalidate, iso, save_entity, update_case)
 from .correction_models import Entity, Task
 from .errors import Problem
-from .providers import question_units, reconciliation
+from .providers import question_units, answer_scope, reconciliation
 from .providers.whole_page import canonical_label, normalize_literal_math, normalize_page_stem
 
 KIND = "recognition_recheck"
@@ -219,6 +219,7 @@ def ready(item):
     return (item.get("recognition_status") == "ready" and item.get("answer_status") in {"present", "blank"}
             and not item.get("uncertainties") and not assessment.get("uncertainties")
             and not reconciliation.has_unreadable_observation(item)
+            and not answer_scope.scope_gap(item)
             and not question_units.unit_issues(item, question_units.source_unit(item))
             and assessment.get("verdict") in {"correct", "incorrect", "partially_correct", "unanswered"}
             and verification.get("mode") in {"two_model", "multimodel"}

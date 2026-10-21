@@ -643,7 +643,10 @@ class CorrectionWorker:
             reason = None
         if verdict not in {"correct", "incorrect", "partially_correct", "unanswered", "unable_to_judge"}:
             verdict, reason = "unable_to_judge", "verification_conflict"
-        if any(
+        if "target_scope_unverified" in verification.get("reason_codes", []):
+            verdict, reason = "unable_to_judge", "verification_conflict"
+            summary = "本题的作答范围尚未完整核对，原图和已有笔迹已保留，待AI继续核对。"
+        elif any(
                 code in {"provider_unavailable", "reconciliation_unavailable"}
                 for code in verification.get("reason_codes", [])):
             verdict, reason = "unable_to_judge", "verification_conflict"

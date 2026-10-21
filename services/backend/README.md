@@ -4,6 +4,8 @@
 
 纠错业务请求和返回按 `contracts/phase1/` 的 JSON Schema 校验；长期账号接口在服务端使用严格字段模型校验，见文末。未知题库 ID、知识点映射保留 `null`。已实现人工布局修订、学生数据删除、证据驱动的个人图谱、记忆和家长报告；当前交付范围及真实验收证据见 [持续交付记录](../../docs/CONTINUOUS_DELIVERY.md)。工程测试和合成流程通过不代表所有真实整页识读、在校使用或安卓硬件验收通过。
 
+纠错可靠性边界另见 [无效对齐预检](../../docs/RECOGNITION_ALIGNMENT_DISPATCH.md)、[逐项格式隔离](../../docs/RECOGNITION_PARTIAL_OUTPUT_PLAN.md) 和 [多空作答范围检查](../../docs/RECOGNITION_SCOPE_GUARD.md)。服务或范围未完成不得写成学生薄弱点。
+
 ## 启动
 
 Mac 联调可使用仓库根目录的学生网页启动器；账号通过下述受控 CLI 开通。早期安卓模拟器的 [本地运行指南](../../docs/MAC_LOCAL_RUN.md) 保留设备连接说明；已有长期账号不再接受配对登录。

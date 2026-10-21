@@ -15,7 +15,7 @@ from .correction_pipeline import (
     normalize_field_for_comparison,
 )
 from .whole_page import _answer_equal, _usable, normalize_literal_math, normalize_page_stem
-from . import review_evidence
+from . import review_evidence, answer_scope
 
 
 OUTPUT_TOKENS = 8192
@@ -497,6 +497,8 @@ def evaluate_review(review, primary, secondary, visual=None, critical_visual=Non
     source = {"primary": primary, "secondary": secondary, "visual": visual}.get(review["selected_source"])
     if not source:
         return reject("missing_source")
+    if answer_scope.review_blocked(primary, secondary, source):
+        return reject(answer_scope.REASON)
     if (not question_units.same_unit_identity(primary, secondary)
             or not question_units.same_unit_identity(primary, source)):
         return reject("target_unit_mismatch")
