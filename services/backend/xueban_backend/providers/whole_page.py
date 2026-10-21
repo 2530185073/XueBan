@@ -172,9 +172,49 @@ def normalize_page_stem(item):
     return value
 
 
+def _single_choice_wrapper_signature(item):
+    """Compare a single option's enclosing brackets, never rewrite the ink.
+
+    This optional presentation equivalence requires the complete same question
+    and option set on both sides. It is not an arithmetic/letter normalizer.
+    """
+    if (item.get("question_type") != "single_choice"
+            or item.get("answer_status") != "present"
+            or item.get("uncertainties") != []):
+        return None
+    answer, label = item.get("answer_text"), item.get("label")
+    if not isinstance(answer, str) or not isinstance(label, str) or not label.strip():
+        return None
+    match = re.fullmatch(r"\s*(?:([A-Z])|\(([A-Z])\)|（([A-Z])）)\s*", answer)
+    if match is None:
+        return None
+    selected = next(value for value in match.groups() if value is not None)
+    options = item.get("options")
+    if not isinstance(options, list) or not 2 <= len(options) <= 12:
+        return None
+    values = []
+    for option in options:
+        if (not isinstance(option, dict)
+                or not isinstance(option.get("label"), str)
+                or re.fullmatch(r"[A-Z]", option["label"]) is None
+                or not isinstance(option.get("text"), str) or not option["text"].strip()):
+            return None
+        values.append((option["label"], normalize_literal_math(option["text"])))
+    labels = [key for key, _ in values]
+    if len(set(labels)) != len(labels) or selected not in labels:
+        return None
+    stem = normalize_page_stem(item)
+    if not stem:
+        return None
+    return canonical_label(label), stem, tuple(sorted(values)), selected
+
+
 def _answer_equal(left, right):
-    return all(normalize_literal_math(left.get(key), key) == normalize_literal_math(right.get(key), key)
-               for key in ("answer_text", "answer_status"))
+    if all(normalize_literal_math(left.get(key), key) == normalize_literal_math(right.get(key), key)
+           for key in ("answer_text", "answer_status")):
+        return True
+    a, b = _single_choice_wrapper_signature(left), _single_choice_wrapper_signature(right)
+    return a is not None and a == b
 
 
 def _stem_compatible(left, right):
