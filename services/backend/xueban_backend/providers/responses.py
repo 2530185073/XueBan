@@ -182,7 +182,8 @@ class ResponsesClient(ArkClient):
             except (ValueError, TypeError, KeyError, AttributeError, RecursionError, ValidationError, Unresolvable) as error:
                 code = "invalid_output"
                 diagnostic = _schema_diagnostic(error) if isinstance(error, ValidationError) else OutputDiagnostic("responses", "invalid_structure")
-        attempt = Attempt(1, response.status, code, _elapsed(started), response.request_id, model, usage, diagnostic=diagnostic)
+        attempt = Attempt(1, response.status, code, _elapsed(started), response.request_id, model, usage,
+                          diagnostic=diagnostic, transport=response.progress)
         if code != "ok":
             raise ProviderError(code, attempts=(attempt,), latency_ms=_elapsed(started)) from None
         return CandidateResult(role, data, Metadata(cfg.model, model, response.request_id, response_id, usage,

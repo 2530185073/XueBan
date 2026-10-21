@@ -199,7 +199,8 @@ class BoundedChatClient(ArkClient):
                 diagnostic = OutputDiagnostic("validation", "total_timeout")
         else:
             diagnostic = OutputDiagnostic("transport", _TRANSPORT_RULES.get(code, "request_failed"))
-        attempt = Attempt(1, response.status, code, _elapsed(started), response.request_id, model, usage, diagnostic=diagnostic)
+        attempt = Attempt(1, response.status, code, _elapsed(started), response.request_id, model, usage,
+                          diagnostic=diagnostic, transport=response.progress)
         if code != "ok":
             if rejected_candidate is not None:
                 metadata = Metadata(cfg.model, model, response.request_id, response_id, usage,

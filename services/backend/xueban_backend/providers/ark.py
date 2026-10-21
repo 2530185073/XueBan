@@ -93,6 +93,58 @@ def _schema_diagnostic(error: ValidationError) -> OutputDiagnostic:
 
 
 @dataclass(frozen=True)
+class TransportDiagnostic:
+    """Content-free counters for this one HTTP read, not model/fee evidence.
+
+    Bytes/chunks are HTTPX-decoded body data, not raw wire measurements. Event
+    kinds are counted in fixed categories only; no provider-supplied strings,
+    text deltas, reasoning, headers, URLs, or credentials are retained here.
+    """
+    protocol: str = "bounded-http.progress.v1"
+    content_mode: str = "unknown"
+    phase: str = "waiting_headers"
+    headers_received_ms: int | None = None
+    first_body_byte_ms: int | None = None
+    last_body_byte_ms: int | None = None
+    first_sse_data_ms: int | None = None
+    first_output_text_ms: int | None = None
+    body_chunks_received: int = 0
+    decoded_body_bytes: int = 0
+    sse_comment_lines: int = 0
+    sse_data_lines: int = 0
+    sse_events: int = 0
+    output_text_events: int = 0
+    output_text_delta_chars: int = 0
+    reasoning_events: int = 0
+    other_events: int = 0
+    done_marker_seen: bool = False
+    terminal_event: str | None = None
+    terminal_accepted: bool = False
+    pending_buffer_bytes: int = 0
+    pending_data_lines: int = 0
+    elapsed_ms: int = 0
+
+
+    def __post_init__(self):
+        modes = {"unknown", "sse", "body"}
+        phases = {"waiting_headers", "headers_received", "reading_sse", "reading_body",
+                  "validating_sse_event", "terminal_received", "body_complete"}
+        if (self.protocol != "bounded-http.progress.v1" or self.content_mode not in modes
+                or self.phase not in phases or self.terminal_event not in {None, "completed", "incomplete", "failed"}
+                or type(self.done_marker_seen) is not bool or type(self.terminal_accepted) is not bool):
+            raise ValueError("invalid_transport_diagnostic")
+        static = {"protocol", "content_mode", "phase", "terminal_event", "done_marker_seen", "terminal_accepted"}
+        nullable = {"headers_received_ms", "first_body_byte_ms", "last_body_byte_ms",
+                    "first_sse_data_ms", "first_output_text_ms"}
+        for name, value in vars(self).items():
+            if name in static or name in nullable and value is None:
+                continue
+            if type(value) is not int or not 0 <= value <= 2**53 - 1:
+                raise ValueError("invalid_transport_diagnostic")
+
+
+
+@dataclass(frozen=True)
 class Attempt:
     number: int
     status_code: int | None
@@ -104,6 +156,7 @@ class Attempt:
     # Usage is not a bill. Even a timeout/retry may have incurred a charge.
     charge_status: Literal["unknown"] = "unknown"
     diagnostic: OutputDiagnostic | None = None
+    transport: TransportDiagnostic | None = None
 
 
 @dataclass(frozen=True)
