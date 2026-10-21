@@ -19,6 +19,7 @@ from .bounded_chat import BoundedChatClient
 from .host_call_journal import HostCallJournal
 from .read_checkpoint import ReadCheckpointSink
 from .position_arithmetic import check_position_arithmetic
+from .equality_chain import check_equality_chain, check_matched_equality_chain, check_reviewed_equality_chain
 from .matched_position_arithmetic import check_matched_positions
 from .correction_pipeline import (
     CorrectionPipeline, PipelineResult, QUESTION_OPTION, QUESTION_TYPES,
@@ -965,6 +966,20 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             position_check["audit"].update(previous_review_verdict=outcome["verdict"],
                                            applied_verdict=position_check["verdict"])
             outcome = {**outcome, **{key: value for key, value in position_check.items() if key != "audit"}}
+        chain_check = (check_equality_chain(outcome["source"], source_id=outcome["source_id"])
+                       if outcome["resolved"] and visual_call is not None
+                       and outcome.get("requires_visual_support") else None)
+        if (chain_check is None and outcome["resolved"]
+                and not outcome.get("requires_visual_support") and outcome["verdict"] == "correct"):
+            # Review dispatch already requires two complete successful reads.
+            # A local proof still needs both entire original chains to agree;
+            # absence of a required visual check is never treated as its success.
+            chain_check = check_reviewed_equality_chain(primary, secondary,
+                selected_source=outcome.get("resolved_source"), selected_source_id=outcome.get("source_id"))
+        if chain_check is not None:
+            chain_check["audit"].update(previous_review_verdict=outcome["verdict"],
+                                        applied_verdict=chain_check["verdict"])
+            outcome = {**outcome, **{key: value for key, value in chain_check.items() if key != "audit"}}
         call.setdefault("applications", []).append({
             "label": label, "original_reason_codes": original_reasons,
             "resolved": outcome["resolved"],
@@ -974,6 +989,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             "visual_readback_required": visual_call is not None,
             **({"evidence_binding": outcome["audit"]} if outcome.get("audit") else {}),
             **({"position_arithmetic": position_check["audit"]} if position_check is not None else {}),
+            **({"equality_chain_arithmetic": chain_check["audit"]} if chain_check is not None else {}),
             **({"observation_issue_review": outcome["observation_issue_review"]}
                if "observation_issue_review" in outcome else {}),
         })
@@ -1109,6 +1125,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                                 latency_ms=metadata.latency_ms)
         items, label_alignments, alignment_dispatches, scope_dispatches = [], [], [], []
         matched_position_checks = []
+        matched_chain_checks = []
         alignment_jobs = []
         with ThreadPoolExecutor(max_workers=4, thread_name_prefix="xueban-alignment") as pool:
             for image in pages:
@@ -1278,6 +1295,15 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                     assessment["reason_code"] = position_check["judgment_reason_code"]
                     matched_position_checks.append({"asset_id": image.asset_id, "label": raw["label"],
                                                     **deepcopy(position_check["audit"])})
+                chain_check = (check_matched_equality_chain(a, b)
+                               if matched and verdict == "correct"
+                               and first["code"] == second["code"] == "ok" else None)
+                if chain_check is not None:
+                    assessment.update({key: chain_check[key] for key in (
+                        "verdict", "basis_summary", "correct_answer", "correction_method")})
+                    assessment["reason_code"] = chain_check["judgment_reason_code"]
+                    matched_chain_checks.append({"asset_id": image.asset_id, "label": raw["label"],
+                                                 **deepcopy(chain_check["audit"])})
                 items.append({
                     "asset_id": image.asset_id, "label": raw["label"], "reading_order": len(items),
                     "subject": subject, "question_type": raw.get("question_type", "unknown"),
@@ -1450,6 +1476,8 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                                 **({"scope_dispatches": scope_dispatches} if scope_dispatches else {}),
                                 **({"matched_position_arithmetic": matched_position_checks}
                                    if matched_position_checks else {}),
+                                **({"matched_equality_chain_arithmetic": matched_chain_checks}
+                                   if matched_chain_checks else {}),
                                 **({"structure_navigation": {"protocol": structure_navigation.PROTOCOL,
                                     "enabled": True, "structure_shared": structure_shared, "content_shared": False}}
                                    if navigation_enabled else {}),
