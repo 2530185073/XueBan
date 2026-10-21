@@ -39,6 +39,7 @@ PYTHONPATH=services/backend services/backend/.venv/bin/python -m xueban_backend.
 | `PUBLIC_BASE_URL` | 如 `http://127.0.0.1:8000`；必须与安卓配置的 API origin 一致，无额外路径/查询；本机 HTTP 仅用于受控联调 |
 | `UPLOAD_TICKET_TTL_SECONDS` | 默认900秒，服务端限定30—1800秒；读取票据固定120秒 |
 | `WORKER_LEASE_SECONDS` | 默认300秒；进程中断后到期可恢复 |
+| `READ_CHECKPOINT_ENABLED` | 默认 `0`；API 与 Worker 同时设 `1` 时，普通整页任务可保存及读取未核实首路草稿；不是结果、学习证据或中断续跑许可，学生网页另需构建期开关 |
 | `CORS_ALLOWED_ORIGINS` | 精确来源列表，默认关闭；不允许 `*`，不启用 Cookie 凭证 |
 | `ARK_BASE_URL`、`ARK_API_KEY`、`ARK_MODEL`、`ARK_FALLBACK_MODEL` | 仅 Worker 使用；密钥不进入安卓/Web/响应/日志。兜底模型可选；配置 `gpt-6-astra` 时走 Responses API |
 
@@ -57,6 +58,7 @@ PYTHONPATH=services/backend services/backend/.venv/bin/python -m xueban_backend.
 | `POST /v1/homeworks/{id}/uploads` | 创建私有资产和上传票据 |
 | `GET /v1/assets/{id}`；`POST /v1/assets/{id}/upload-ticket`；`POST /v1/assets/{id}/complete`；`GET /v1/assets/{id}/access` | 状态、同资产续票、完整性确认、短时读取票据 |
 | `POST /v1/homeworks/{id}/recognitions`；`GET /v1/jobs/{id}` | 持久识别任务、真实执行状态 |
+| `GET /v1/jobs/{id}/recognition-progress` | 与任务相同授权；运行中的普通整页识读仅返回题号、题干、作答原文；终态隐藏草稿，旧任务不回填 |
 | `GET /v1/questions/{id}`；`GET /v1/attempts/{id}`；`GET /v1/cases/{id}` | 题目、原/新作答和纠错状态 |
 | `POST /v1/cases/{id}/checks`；`GET /v1/checks/{id}`；`GET /v1/decisions/{id}` | 发起检查、模型版本、候选依据 |
 | `POST /v1/cases/{id}/hints`；`GET /v1/hints/{id}`；`POST /v1/hints/{id}/views` | 分层提示、真实展示记录 |
