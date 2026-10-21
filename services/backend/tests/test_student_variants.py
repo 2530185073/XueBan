@@ -86,11 +86,19 @@ def start(flow, task):
         "purpose": "variant", "willing": True, "generation_job_id": task["job_id"], "count": 1})
 
 
+def solution_agreement():
+    return {"equivalent": True, "answer_a_steps_valid": True, "answer_b_steps_valid": True,
+            "reason": "两份必要步骤及结论都完整正确。"}
+
+
 def ready(flow, kind="fill_blank"):
     case = source(flow, kind)
     task = queue(flow, case)
     c = candidate(kind)
-    client = Client([c, verification(c)])
+    outputs = [c, verification(c)]
+    if c["question_kind"] == "solution":
+        outputs.append(solution_agreement())
+    client = Client(outputs)
     assert run(flow, task, client)["status"] == "ready"
     return case, task, client
 
@@ -257,7 +265,7 @@ def test_text_reference_equivalence_is_explicit_non_blind_third_stage(flow):
     c = candidate("calculation")
     v = verification(c)
     v["answer_values"] = ["七"]
-    client = Client([c, v, {"equivalent": True, "reason": "7和七表示同一数值。"}])
+    client = Client([c, v, {**solution_agreement(), "reason": "两份完整正确解法中的7和七表示同一数值。"}])
     assert run(flow, task, client)["status"] == "ready"
     assert "answer_a" not in client.calls[1]["text"] and "answer_a" in client.calls[2]["text"]
 
@@ -423,7 +431,7 @@ def test_actual_worker_completes_generation_then_semantic_assessment_without_api
     case = source(flow, "calculation")
     task = queue(flow, case)
     c = candidate("calculation")
-    client = Client([c, verification(c), {"result": "correct", "feedback": "等价运算正确。"}])
+    client = Client([c, verification(c), solution_agreement(), {"result": "correct", "feedback": "等价运算正确。"}])
     worker = LearningWorker(flow.database.engine, client=client)
     worker.scan = lambda *a, **kw: None
     assert worker.run_once() and get(flow, task)["status"] == "ready"
@@ -438,7 +446,7 @@ def test_actual_worker_completes_generation_then_semantic_assessment_without_api
     graded = flow.client.get(f"/v1/practice-assessments/{aid}").json()
     assert graded["status"] == "completed" and graded["result"] == "correct"
     assert "audit" not in graded and "verification_calls" not in graded
-    assert len(client.calls) == 3 and worker.run_once() is False
+    assert len(client.calls) == 4 and worker.run_once() is False
 
 
 def test_unlinked_knowledge_cannot_be_claimed_and_no_same_type_guess_without_structure(flow):

@@ -11,3 +11,19 @@
 
 .variant-page{animation:arrive .4s ease-out both}.variant-sync{display:flex;align-items:center;gap:10px;padding:13px 16px;margin:-9px 0 20px;border:1px solid #d8e1cf;border-radius:6px;background:#edf2e7;color:#52724f;font-size:12px}.variant-sync.ready{background:#f4f4e9;color:#728365;border-color:#e1e3d7}.variant-gate{padding:17px 20px;margin-bottom:20px;border-left:2px solid #c9ad70;background:#f7f1e2;color:#826c42}.variant-gate strong{font-size:13px}.variant-gate p{font-size:11px;margin-top:5px;color:#9a8862}.variant-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.variant-card{background:var(--paper);border:1px solid #dce1d1;border-radius:7px;padding:23px;min-width:0}.variant-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:13px}.variant-card-head h2{font-size:23px}.variant-card-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:20px 0 14px;padding:12px 13px;background:#f1f3e9;border:1px solid #e0e6d6;border-radius:4px}.variant-card-summary strong{font-size:12px;color:#a25c47}.variant-card-summary span{font-size:10px;color:#7e8d78;text-align:right}.variant-question-list{margin:0 0 12px;padding:0;list-style:none;display:flex;flex-direction:column;gap:10px}.variant-question-list li{display:flex;align-items:flex-start;gap:8px;font-size:12px;line-height:1.7;color:#596c5c}.variant-question-dot{width:6px;height:6px;margin-top:7px;border-radius:50%;background:#c48669;flex-shrink:0}.variant-card>.full{margin-top:17px}.variant-empty{min-height:320px;background:#fffdf6;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center;color:#829276;padding:45px 25px}.variant-empty h2{color:var(--ink);font-size:23px;margin:4px 0 11px}.variant-empty p{font-size:12px;color:var(--muted)}.variant-empty .ready-symbol{margin-bottom:14px}.variant-notice{margin-top:20px;text-align:center}
 @media(max-width:760px){.variant-grid{grid-template-columns:1fr}.variant-card{padding:19px}.variant-card-head h2{font-size:21px}.variant-card-summary{align-items:flex-start;flex-direction:column;gap:5px}.variant-card-summary span{text-align:left}}
+.account{min-width:0}.account-name{min-width:0}.account>.avatar,.account>.icon-button{flex-shrink:0}
+/* Keep every navigation and account control reachable in portrait tablet layouts. */
+@media(max-width:1100px){
+  .topbar,.topbar:has(nav){display:grid;grid-template-columns:auto minmax(0,1fr);height:auto;min-height:75px;padding:14px 24px 0;gap:10px 20px}
+  .topbar:not(:has(nav)){padding-bottom:14px}
+  .topbar nav{grid-column:1/-1;order:3;width:100%;height:48px;margin:0;gap:12px;justify-content:space-between;border-top:1px solid #e6e8dc}
+  .topbar nav button{flex:1;justify-content:center;min-width:0}
+  .topbar .account{justify-self:end;max-width:100%;margin-left:0}
+}
+@media(max-width:760px){
+  .topbar,.topbar:has(nav){padding-right:18px;padding-left:18px;column-gap:12px}
+  .topbar nav{gap:0}
+  .topbar nav button{gap:5px}
+  .topbar .account{gap:4px}
+  .topbar .account>.icon-button{width:32px;height:40px}
+}

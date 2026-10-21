@@ -49,11 +49,19 @@ GENERATE_PROMPT = """为托管班学生自愿生成恰好一道与 source_questi
 VERIFY_PROMPT = """你是独立验题员。只看到新题及目标类型，不会看到出题者答案。独立解答，不猜另一模型结论。
 检查条件自足、答案是否确定、所有选项/每一空/必要解题步骤。按要求题型和知识目标判断same_type。
 unique_answer对开放证明指结论明确且评分要求确定，允许等价合法解法。无法确定则标false。
-选择题返回完整正确选项；填空逐空返回；解答题给独立结论与步骤。不得输出学生掌握或教师批准。
+选择题返回完整正确选项；填空逐空返回；解答题给独立结论与完整必要步骤。
+解答题的数值终答可以标number，其他表述标text；这只是答案表示，不能改变题型或省略solution_text。
+不得输出学生掌握或教师批准。
 只返回schema字段，不依据不存在的图片或外部文章。"""
 EQUIVALENCE_PROMPT = """核对两份针对同一道题的答案/解法是否数学及语义等价、每空完整且条件一致。
 允许分数小数、代数等价式、不同正确解法；不因文字相似就相等。任一不完整或无法确定则equivalent=false。
+answer_kind的number/text差异本身不代表数学差异。
 这是答案一致性核验，不是独立盲解题，也不是教师审核。"""
+SOLUTION_REVIEW_PROMPT = EQUIVALENCE_PROMPT + """
+对于解答题，必须逐一核对两份solution_text中的运算、推导、所用条件和结论；分别报告answer_a_steps_valid和answer_b_steps_valid。
+不能仅因answer_values终答相同就判通过：错误中间步骤、无依据跳步、循环论证或遗漏题目要求时，对应steps_valid=false。
+允许不同但完整正确的必要解法，不要求题目没有要求的额外步骤。证据不足不能将steps_valid设true。
+equivalent只在两份完整解答均有效、终答与自身步骤一致且两份结论等价时为true。"""
 GRADE_PROMPT = """核对这道自愿练习的学生当前作答。允许等价表达、合理不同解法；检查每一空及题目实际要求的步骤。
 不要求未被题目要求的额外步骤。任何明确错误则incorrect；证据/服务不足则unscorable，不能猜错。
 不得依据参考答案替学生补内容。只给简短具体反馈，不评价能力或掌握程度。"""
@@ -87,6 +95,8 @@ CANDIDATE_SCHEMA = _obj({
 VERIFY_SCHEMA = _obj({"self_contained": {"type": "boolean"}, "unique_answer": {"type": "boolean"},
                       "same_type": {"type": "boolean"}, **ANSWER_SCHEMA, "reason": _text(600)})
 EQUIVALENCE_SCHEMA = _obj({"equivalent": {"type": "boolean"}, "reason": _text(600)})
+SOLUTION_REVIEW_SCHEMA = _obj({"equivalent": {"type": "boolean"},
+    "answer_a_steps_valid": {"type": "boolean"}, "answer_b_steps_valid": {"type": "boolean"}, "reason": _text(600)})
 GRADE_SCHEMA = _obj({"result": {"enum": ["correct", "incorrect", "unscorable"]}, "feedback": _text(600)})
 
 
@@ -280,7 +290,8 @@ def _valid_candidate(candidate, snapshot):
         expected_count = snapshot["source_question"].get("blank_count")
         return (bool(fields) and set(fields) == set(supplied_fields) and not candidate["answer_values"]
                 and (not expected_count or len(fields) == expected_count))
-    return bool(candidate["answer_values"]) and candidate["answer_kind"] == "text" and not fields and not supplied_fields
+    return (bool(candidate["answer_values"]) and candidate["answer_kind"] == "text" and not fields and not supplied_fields
+            and bool(candidate["solution_text"].strip()))
 
 
 def _valid_reference(candidate, verified):
@@ -293,7 +304,8 @@ def _valid_reference(candidate, verified):
         fields = [f["field_id"] for f in verified["field_answers"]]
         return (not verified["answer_values"] and len(fields) == len(set(fields))
                 and set(fields) == {f["id"] for f in candidate["answer_fields"]})
-    return verified["answer_kind"] == "text" and bool(verified["answer_values"]) and not verified["field_answers"]
+    return (verified["answer_kind"] in ("number", "text") and bool(verified["answer_values"])
+            and not verified["field_answers"] and bool(verified["solution_text"].strip()))
 
 
 def _answer_agreement(a, b):
@@ -314,6 +326,10 @@ def _answer_agreement(a, b):
 
 
 def _agrees(candidate, verified):
+    if candidate["question_kind"] == "solution":
+        # Identical terminal answers do not establish valid intermediate work.
+        # Every solution gets the separate, explicitly non-blind full-work check.
+        return None
     if candidate["question_kind"] != "fill_blank":
         return _answer_agreement(candidate, verified)
     a, b = ({x["field_id"]: x for x in row["field_answers"]} for row in (candidate, verified))
@@ -370,9 +386,13 @@ def generate_student_variant(session, job, worker):
             agrees = _agrees(candidate, verified) if reference_valid and all(
                 verified[k] for k in ("self_contained", "unique_answer", "same_type")) else False
             if agrees is None:
-                agrees = _call(client, "answer_equivalence", {"question": blind_input, "answer_a": {
+                is_solution = candidate["question_kind"] == "solution"
+                agreement = _call(client, "answer_equivalence", {"question": blind_input, "answer_a": {
                     k: candidate[k] for k in ANSWER_SCHEMA}, "answer_b": {k: verified[k] for k in ANSWER_SCHEMA}},
-                    EQUIVALENCE_SCHEMA, EQUIVALENCE_PROMPT, calls)["equivalent"]
+                    SOLUTION_REVIEW_SCHEMA if is_solution else EQUIVALENCE_SCHEMA,
+                    SOLUTION_REVIEW_PROMPT if is_solution else EQUIVALENCE_PROMPT, calls)
+                agrees = agreement["equivalent"] and (not is_solution or (
+                    agreement["answer_a_steps_valid"] and agreement["answer_b_steps_valid"]))
             if not agrees:
                 continue
             lock_source(session, row)
