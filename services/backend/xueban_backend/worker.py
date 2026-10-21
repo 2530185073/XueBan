@@ -33,6 +33,7 @@ from .layout_repair import apply_repair, recognize_replacements
 from .models import Homework, Student
 from .student_locks import lock_task_student, task_scope_current
 from .providers import ProviderError
+from .providers.host_call_journal import HostCallJournalSnapshot
 from . import recognition_recheck
 from .providers import question_units
 from .providers.correction_pipeline import CorrectionPipeline, PipelineImage, normalize_field_for_comparison
@@ -252,11 +253,17 @@ class CorrectionWorker:
             return False
         identifier, token = claim
         result = None
+        journal = None
         try:
             loaded = self._load(identifier, token)
             if loaded is None:
                 return True
             kind, context = loaded
+            if kind == "recognize_homework":
+                factory = getattr(self.pipeline, "create_host_call_journal", None)
+                journal = factory() if factory is not None else None
+                if journal is not None:
+                    context["host_call_journal"] = journal
             with self._keep_lease(identifier, token):
                 if kind in {"recognize_homework", "recognize_attempt"}:
                     result = self.pipeline.recognize(**context)
@@ -277,15 +284,15 @@ class CorrectionWorker:
                 else:
                     raise ProviderError("invalid_input")
             # Stop heartbeat writes before committing the result transaction.
-            self.finish(identifier, token, result=result)
+            self.finish(identifier, token, result=result, host_call_journal=journal.snapshot() if journal else None)
         except ProviderError as error:
-            self.finish(identifier, token, error=error, result=result)
+            self.finish(identifier, token, error=error, result=result, host_call_journal=journal.snapshot() if journal else None)
         except Problem as error:
             failure = ProviderError("invalid_output") if result is not None and error.code == "service_unavailable" else error
-            self.finish(identifier, token, error=failure, result=result)
+            self.finish(identifier, token, error=failure, result=result, host_call_journal=journal.snapshot() if journal else None)
         except Exception:
             # Never log an exception body: upstream errors can include student data.
-            self.finish(identifier, token, error=ProviderError("worker_failure"), result=result)
+            self.finish(identifier, token, error=ProviderError("worker_failure"), result=result, host_call_journal=journal.snapshot() if journal else None)
         return True
 
     def _dispatch_original_recheck(self, identifier, token):
@@ -348,7 +355,7 @@ class CorrectionWorker:
         session.commit()
         return False
 
-    def finish(self, identifier, token, *, result=None, error=None):
+    def finish(self, identifier, token, *, result=None, error=None, host_call_journal=None):
         with Session(self.engine) as session:
             scope = lock_task_student(session, identifier)
             task = session.scalar(select(Task).where(Task.id == identifier).with_for_update()
@@ -365,6 +372,10 @@ class CorrectionWorker:
                 error = Problem(409, "conflict", "processing_blocked", "处理已停止。")
             ledger = deepcopy(task.audit or {"executions": []})
             execution = ledger["executions"][-1]
+            # Only this execution's host collector is accepted. Candidate keys
+            # and historical audit documents can never manufacture a journal.
+            if task.kind == "recognize_homework" and type(host_call_journal) is HostCallJournalSnapshot:
+                execution["host_call_journal"] = host_call_journal.document()
             if result is not None:
                 if result.status != "candidate":
                     error = ProviderError("invalid_output")

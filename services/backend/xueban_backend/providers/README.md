@@ -192,3 +192,17 @@ with EmbeddingClient(EmbeddingSettings(
 ## 语义对齐派发预检
 
 两路未配对来源仅在所有跨路候选均被既有印刷条件/完整选项规则排除时跳过对齐请求。任一兼容边存在就发送完整原输入；异常保留原路径。`multimodel_audit.alignment_dispatches` 只记调度原因、数量及来源哈希，没有虚构调用或用量。兼容只是必要条件，不能代替模型对齐和后续核验。当前 provisional/split 仅审计；未来消费这些结果时须重新评估预检。见 [证据与边界](../../../../docs/RECOGNITION_ALIGNMENT_DISPATCH.md)。
+
+## 可选主机调用记录
+
+`HOST_CALL_JOURNAL_ENABLED=1` 为 `two_model` 的首次整页任务启用主机侧记录，默认 `0`；
+只接受 `0` 或 `1`。它不新增请求、不改变模型输入和纠错结论，也不启用逐空恢复。
+记录来自本次执行的 `generate` 调用边界，包含阶段、图片 ID、目标和输入摘要、起止
+时间及对应 `Metadata`，单独保存在该次 Task execution 的 `host_call_journal`。
+不从模型候选字段提取记录，不保存图片 base64、提示正文或模型密钥。
+
+一次 `generate` 调用不一定发送一次 HTTP：返回的 attempts 单独统计；没有尝试元数据
+或调用中断时用量仍未知。该记录仅在内存收集、结束时保存，进程崩溃可能丢失，
+不能证明请求字节、费用、完整派发历史或图像真值。字段始终为
+`wire_verified=false`、`scope_admission_eligible=false`，不能授权自动重派或收费恢复。
+R1、订正识读、check/hint 和旧任务不补造此记录。生产启用前仍须单独验证实际运行配置。

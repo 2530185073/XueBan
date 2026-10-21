@@ -16,6 +16,7 @@ import time
 
 from .ark import ArkSettings, Metadata, MODEL_ID, OutputDiagnostic, ProviderError
 from .bounded_chat import BoundedChatClient
+from .host_call_journal import HostCallJournal
 from .correction_pipeline import (
     CorrectionPipeline, PipelineResult, QUESTION_OPTION, QUESTION_TYPES,
     _contains_credential, _object, _strip_field_label, _text, _validate,
@@ -251,7 +252,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
 
     def __init__(self, client, review_client, *, reconciliation_client=None, secondary_thinking=True,
                  visual_client=None, judgment_client=None, target_unit="answer_slot",
-                 structure_navigation_enabled=False, partial_output_enabled=False):
+                 structure_navigation_enabled=False, partial_output_enabled=False, host_call_journal_enabled=False):
         self.target_unit = question_units.validate_unit(target_unit)
         # Validate replacement anchors before any provider request, including
         # when this instance normally handles only legacy saved cases.
@@ -260,7 +261,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             question_units.visual_prompt(visual_readback.PROMPT, target_unit)
             question_units.review_prompt(reconciliation.PROMPT, target_unit)
         if (type(secondary_thinking) is not bool or type(structure_navigation_enabled) is not bool
-                or type(partial_output_enabled) is not bool):
+                or type(partial_output_enabled) is not bool or type(host_call_journal_enabled) is not bool):
             raise ProviderError("invalid_configuration")
         super().__init__(client)
         self.review_client = review_client
@@ -270,6 +271,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         self.judgment_client = judgment_client
         self.structure_navigation_enabled = structure_navigation_enabled
         self.partial_output_enabled = partial_output_enabled
+        self.host_call_journal_enabled = host_call_journal_enabled
 
     @classmethod
     def from_env(cls, environ=None):
@@ -285,12 +287,14 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         visual_enabled = env.get("VISUAL_REVIEW_ENABLED", "1")
         navigation_enabled = env.get("STRUCTURE_NAVIGATION_ENABLED", "0")
         partial_enabled = env.get("PARTIAL_PAGE_OUTPUT_ENABLED", "0")
+        journal_enabled = env.get("HOST_CALL_JOURNAL_ENABLED", "0")
         visual_model = env.get("VISUAL_REVIEW_MODEL", "gpt-6-astra")
         if (review_api not in ("chat", "responses") or review_thinking not in ("enabled", "disabled")
                 or reconciliation_provider not in ("primary", "secondary")
                 or visual_enabled not in ("0", "1")
                 or navigation_enabled not in ("0", "1")
                 or partial_enabled not in ("0", "1")
+                or journal_enabled not in ("0", "1")
                 or not isinstance(visual_model, str) or not _SAFE_TOKEN.fullmatch(visual_model)):
             raise ProviderError("invalid_configuration")
         secondary_thinking = review_thinking == "enabled"
@@ -322,7 +326,8 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                        secondary_thinking=secondary_thinking, visual_client=visual_client,
                        judgment_client=visual_client, target_unit=target_unit,
                        structure_navigation_enabled=navigation_enabled == "1",
-                       partial_output_enabled=partial_enabled == "1")
+                       partial_output_enabled=partial_enabled == "1",
+                       host_call_journal_enabled=journal_enabled == "1")
         except Exception:
             closed = set()
             for client in created:
@@ -361,6 +366,41 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         latency = error.latency_ms or (result.metadata.latency_ms if result is not None else 0)
         return code, Metadata(client.settings.model, None, None, None, None, latency, attempts)
 
+    def create_host_call_journal(self):
+        return HostCallJournal() if self.host_call_journal_enabled else None
+
+    def _generate_with_journal(self, client, image, stage, *, target_labels=None, **kwargs):
+        journal = getattr(self, "_host_call_journal", None)
+        if journal is None:
+            return client.generate(**kwargs)
+        secrets = self._provider_secrets(client)
+        ticket = journal.begin(stage=stage, asset_id=image.asset_id, role=kwargs["role"],
+            requested_model=client.settings.model, max_output_tokens=kwargs["max_tokens"],
+            target_labels=target_labels, text=kwargs["text"], image_count=len(kwargs.get("images", ())),
+            secrets=secrets)
+        try:
+            result = client.generate(**kwargs)
+        except ProviderError as error:
+            _, metadata = self._failure_metadata(error, None, client)
+            journal.finish(ticket, outcome="failed", metadata=metadata, secrets=secrets)
+            raise
+        except BaseException:
+            # Cancellation and unknown failures have no invented usage or proof
+            # that the adapter never sent a request.
+            journal.finish(ticket, outcome="interrupted", metadata=None, secrets=secrets)
+            raise
+        else:
+            echoed = any(_contains_credential(result.data, secret)
+                         or _contains_credential(asdict(result.metadata), secret) for secret in secrets)
+            metadata = result.metadata
+            if echoed:
+                error = ProviderError("provider_credential_echo", attempts=tuple(
+                    replace(a, code="provider_credential_echo", request_id=None, model=None)
+                    for a in metadata.attempts), latency_ms=metadata.latency_ms)
+                _, metadata = self._failure_metadata(error, None, client)
+            journal.finish(ticket, outcome="failed" if echoed else "returned", metadata=metadata, secrets=secrets)
+            return result
+
     def _read_and_judge(self, client, image, stage, *, navigation=None):
         result = None
         partition = None
@@ -376,7 +416,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             secrets = self._provider_secrets(client)
             with partial_output.capture_page_failures(isolate):
                 try:
-                    result = client.generate(
+                    result = self._generate_with_journal(client, image, stage,
                         role="check", images=(image.data_url,), instructions=prompt,
                         text=json.dumps({"asset_id": image.asset_id, "task_input": task_input}, ensure_ascii=False),
                         output_schema=schema, max_tokens=OUTPUT_TOKENS,
@@ -510,7 +550,8 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                     "开放式个人介绍或自由作答可以没有唯一事实答案，但仍须逐空核验所在句的语法、"
                     "语义类别和上下文关系；不能因为内容由学生自定就把任意类别的填答判为正确。"
                 )
-            result = client.generate(
+            result = self._generate_with_journal(client, image, stage,
+                target_labels=[target["label"] for target in targets],
                 role="check", images=(image.data_url,), instructions=prompt,
                 text=json.dumps({"asset_id": image.asset_id, "task_input": {"items": targets}}, ensure_ascii=False),
                 output_schema=schema, max_tokens=reconciliation.OUTPUT_TOKENS, thinking=False,
@@ -590,7 +631,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         if views:
             task_input["image_views"] = views
         try:
-            result = client.generate(
+            result = self._generate_with_journal(client, image, stage, target_labels=list(labels),
                 role="recognition", images=images, instructions=prompt,
                 text=json.dumps({"asset_id": image.asset_id, "task_input": task_input}, ensure_ascii=False),
                 output_schema=schema, max_tokens=visual_readback.OUTPUT_TOKENS, thinking=True,
@@ -628,7 +669,8 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
     def _align_page(self, image, primary, secondary):
         client, result = self.reconciliation_client, None
         try:
-            result = client.generate(
+            result = self._generate_with_journal(client, image, "semantic_alignment",
+                target_labels={"primary": list(primary), "secondary": list(secondary)},
                 role="recognition", images=(image.data_url,),
                 instructions=question_units.alignment_prompt(semantic_alignment.PROMPT, self.target_unit),
                 text=json.dumps({"asset_id": image.asset_id,
@@ -922,7 +964,26 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         calls = [by_page[image.asset_id][stage] for image in pages for stage in ("primary", "secondary")]
         return calls, by_page
 
-    def recognize(self, *, images, target_unit=None):
+    def recognize(self, *, images, target_unit=None, host_call_journal=None):
+        if host_call_journal is None:
+            return self._recognize(images=images, target_unit=target_unit)
+        if (not self.host_call_journal_enabled or type(host_call_journal) is not HostCallJournal
+                or getattr(self, "_original_recheck_target", None) is not None):
+            raise ProviderError("invalid_configuration")
+        # Thread pools receive this invocation's shallow copy explicitly. No
+        # collector is ever written to the shared pipeline or provider clients.
+        local = copy(self)
+        local._host_call_journal = host_call_journal
+        host_call_journal.start()
+        try:
+            result = local._recognize(images=images, target_unit=target_unit)
+        except BaseException:
+            host_call_journal.close("failed")
+            raise
+        host_call_journal.close("returned")
+        return replace(result, host_call_journal=host_call_journal.snapshot())
+
+    def _recognize(self, *, images, target_unit=None):
         if target_unit is not None and target_unit != self.target_unit:
             # Keep all current routing clients (including judgment_client),
             # without mutating a shared worker instance or closing clients.

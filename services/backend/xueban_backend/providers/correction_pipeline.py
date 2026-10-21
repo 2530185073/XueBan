@@ -177,6 +177,8 @@ class PipelineResult:
     metadata: Metadata
     prompt_version: str = PROMPT_VERSION
     status: str = field(default="candidate", init=False)
+    # Host-owned side channel; never read from the provider candidate document.
+    host_call_journal: object | None = field(default=None, repr=False)
 
 
 class _SemanticOutputError(ValueError):
