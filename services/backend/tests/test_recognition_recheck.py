@@ -163,6 +163,20 @@ def test_old_inflight_check_preserves_paid_audit_without_overwriting_recovery(re
     assert current_case(flow, case["id"])["current_decision"]["verdict"] == "correct"
 
 
+def test_success_on_last_budget_slot_reports_resolved_not_exhausted(recovery_flow):
+    flow, case, control = recovery_flow
+    control.error = ProviderError("upstream_unavailable")
+    assert recheck(flow, case).status_code == 202
+    assert flow.worker.run_once()
+    control.error = None
+    assert recheck(flow, current_case(flow, case["id"])).status_code == 202
+    assert flow.worker.run_once()
+    status = recovery(flow, current_case(flow, case["id"]))
+    assert status["last_outcome"] == "applied" and status["used"] == 2
+    assert status["remaining"] == 0 and not status["eligible"]
+    assert status["blocked_reason"] == "already_resolved"
+
+
 def test_dispatched_expired_lease_is_not_reclaimed_for_another_paid_call(recovery_flow):
     flow, case, control = recovery_flow
     accepted = recheck(flow, case).json()
@@ -462,3 +476,84 @@ def test_recovery_number_veto_preserves_format_missing_and_parent_boundaries(
     assert (item is candidate) == accepted
     assert reason == (None if accepted else "target_unconfirmed")
     assert (question.document, question.annotations, candidate) == before
+
+
+@pytest.mark.parametrize("old_stem,new_stem,accepted", [
+    ("Compute: (-24)/6", "计算：(-24)/6", True),
+    ("Evaluate the expression: 3+2", "求值：3+2", True),
+    ("Calculate: 7/2", "7/2", True),
+    ("求值：x+2", "Compute: x+2", True),
+    ("Compute: (-24)/6", "计算：24/6", False),
+    ("Compute: (-24)/6", "计算：(-24)/8", False),
+    ("Compute: 2 1/2", "计算：21/2", False),
+    ("Compute: (-3)^2", "计算：-3^2", False),
+    ("Compute: x+2", "计算：y+2", False),
+    ("Compute: (-24)/6", "Do not Compute: (-24)/6", False),
+    ("Calculate(x)+3", "Compute(x)+3", False),
+    ('"Calculate": (-24)/6', "计算：(-24)/6", False),
+    ("甲比乙多4，求甲。", "甲比乙少4，求甲。", False),
+])
+def test_recovery_instruction_identity_retains_entire_body_and_archived_wording(old_stem, new_stem, accepted):
+    from xueban_backend.recognition_recheck import matching_item, ready
+    question = SimpleNamespace(document={"stem_text": old_stem, "options": [], "blank_count": 0},
+                               annotations={"label": "1"})
+    attempt = SimpleNamespace(document={"asset_ids": ["original-photo"]})
+    candidate = {"stem_text": new_stem, "options": [], "label": "1", "asset_id": "original-photo"}
+    before = deepcopy((question.document, question.annotations, candidate))
+    item, reason = matching_item(question, attempt, [candidate], [question])
+    assert (item is candidate) == accepted
+    assert reason == (None if accepted else "target_unconfirmed")
+    assert not ready(candidate)  # Identity matching alone never approves a reading/judgment.
+    assert (question.document, question.annotations, candidate) == before
+
+
+def test_recovery_instruction_translation_applies_new_reading_without_translating_saved_question(recovery_flow):
+    flow, case, control = recovery_flow
+    with Session(flow.database.engine) as session:
+        question = session.get(Entity, case["question_id"])
+        question.document = {**question.document, "stem_text": "Compute: (-24)/6"}
+        session.commit()
+    old = attempt_for(flow, case)
+    control.change = {"stem_text": "计算：(-24)/6", "answer_text": "(-24)/6=4",
+                      "assessment": {**assessment("incorrect"), "correct_answer": "-4",
+                                     "correction_method": "复核符号。"}}
+    assert recheck(flow, case).status_code == 202
+    assert flow.worker.run_once()
+    current = current_case(flow, case["id"])
+    new = attempt_for(flow, current)
+    assert recovery(flow, current)["last_outcome"] == "applied"
+    assert new["id"] == old["id"] and new["recognition_revision"] == old["recognition_revision"] + 1
+    assert new["answer_text"] == "(-24)/6=4" and current["current_decision"]["verdict"] == "incorrect"
+    saved_question = flow.client.get(f"/v1/questions/{case['question_id']}").json()["record"]
+    assert saved_question["stem_text"] == "Compute: (-24)/6"
+
+
+@pytest.mark.parametrize("change", [
+    {"label": "2"}, {"visible_locator": {"printed_label": "2", "page_zone": "top"}},
+    {"options": [{"label": "A", "text": "different option"}]}, {"asset_id": "other-photo"},
+    {"blank_count": 2}, {"target_unit": "answer_slot"}, {"unit_complete": False},
+])
+def test_translated_instruction_does_not_relax_number_asset_options_or_unit_gate(change):
+    from xueban_backend.recognition_recheck import matching_item
+    context = {"section": "1", "row": None, "column": None, "anchor": "(-24)/6"}
+    question = SimpleNamespace(document={"stem_text": "Compute: (-24)/6", "options": [], "blank_count": 1},
+                               annotations={"label": "1", "target_unit": "question", "target_context": context,
+                                            "unit_complete": True})
+    attempt = SimpleNamespace(document={"asset_ids": ["original-photo"]})
+    candidate = {"stem_text": "计算：(-24)/6", "options": [], "label": "1", "asset_id": "original-photo",
+                 "target_unit": "question", "target_context": context, "unit_complete": True, "blank_count": 1,
+                 **change}
+    item, reason = matching_item(question, attempt, [candidate], [question])
+    assert item is None and reason in {"target_unconfirmed", "scope_change_required"}
+
+
+@pytest.mark.parametrize("candidate_label,accepted", [("1", True), ("2", False), (None, False)])
+def test_instruction_equivalent_duplicate_questions_still_require_actual_matching_number(candidate_label, accepted):
+    from xueban_backend.recognition_recheck import matching_item
+    first = SimpleNamespace(document={"stem_text": "Compute: (-24)/6", "options": []}, annotations={"label": "1"})
+    other = SimpleNamespace(document={"stem_text": "求值：(-24)/6", "options": []}, annotations={"label": "2"})
+    attempt = SimpleNamespace(document={"asset_ids": ["original-photo"]})
+    candidate = {"stem_text": "计算：(-24)/6", "options": [], "label": candidate_label, "asset_id": "original-photo"}
+    item, reason = matching_item(first, attempt, [candidate], [first, other])
+    assert (item is candidate) == accepted
+    assert reason == (None if accepted else "target_unconfirmed")

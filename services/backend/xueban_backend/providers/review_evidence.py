@@ -7,6 +7,8 @@ that the selected visual source agrees with itself. These checks reject unsafe
 claims; they are not a proof that a model read the photograph correctly.
 """
 from copy import deepcopy
+import ast
+import re
 
 from .correction_pipeline import _object, _text
 from . import question_units
@@ -111,6 +113,48 @@ def _whole_printed_match(a, b):
             and _options(a) == _options(b) and question_units.same_unit_identity(a, b))
 
 
+def _calculation_heading_link(original, selected):
+    """Bind an unchanged numeric calculation when the new read adds its heading.
+
+    This is directional identity evidence, not condition/answer equivalence:
+    the selected observation must retain the newly visible method instruction.
+    Only a complete arithmetic expression before a terminal answer position is
+    compared. No values, operators, grouping, restrictions or old headings are
+    dropped, and the independently observed page area must also agree.
+    """
+    before, after = normalize_page_stem(original), normalize_page_stem(selected)
+    heading = re.fullmatch(r"(计算|列竖式计算|用竖式计算)[:：](.+)", after)
+    if not heading or before != heading[2] or not before.endswith("="):
+        return None
+    expression = before[:-1]
+    # Parse for syntax only. Equality above compares the complete written body;
+    # never compare evaluated answers or ASTs to establish physical identity.
+    if not re.fullmatch(r"[0-9.()+\-*/÷×\s]+", expression):
+        return None
+    try:
+        tree = ast.parse(expression.replace("÷", "/").replace("×", "*"), mode="eval")
+    except (SyntaxError, ValueError, RecursionError):
+        return None
+    allowed = (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Constant,
+               ast.Add, ast.Sub, ast.Mult, ast.Div, ast.UAdd, ast.USub)
+    nodes = list(ast.walk(tree))
+    if (not any(isinstance(node, ast.BinOp) for node in nodes)
+            or any(not isinstance(node, allowed) for node in nodes)):
+        return None
+    a, b = original.get("visible_locator"), selected.get("visible_locator")
+    if (not isinstance(a, dict) or not isinstance(b, dict)
+            or a.get("page_zone") not in question_units.VISIBLE_ZONES
+            or a.get("page_zone") != b.get("page_zone")
+            or not question_units.same_unit_identity(original, selected)
+            or _options(original) != _options(selected)):
+        return None
+    if (original.get("source_asset_id") and selected.get("source_asset_id")
+            and original["source_asset_id"] != selected["source_asset_id"]):
+        return None
+    return {"printed_expression": before, "retained_selected_heading": heading[1],
+            "original_locator": deepcopy(a), "selected_locator": deepcopy(b)}
+
+
 def _bound_quote(quote, source):
     stem = source.get("stem_text") or ""
     # A literal source quote, not a rewritten question or student-answer quote.
@@ -163,6 +207,13 @@ def target_link(review, primary, secondary, selected, source_id):
                     "original_source_id": source_id(role, original), "selected_source_id": selected_id,
                     "original_observation": {"stem_text": original.get("stem_text"), "options": deepcopy(original.get("options", []))},
                     "selected_observation": {"stem_text": selected.get("stem_text"), "options": deepcopy(selected.get("options", []))}}
+        calculation = _calculation_heading_link(original, selected)
+        if calculation:
+            return {"clear": True, "basis": "full_original_calculation_with_retained_heading",
+                    "original_source_id": source_id(role, original), "selected_source_id": selected_id,
+                    "original_observation": {"stem_text": original.get("stem_text"), "options": deepcopy(original.get("options", []))},
+                    "selected_observation": {"stem_text": selected.get("stem_text"), "options": deepcopy(selected.get("options", []))},
+                    **calculation}
     identity = review.get("target_identity")
     def fail(code):
         return {"clear": False, "rejection_code": code}

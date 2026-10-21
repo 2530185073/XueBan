@@ -71,8 +71,6 @@ def status(session, case):
         reason = "inactive_case"
     elif active:
         reason = "active_recovery"
-    elif used >= LIMIT:
-        reason = "budget_exhausted"
     elif decision.get("origin") == "staff" and decision.get("validity") == "confirmed":
         reason = "staff_confirmed"
     elif attempt.document["recognition_status"] == "pending":
@@ -85,6 +83,8 @@ def status(session, case):
           and not decision.get("uncertainties") and not attempt.document.get("recognition_uncertainties")
           and not question.document.get("recognition_uncertainties")):
         reason = "already_resolved"
+    elif used >= LIMIT:
+        reason = "budget_exhausted"
     return {"case_id": case.id, "attempt_id": attempt.id, "limit": LIMIT,
             "used": min(LIMIT, used), "remaining": max(0, LIMIT - used),
             "active_job_id": active.id if active else None,
@@ -188,7 +188,13 @@ def matching_item(question, attempt, candidates, other_questions=()):
     stem = normalize_page_stem(original)
     if not stem or reconciliation.has_unreadable_marker(stem):
         return None, "target_unconfirmed"
-    same_print = [item for item in candidates if normalize_page_stem(item) == stem
+    def same_printed_target(item):
+        observed = normalize_page_stem(item)
+        # Identity only: a translated evaluation heading may enclose the
+        # exact same complete arithmetic body. Keep both archived wordings;
+        # this does not approve the new reading or verdict (ready still does).
+        return observed == stem or reconciliation.instruction_presentation_same(stem, observed)
+    same_print = [item for item in candidates if same_printed_target(item)
                   and _options(item) == _options(original)
                   and item.get("asset_id") in attempt.document["asset_ids"]
                   and not _target_number_conflict(original, item)]
@@ -198,7 +204,7 @@ def matching_item(question, attempt, candidates, other_questions=()):
         return None, "scope_change_required"
     # Identical printed targets on the same photograph require the actual
     # existing subquestion label too; array order and equal answers do not bind.
-    shared = sum(normalize_page_stem(target_document(row)) == stem for row in other_questions) > 1
+    shared = sum(same_printed_target(target_document(row)) for row in other_questions) > 1
     if shared:
         label = canonical_label(original.get("label") or "")
         matches = [item for item in matches if label and canonical_label(item.get("label") or "") == label]

@@ -30,7 +30,7 @@ from .whole_page import (
 )
 
 
-PROMPT_VERSION = "photo-correction.two-model.v5.1"
+PROMPT_VERSION = "photo-correction.two-model.v5.2"
 OUTPUT_TOKENS = 24576
 REVIEW_BATCH_ITEMS = 6
 REVIEW_BATCH_TEXT = 6000
@@ -161,15 +161,17 @@ def _same_observation(first, second):
 def _needs_condition_readback(first, second):
     """Start an eventually necessary blind read with the first review.
 
-    Only an enclosing heading with unchanged symbols can wait for the
-    presentation reviewer. This routes work; it never accepts a judgment.
+    An enclosing heading or equivalent arithmetic instruction can wait for
+    the presentation reviewer. This routes work; it never accepts a judgment.
     """
     a, b = normalize_page_stem(first), normalize_page_stem(second)
     if a == b:
         return False
-    if reconciliation._critical_literals(a) != reconciliation._critical_literals(b):
+    if reconciliation._condition_literals(a) != reconciliation._condition_literals(b):
         return True
-    return not (a and b and (a in b or b in a))
+    if reconciliation.instruction_presentation_same(a, b):
+        return False
+    return not reconciliation.enclosing_presentation_same(a, b)
 
 
 def _bounded_uncertainties(*groups):
@@ -665,7 +667,13 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             if not _answer_equal(observed, selected):
                 return reject("independent_answer_disagreement", "model_disagreement",
                               ["独立原图核读与复核所选作答未能对应，暂不形成学习结论。"])
-            if not _same_observation(observed, selected):
+            reviewed_instruction = (
+                outcome.get("reviewed_visual_source_id") == reconciliation.source_id("visual", observed)
+                and question_units.same_unit_identity(observed, selected)
+                and _options_key(observed) == _options_key(selected)
+                and reconciliation.instruction_presentation_same(
+                    normalize_page_stem(observed), normalize_page_stem(selected)))
+            if not (_same_observation(observed, selected) or reviewed_instruction):
                 # Natural-language paraphrases may be valid, but only a
                 # subsequent review that actually sees this independent read
                 # can judge them. Never silently drop printed conditions.
@@ -1003,8 +1011,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                                      if set(target["reason_codes"]) & {
                                          "answer_disagreement", "uncertain_observation",
                                          "options_disagreement", "critical_print_verification"}
-                                     or _needs_condition_readback(target["primary"], target["secondary"])
-                                     or getattr(self, "_original_recheck_target", None)}
+                                     or _needs_condition_readback(target["primary"], target["secondary"])}
                     if self.visual_client is None:
                         visual_labels = set()  # Existing disabled-reader behavior stays bounded.
                     visual_rows = [row for row in selected_rows

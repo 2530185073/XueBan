@@ -44,6 +44,45 @@ def make_flow(first=None, second=None, observed=None, reviewer=None, judgment=No
         visual_client=FakeClient("reader", observed), judgment_client=judgment, target_unit=unit)
 
 
+def test_original_recheck_does_not_force_blind_read_for_reviewed_instruction_translation():
+    p = correct(stem_text="Compute: (-24)/6", answer_text="(-24)/6=4", verdict="incorrect", correct_answer="-4")
+    s = correct(stem_text="计算：(-24)/6", answer_text="(-24) / 6 = 4", verdict="incorrect", correct_answer="-4")
+    def reconcile(request):
+        target = targets(request)[0]
+        assert "visual" not in target
+        return {"items": [review(source=target["primary"], verdict="incorrect", correct_answer="-4",
+                                 correction_method="检查除法的符号。") ]}
+    strong = FakeClient("strong", ProviderError("must_not_call"))
+    flow = make_flow([p], [s], reviewer=reconcile, judgment=strong)
+    # This is the flag attached only to the isolated original-image pipeline.
+    flow._original_recheck_target = {"label": "1", "target_unit": "answer_slot"}
+    result = flow.recognize(images=(picture(),))
+    row = result.data["items"][0]
+    assert row["recognition_status"] == "ready" and row["assessment"]["verdict"] == "incorrect"
+    assert row["answer_text"] == p["answer_text"] and row["stem_text"] == p["stem_text"]
+    assert not flow.visual_client.calls and not strong.calls
+    assert len(flow.reconciliation_client.calls) == 1 and len(result.metadata.attempts) == 3
+    assert [call["stage"] for call in result.data["multimodel_audit"]["calls"]] == ["primary", "secondary", "reconciliation"]
+
+
+def test_review_that_actually_saw_blind_instruction_variant_can_keep_bound_old_source():
+    from xueban_backend.providers.reconciliation import evaluate_review
+    p = correct(stem_text="Compute: (-24)/6")
+    s = correct(stem_text="计算：(-24)/6")
+    observed = blind(p)
+    proposal = review(source=s, selected_source="secondary", resolution="visual_resolution")
+    flow = make_flow()
+    call = {"code": "ok", "model": "reader", "items": {"1": observed}}
+    with_read = evaluate_review(proposal, p, s, visual=observed)
+    assert flow._visual_gate(call, "1", with_read)["resolved"] is True
+    without_read = evaluate_review(proposal, p, s)
+    assert flow._visual_gate(call, "1", without_read)["rejection_code"] == "independent_condition_disagreement"
+    changed = blind(p, stem_text="Compute: (-24)/8")
+    changed_call = {**call, "items": {"1": changed}}
+    unsupported = evaluate_review(proposal, p, s, visual=changed)
+    assert flow._visual_gate(changed_call, "1", unsupported)["rejection_code"] == "independent_condition_disagreement"
+
+
 @pytest.mark.parametrize("role", ["primary", "secondary", "visual"])
 def test_material_target_reads_before_exactly_one_adjudication_and_keeps_selected_source(role):
     first, second = correct(), correct(answer_text="-4")

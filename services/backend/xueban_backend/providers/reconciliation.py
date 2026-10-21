@@ -30,7 +30,7 @@ COMPARISON_SCHEMA = _object({
 })
 JUDGMENT_BASIS_SCHEMA = _object({
     "source_id": _text(100, nullable=True),
-    "condition_quotes": {"type": "array", "maxItems": 4, "items": _object({
+    "condition_quotes": {"type": "array", "maxItems": 12, "items": _object({
         "field": {"enum": ["stem_text", "option"]},
         "option_label": _text(20, nullable=True),
         "text": _text(600),
@@ -84,6 +84,9 @@ PROMPT = (
     "observation_comparison明确两份原始观察的有效作答是否相同observations_same、关键条件是否相同"
     "conditions_same、差异类别difference_type与简短具体explanation；不是填写判定是否相同。"
     "真正的自然语言等价需明确说明，不用笼统“双方一致”掩盖差异。"
+    "普通计算指令的等义中英文说明不等于数学变量改变；完整算式、条件、有效作答仍须逐项一致。"
+    "已有独立visual时，等义说明仍可用equivalent，不为满足标签而谎称笔迹发生变化；"
+    "但选择visual必须有direct_image依据及原目标题绑定，真实数字、变量、单位、声调变化仍不是等义表述。"
     "judgment_basis独立记录重新核验依据：source_id必须与所选id相同；condition_quotes用少量"
     "逐字短引用覆盖实际用于判断的关键题干/选项，option引用带原option_label；answer_quote逐字引用"
     "所选有效作答的简短片段，空白为null；不要重复整个作答过程。summary简述依据这些条件核算的结论，允许数学计算。"
@@ -323,6 +326,96 @@ def _condition_quote_requirement(source):
     return "long_stem_anchor_only", anchors
 
 
+_ARITHMETIC_INSTRUCTION = re.compile(
+    r"^(?:计算|求值|计算下列各式|计算下列各题|求下列各式的值|"
+    r"(?i:calculate|compute|evaluate)(?:\s+(?i:the\s+)?(?i:expression|following))?)[:：](.+)$")
+
+
+def _instruction_math_body(value):
+    """A narrow routing/comparison view, never a rewritten source or proof.
+
+    Only a delimited evaluation command followed by an actual arithmetic
+    expression is recognized. A function/variable named Calculate, quoted
+    language, restrictions, rounding, and ordinary prose stay untouched.
+    Even equal bodies need an explicit source-bound image review to resolve.
+    """
+    value = normalize_literal_math(value) or ""
+    match = _ARITHMETIC_INSTRUCTION.fullmatch(value)
+    body = match[1].strip() if match else value
+    if (not re.search(r"\d", body) or not re.search(r"[-+*/÷×=^]", body)
+            or not re.fullmatch(r"[A-Za-z0-9\s.()+\-*/÷×=^{}\[\]_%√°]+", body)):
+        return None
+    return body
+
+
+def instruction_presentation_same(first, second):
+    """Same complete arithmetic body, not merely the same numeric tokens."""
+    a, b = _instruction_math_body(first), _instruction_math_body(second)
+    return a is not None and a == b
+
+
+def enclosing_presentation_same(first, second):
+    """Recognize only a complete known heading around the identical expression.
+
+    Substring containment is not a heading proof: an added reciprocal,
+    absolute-value or power instruction changes the task without adding a
+    numeric token. Unknown prose must take the independent-image path. This
+    comparison neither removes source citations nor rewrites either source;
+    the reviewer still checks the full printed instruction and student work.
+    """
+    if not first or not second or _critical_literals(first) != _critical_literals(second):
+        return False
+    bodies, has_heading = [], False
+    for value in (first, second):
+        match = re.fullmatch(
+            r"(?:请)?(?:列竖式计算|计算下列各式|计算下列各题|求下列各式的值|计算|求值)[:：]?\s*(.+)",
+            value)
+        body = match[1].strip() if match else value
+        if _instruction_math_body(body) != body:
+            return False
+        has_heading = has_heading or match is not None
+        bodies.append(body)
+    return has_heading and bodies[0] == bodies[1]
+
+
+def _condition_literals(value):
+    """Contextual condition veto; student-transcription veto stays unchanged.
+
+    Preserve order and multiplicity of numbers, expression identifiers,
+    operators/grouping, phonetics and units. Ordinary prose words are not
+    mathematical variables. This is only a negative guard: relationship words
+    and natural-language constraints still need full-source image review and,
+    outside the narrow instruction presentation above, independent readback.
+    """
+    value = normalize_literal_math(value) or ""
+    # This view may remove a delimited command, never an identically named
+    # function/variable or quoted text. No source/hash is modified.
+    body = _instruction_math_body(value)
+    if body is not None:
+        value = body
+    identifiers = _quote_condition_literals(value)
+    for match in _QUOTE_IDENTIFIER.finditer(value):
+        if (_QUOTE_UNITS.fullmatch(match[0]) and re.search(
+                r"\b(?:in|units?|unit\s+of)\s+$", value[:match.start()], re.IGNORECASE)):
+            identifiers.add(match[0])
+    tokens = re.findall(r"\d+(?:\.\d+)?|[" + _QUOTE_LETTERS + r"]+|["
+                        + _QUOTE_OPERATORS + r"()\[\]{}_]", value)
+    return [token for token in tokens
+            if not _QUOTE_IDENTIFIER.fullmatch(token) or token in identifiers
+            or _QUOTE_UNITS.fullmatch(token) and len(token) > 1
+            or value == token and re.fullmatch(r"[A-Za-z]{1,3}", token)]
+
+
+def _condition_literal_change(first, second):
+    # Option identity is structural, not an English word to be discarded.
+    a, b = first.get("options") or [], second.get("options") or []
+    return (_condition_literals(normalize_page_stem(first)) != _condition_literals(normalize_page_stem(second))
+            or len(a) != len(b)
+            or any(left.get("label") != right.get("label")
+                   or _condition_literals(left.get("text")) != _condition_literals(right.get("text"))
+                   for left, right in zip(a, b)))
+
+
 def _judgment_binding_error(basis, selected_id, source):
     """Quotes bind judgment inputs; they do not certify a model's arithmetic."""
     if not isinstance(basis, dict) or basis.get("source_id") != selected_id:
@@ -394,7 +487,7 @@ def evaluate_review(review, primary, secondary, visual=None, critical_visual=Non
         return reject("remaining_uncertainty", review["unresolved_cause"] or "model_disagreement")
     if not _nonempty(review["visual_evidence"]):
         return reject("missing_image_evidence")
-    if review["resolution"] == "visual_resolution":
+    if review["resolution"] == "visual_resolution" or review["selected_source"] == "visual":
         if review["observation_basis"] != "direct_image":
             return reject("observation_not_direct")
         if _inferred_observation(review["visual_evidence"]):
@@ -420,7 +513,10 @@ def evaluate_review(review, primary, secondary, visual=None, critical_visual=Non
         return reject("new_answer_not_allowed")
     if review["answer_status"] != source.get("answer_status"):
         return reject("source_status_mismatch")
-    if resolved_source == "visual" and review["resolution"] != "visual_resolution":
+    if (resolved_source == "visual" and review["resolution"] != "visual_resolution"
+            and (not _answer_equal(primary, source) or not _answer_equal(secondary, source)
+                 or _condition_literal_change(primary, source)
+                 or _condition_literal_change(secondary, source))):
         return reject("new_observation_requires_visual_resolution")
     identity = None
     if resolved_source == "visual":
@@ -469,9 +565,7 @@ def evaluate_review(review, primary, secondary, visual=None, critical_visual=Non
         if _critical_literals(primary.get("answer_text")) != _critical_literals(secondary.get("answer_text")):
             return reject("material_observation_change")
         first_conditions, second_conditions = _conditions(primary), _conditions(secondary)
-        if (len(first_conditions) != len(second_conditions)
-                or any(_critical_literals(a) != _critical_literals(b)
-                       for a, b in zip(first_conditions, second_conditions))):
+        if _condition_literal_change(primary, secondary):
             return reject("material_condition_change")
         # A reviewer can resolve an added heading without a third reader:
         # the complete shorter stem is still present and every critical
@@ -481,12 +575,13 @@ def evaluate_review(review, primary, secondary, visual=None, critical_visual=Non
         # independent read. Student-answer changes always need that read too.
         a_stem, b_stem = first_conditions[0], second_conditions[0]
         enclosing_context = (comparison["difference_type"] == "presentation"
-                             and bool(a_stem and b_stem)
-                             and (a_stem in b_stem or b_stem in a_stem)
+                             and enclosing_presentation_same(a_stem, b_stem)
                              and first_conditions[1:] == second_conditions[1:])
+        instruction_context = (instruction_presentation_same(a_stem, b_stem)
+                               and first_conditions[1:] == second_conditions[1:])
         requires_visual_support = (
-            not _answer_equal(primary, secondary)
-            or (first_conditions != second_conditions and not enclosing_context)
+            resolved_source == "visual" or not _answer_equal(primary, secondary)
+            or (first_conditions != second_conditions and not (enclosing_context or instruction_context))
         )
         # Do not require the original judges to agree, or to have supplied a
         # correction. This review independently judges the bound observation.
@@ -502,6 +597,10 @@ def evaluate_review(review, primary, secondary, visual=None, critical_visual=Non
         # This is an application prerequisite, not an already satisfied claim.
         # The orchestrator checks the separately archived blind observation.
         "requires_visual_support": requires_visual_support,
+        # A pre-read review cannot claim it has evaluated the later reader.
+        # The orchestrator uses this immutable identity only for the narrow
+        # instruction-frame equivalence, never to excuse changed conditions.
+        "reviewed_visual_source_id": source_id("visual", visual) if visual is not None else None,
         "observation_issue_review": note_review,
         "resolution": review["resolution"],
         "reason_code": code,
@@ -515,7 +614,9 @@ def evaluate_review(review, primary, secondary, visual=None, critical_visual=Non
         "correction_method": review["correction_method"] if wrong else None,
         "judgment_reason_code": review["reason_code"],
         "audit": {
-            "protocol_version": 3,
+            "protocol_version": 4,
+            "condition_comparison_policy": "contextual_literals_with_source_review",
+            "reviewed_visual_source_id": source_id("visual", visual) if visual is not None else None,
             "observation_issue_review": deepcopy(note_review),
             "target_identity": deepcopy(identity),
             "condition_quote_coverage": _condition_quote_requirement(source)[0],

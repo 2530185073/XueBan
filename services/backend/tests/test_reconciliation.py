@@ -11,6 +11,98 @@ from xueban_backend.providers.reconciliation import (
 )
 
 
+@pytest.mark.parametrize("heading", ["Calculate", "Compute", "Evaluate the expression", "求值"])
+def test_arithmetic_instruction_paraphrase_needs_source_review_but_not_extra_blind_read(heading):
+    a = correct(stem_text=f"{heading}: (-24)/6", answer_text="(-24)/6=4")
+    b = correct(stem_text="计算：(-24)/6", answer_text="(-24) / 6 = 4")
+    original = deepcopy((a, b)); identity = source_id("primary", a)
+    proposal = review(source=a, verdict="incorrect", correct_answer="-4", correction_method="复核带符号除法。")
+    result = evaluate_review(proposal, a, b)
+    assert result["resolved"] is True and result["requires_visual_support"] is False
+    assert result["source"]["answer_text"] == "(-24)/6=4" and result["verdict"] == "incorrect"
+    assert result["source_id"] == identity and (a, b) == original
+    proposal["observation_comparison"]["conditions_same"] = False
+    assert evaluate_review(proposal, a, b)["resolved"] is False
+
+
+@pytest.mark.parametrize("first,second", [
+    ("Calculate(x)+3", "Compute(x)+3"),
+    ("Let Calculate=3. Find Calculate+2.", "Let Compute=3. Find Compute+2."),
+    ("Compute: -24/6", "计算：24/6"),
+    ("Compute: (-3)^2", "计算：-3^2"),
+    ("Compute: 2 1/2", "计算：21/2"),
+    ("Compute: x/y+2", "计算：x/z+2"),
+    ("Length is 3 cm.", "Length is 3 mm."),
+    ("Length in m is 3.", "Length in s is 3."),
+    ("辨别zhǐ的读音", "辨别zhí的读音"),
+    ("distance=speed×time", "distance=speed/time"),
+])
+def test_condition_context_never_exempts_variables_functions_units_tones_or_signed_values(first, second):
+    a, b = correct(stem_text=first), correct(stem_text=second)
+    result = evaluate_review(review(source=a), a, b)
+    assert result["rejection_code"] == "material_condition_change"
+
+
+@pytest.mark.parametrize("first,second", [
+    ("甲比乙多4，求甲。", "甲比乙少4，求甲。"),
+    ("Choose values greater than 3.", "Choose values less than 3."),
+    ("Evaluate: (-24)/6", "Do not Evaluate: (-24)/6"),
+    ("计算：(-24)/6", "不要计算：(-24)/6"),
+    ("计算：(-24)/6", "保留两位小数，计算：(-24)/6"),
+    ('"Calculate": (-24)/6', '计算：(-24)/6'),
+])
+def test_relationship_restriction_and_quoted_prose_are_not_instruction_equivalence(first, second):
+    from xueban_backend.providers.reconciliation import instruction_presentation_same
+    from xueban_backend.providers.two_model import _needs_condition_readback
+    a, b = correct(stem_text=first), correct(stem_text=second)
+    assert instruction_presentation_same(first, second) is False
+    assert _needs_condition_readback(a, b) is True
+    proposal = review(source=a)
+    proposal["observation_comparison"]["difference_type"] = "presentation"
+    result = evaluate_review(proposal, a, b)
+    # Even an incorrect model equivalence claim cannot skip original-image
+    # corroboration merely because the numeric tokens are the same.
+    assert not result["resolved"] or result["requires_visual_support"] is True
+
+
+def test_equivalent_can_select_actual_blind_source_without_mislabeling_transcription_change():
+    a = correct(stem_text="Compute: (-24)/6", answer_text="4")
+    b = correct(stem_text="计算：(-24)/6", answer_text="4")
+    observed = deepcopy(a)
+    proposal = review(source=observed, selected_source="visual", verdict="incorrect",
+                      correct_answer="-4", correction_method="复核符号。")
+    result = evaluate_review(proposal, a, b, visual=observed)
+    assert result["resolved"] is True and result["requires_visual_support"] is True
+    assert result["resolved_source"] == "visual" and result["resolution"] == "equivalent"
+    proposal["observation_basis"] = "semantic_only"
+    assert evaluate_review(proposal, a, b, visual=observed)["rejection_code"] == "observation_not_direct"
+    observed["answer_text"] = "-4"
+    proposal = review(source=observed, selected_source="visual")
+    assert evaluate_review(proposal, a, b, visual=observed)["rejection_code"] == "new_observation_requires_visual_resolution"
+
+
+def test_four_choice_options_plus_stem_fit_quote_budget_and_every_quote_remains_bound():
+    from jsonschema import ValidationError, validate
+    from xueban_backend.providers.reconciliation import SCHEMA
+    source = correct(stem_text="当x=3时，选择值为4的算式。", answer_text="A",
+                     options=[{"label": label, "text": text} for label, text in
+                              [("A", "x+1"), ("B", "x-1"), ("C", "2x"), ("D", "x/3")]])
+    proposal = review(source=source)
+    proposal["judgment_basis"]["condition_quotes"] += [
+        {"field": "option", "option_label": option["label"], "text": option["text"]}
+        for option in source["options"]]
+    assert len(proposal["judgment_basis"]["condition_quotes"]) == 5
+    validate({"items": [proposal]}, SCHEMA)
+    assert evaluate_review(proposal, source, source)["resolved"] is True
+    for index in range(5):
+        altered = deepcopy(proposal)
+        altered["judgment_basis"]["condition_quotes"][index]["text"] = "not in selected source"
+        assert evaluate_review(altered, source, source)["rejection_code"] == "condition_quote_not_bound"
+    proposal["judgment_basis"]["condition_quotes"] = [proposal["judgment_basis"]["condition_quotes"][0]] * 13
+    with pytest.raises(ValidationError):
+        validate({"items": [proposal]}, SCHEMA)
+
+
 def review(*, source=None, comparison=None, **changes):
     """An explicitly source-bound synthetic review; never used by production."""
     if source is None:
@@ -547,6 +639,47 @@ def test_image_review_can_resolve_added_printed_heading_with_same_full_expressio
     changed = {**second, "stem_text": "列竖式计算：5.4÷100="}
     assert evaluate_review(review(source=changed, selected_source="secondary", comparison=comparison),
                            first, changed)["rejection_code"] == "material_condition_change"
+
+
+@pytest.mark.parametrize("changed", [
+    "求绝对值：计算：-2+1", "先取倒数，计算：-2+1", "结果取负，计算：-2+1",
+    "计算：-2+1的平方", "计算：-2+1，结果化为百分数", "估算：计算：-2+1",
+    "计算：-2+1，写出相邻整数", "自定义标题：计算：-2+1",
+])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_enclosing_instruction_cannot_hide_changed_operation_or_unknown_prose(changed, reverse):
+    from xueban_backend.providers.reconciliation import enclosing_presentation_same
+    from xueban_backend.providers.two_model import _needs_condition_readback
+    first, second = correct(stem_text="计算：-2+1"), correct(stem_text=changed)
+    if reverse:
+        first, second = second, first
+    assert enclosing_presentation_same(first["stem_text"], second["stem_text"]) is False
+    assert _needs_condition_readback(first, second) is True
+    comparison = {"observations_same": True, "conditions_same": True, "difference_type": "presentation",
+                  "explanation": "合成反例：即便复核误称只是标题，也不能跳过独立原图核验。"}
+    outcome = evaluate_review(review(source=first, comparison=comparison), first, second)
+    assert not outcome["resolved"] or outcome["requires_visual_support"] is True
+
+
+@pytest.mark.parametrize("heading", ["列竖式计算", "计算", "求值", "计算下列各式", "求下列各式的值"])
+def test_known_complete_heading_preserves_entire_arithmetic_body(heading):
+    from xueban_backend.providers.reconciliation import enclosing_presentation_same
+    from xueban_backend.providers.two_model import _needs_condition_readback
+    first, second = correct(stem_text="(-21)÷(-7)="), correct(stem_text=f"{heading}：(-21)÷(-7)=")
+    assert enclosing_presentation_same(first["stem_text"], second["stem_text"]) is True
+    assert enclosing_presentation_same(second["stem_text"], first["stem_text"]) is True
+    assert _needs_condition_readback(first, second) is False
+    assert enclosing_presentation_same("(-21)÷(-7)=", f"{heading}：(-21)÷(-7)=的倒数") is False
+    assert enclosing_presentation_same("(-21)÷(-7)=", f"{heading}：(2025·天津)(-21)÷(-7)=") is False
+
+
+def test_complete_polite_calculation_heading_without_colon_is_only_presentation():
+    from xueban_backend.providers.reconciliation import enclosing_presentation_same
+    from xueban_backend.providers.two_model import _needs_condition_readback
+    first, second = correct(stem_text="计算(-2)²。"), correct(stem_text="请计算(-2)²。")
+    assert _needs_condition_readback(first, second) is False
+    assert enclosing_presentation_same("计算(-2)^2", "请计算(-2)^2") is True
+    assert enclosing_presentation_same("计算(-2)^2", "请计算(-2)^2的倒数") is False
 
 
 def test_layout_annotation_is_not_removed_from_archived_student_text():
