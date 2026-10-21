@@ -60,6 +60,7 @@ export class StudentClient {
   private student: string | null = null
   private epoch = 0
   private identityFlight: { epoch: number; session: Session | null; promise: Promise<IdentityContext> } | null = null
+  private caseFlights = new Map<string, { epoch: number; session: Session | null; scope: string; promise: Promise<CorrectionCase> }>()
   private listeners = new Set<() => void>()
   private api: StudentApi
   private store: DraftStore
@@ -96,7 +97,7 @@ export class StudentClient {
   private load<T>(name: string): T | null { try { return JSON.parse(this.storage.getItem(this.storageKey(name)) ?? 'null') as T | null } catch { return null } }
   private persist(name: string, value: unknown) { try { this.storage.setItem(this.storageKey(name), JSON.stringify(value)) } catch { throw new StudentError('session_storage_unavailable', 0, '无法保存本次会话，请允许浏览器会话存储后重试。') } }
   private token() { if (this.session && Date.parse(this.session.expires_at) <= Date.now()) this.disconnect(); return this.session?.access_token ?? null }
-  private clearSession(clearPending = true) { this.epoch++; this.identityFlight = null; this.session = null; this.currentAccount = null; this.currentIdentity = null; this.student = null; this.dropMedia(); if (clearPending) this.pendingAuth.clear(); this.storage.removeItem(this.storageKey('session')); this.storage.removeItem(this.storageKey('selected')); this.storage.removeItem(this.storageKey('pair')); this.storage.removeItem(this.storageKey('scope')); this.changed() }
+  private clearSession(clearPending = true) { this.epoch++; this.identityFlight = null; this.caseFlights.clear(); this.session = null; this.currentAccount = null; this.currentIdentity = null; this.student = null; this.dropMedia(); if (clearPending) this.pendingAuth.clear(); this.storage.removeItem(this.storageKey('session')); this.storage.removeItem(this.storageKey('selected')); this.storage.removeItem(this.storageKey('pair')); this.storage.removeItem(this.storageKey('scope')); this.changed() }
   disconnect() { this.clearSession() }
   // Identifiers only (already used as IndexedDB scope keys), so a later account
   // failure during restore can still find the device data it must remove.
@@ -370,7 +371,26 @@ export class StudentClient {
     return homeworkPageIds(assets.filter(a => a.homework_id === hw.id), detail.jobs, detail.cases)
   }
   private async caseRecordRead(ctx: Context, id: string, homeworkId?: string): Promise<CorrectionCase> {
-    const c = await this.read<CorrectionCase>(ctx, `/v1/cases/${encoded(id)}`, 'CorrectionCase')
+    this.check(ctx)
+    const session = this.session, epoch = ctx.epoch
+    let flight = this.caseFlights.get(id)
+    if (!flight || flight.epoch !== epoch || flight.session !== session || flight.scope !== ctx.scope) {
+      // Record and recovery panels mount together. Share only their in-flight
+      // case GET; each public operation still authorizes and checks ownership.
+      const promise = Promise.resolve().then(() => {
+        if (!this.currentSession(epoch, session)) throw new StudentError('session_changed', 401)
+        return this.read<CorrectionCase>(ctx, `/v1/cases/${encoded(id)}`, 'CorrectionCase')
+      })
+      const pending = { epoch, session, scope: ctx.scope, promise }; flight = pending
+      this.caseFlights.set(id, pending)
+      const clear = () => { if (this.caseFlights.get(id) === pending) this.caseFlights.delete(id) }
+      void promise.then(clear, clear)
+    }
+    const result = await flight.promise
+    this.check(ctx)
+    if (!this.currentSession(epoch, session)) throw new StudentError('session_changed', 401)
+    // Callers must not share mutable arrays or nested decision/scope objects.
+    const c = structuredClone(result)
     if (c.scope.student_id !== ctx.student || homeworkId && c.homework_id !== homeworkId) throw new StudentError('access_denied', 403)
     return c
   }
