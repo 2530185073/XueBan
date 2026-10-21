@@ -23,7 +23,7 @@ from .correction_pipeline import (
 )
 from .responses import ResponsesClient
 from .readback_views import ZONES, readback_views
-from . import reconciliation, semantic_alignment, visual_readback, question_units
+from . import reconciliation, semantic_alignment, visual_readback, question_units, structure_navigation
 from .whole_page import (
     JUDGE_ITEM, JUDGE_PROMPT, PAGE_RULES, WholePageCorrectionPipeline, _answer_equal,
     _usable, canonical_label, normalize_literal_math, normalize_page_stem,
@@ -249,7 +249,8 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
     supports_target_unit = True
 
     def __init__(self, client, review_client, *, reconciliation_client=None, secondary_thinking=True,
-                 visual_client=None, judgment_client=None, target_unit="answer_slot"):
+                 visual_client=None, judgment_client=None, target_unit="answer_slot",
+                 structure_navigation_enabled=False):
         self.target_unit = question_units.validate_unit(target_unit)
         # Validate replacement anchors before any provider request, including
         # when this instance normally handles only legacy saved cases.
@@ -257,7 +258,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             question_units.page_prompt(PAGE_PROMPT, PAGE_RULES, target_unit)
             question_units.visual_prompt(visual_readback.PROMPT, target_unit)
             question_units.review_prompt(reconciliation.PROMPT, target_unit)
-        if type(secondary_thinking) is not bool:
+        if type(secondary_thinking) is not bool or type(structure_navigation_enabled) is not bool:
             raise ProviderError("invalid_configuration")
         super().__init__(client)
         self.review_client = review_client
@@ -265,6 +266,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         self.secondary_thinking = secondary_thinking
         self.visual_client = visual_client
         self.judgment_client = judgment_client
+        self.structure_navigation_enabled = structure_navigation_enabled
 
     @classmethod
     def from_env(cls, environ=None):
@@ -278,10 +280,12 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         review_thinking = env.get("REVIEW_THINKING", "enabled")
         reconciliation_provider = env.get("RECONCILIATION_PROVIDER", "primary")
         visual_enabled = env.get("VISUAL_REVIEW_ENABLED", "1")
+        navigation_enabled = env.get("STRUCTURE_NAVIGATION_ENABLED", "0")
         visual_model = env.get("VISUAL_REVIEW_MODEL", "gpt-6-astra")
         if (review_api not in ("chat", "responses") or review_thinking not in ("enabled", "disabled")
                 or reconciliation_provider not in ("primary", "secondary")
                 or visual_enabled not in ("0", "1")
+                or navigation_enabled not in ("0", "1")
                 or not isinstance(visual_model, str) or not _SAFE_TOKEN.fullmatch(visual_model)):
             raise ProviderError("invalid_configuration")
         secondary_thinking = review_thinking == "enabled"
@@ -311,7 +315,8 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             reconciliation_client = primary if reconciliation_provider == "primary" else secondary
             return cls(primary, secondary, reconciliation_client=reconciliation_client,
                        secondary_thinking=secondary_thinking, visual_client=visual_client,
-                       judgment_client=visual_client, target_unit=target_unit)
+                       judgment_client=visual_client, target_unit=target_unit,
+                       structure_navigation_enabled=navigation_enabled == "1")
         except Exception:
             closed = set()
             for client in created:
@@ -328,12 +333,15 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                 client.close()
                 closed.add(id(client))
 
-    def _read_and_judge(self, client, image, stage):
+    def _read_and_judge(self, client, image, stage, *, navigation=None):
         result = None
         schema = question_units.schema_for(PAGE_SCHEMA, self.target_unit)
         prompt = question_units.page_prompt(PAGE_PROMPT, PAGE_RULES, self.target_unit)
         from .original_recheck import request_scope
         schema, prompt, task_input = request_scope(schema, prompt, getattr(self, "_original_recheck_target", None))
+        if navigation is not None:
+            schema, prompt, task_input = structure_navigation.request_scope(
+                schema, prompt, task_input, navigation)
         try:
             result = client.generate(
                 role="check", images=(image.data_url,), instructions=prompt,
@@ -352,6 +360,17 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                     latency_ms=result.metadata.latency_ms)
             _validate(schema, result.data, code="invalid_output")
             indexed, category_normalizations, observation_normalizations = {}, [], []
+            navigation_report = None
+            if navigation is not None:
+                try:
+                    navigation_report = {"code": "ok", **structure_navigation.coverage_report(
+                        navigation, result.data["items"], result.data[structure_navigation.REPORT_FIELD])}
+                except ValueError as error:
+                    # This auxiliary report is not the observation itself. Keep
+                    # malformed diagnostics visible without losing a whole page.
+                    navigation_report = {"code": "invalid_report", "reason": str(error),
+                        "raw_unlocated_labels": deepcopy(result.data[structure_navigation.REPORT_FIELD]),
+                        "coverage_proven": False}
             for index, raw in enumerate(result.data["items"]):
                 label = canonical_label(raw["label"])
                 if not label:
@@ -394,11 +413,18 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                 if unit_issues:
                     item["uncertainties"] = _bounded_uncertainties(item["uncertainties"], unit_issues)
                     item["answer_status"] = "unclear"
+                if navigation_report and label in navigation_report.get("reported_unlocated_but_returned", []):
+                    item["uncertainties"] = _bounded_uncertainties(item["uncertainties"],
+                        ["本次识读同时报告无法定位该导航和返回同号题，目标对应尚未确认。"])
+                    item["answer_status"] = "unclear"
+                    observation_normalizations.append({"label": label, "code": "navigation_locator_report_conflict"})
                 indexed[label] = item
             return {"stage": stage, "asset_id": image.asset_id, "model": client.settings.model,
                     "code": "ok", "items": indexed, "max_output_tokens": OUTPUT_TOKENS,
                     **({"raw_items": deepcopy(result.data["items"])}
-                       if self.target_unit == question_units.QUESTION_UNIT or observation_normalizations else {}),
+                       if self.target_unit == question_units.QUESTION_UNIT or observation_normalizations
+                       or navigation is not None else {}),
+                    **({"navigation_report": navigation_report} if navigation_report is not None else {}),
                     "observation_normalizations": observation_normalizations,
                     "category_normalizations": category_normalizations,
                     "metadata": result.metadata}
@@ -806,6 +832,56 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         )
         return outcome
 
+    def _read_pages(self, pages, *, navigation_enabled):
+        """Keep two initial requests per page; navigation replaces the second.
+
+        In the experiment, each completed primary unlocks only its own
+        secondary. Another page's slow primary cannot impose a page-wide
+        barrier. Invalid navigation falls back before that secondary dispatch,
+        never by repeating an already billed request.
+        """
+        calls, by_page = [], {}
+        with ThreadPoolExecutor(max_workers=8, thread_name_prefix="xueban-two-model") as pool:
+            if not navigation_enabled:
+                pending = [(image.asset_id, stage, pool.submit(self._read_and_judge, client, image, stage))
+                           for image in pages
+                           for stage, client in (("primary", self.client), ("secondary", self.review_client))]
+                for asset_id, stage, future in pending:
+                    call = future.result()
+                    calls.append(call)
+                    by_page.setdefault(asset_id, {})[stage] = call
+                return calls, by_page
+
+            pending = {pool.submit(self._read_and_judge, self.client, image, "primary"):
+                       (image, "primary", None) for image in pages}
+            while pending:
+                completed, _ = wait(tuple(pending), return_when=FIRST_COMPLETED)
+                for future in completed:
+                    image, stage, navigation_audit = pending.pop(future)
+                    call = future.result()
+                    if navigation_audit is not None:
+                        call["structure_navigation"] = navigation_audit
+                    by_page.setdefault(image.asset_id, {})[stage] = call
+                    if stage != "primary":
+                        continue
+                    navigation = None
+                    navigation_audit = {"protocol": structure_navigation.PROTOCOL,
+                        "structure_shared": False, "content_shared": False,
+                        "skip_reason": "primary_unavailable"}
+                    if call["code"] == "ok":
+                        try:
+                            navigation = structure_navigation.build_navigation(call["items"], self.target_unit)
+                            navigation_audit = structure_navigation.provenance(call["items"], navigation)
+                        except ValueError as error:
+                            navigation = None
+                            navigation_audit["skip_reason"] = str(error)
+                    kwargs = {"navigation": navigation} if navigation is not None else {}
+                    secondary = pool.submit(self._read_and_judge, self.review_client, image, "secondary", **kwargs)
+                    pending[secondary] = (image, "secondary", navigation_audit)
+        # Stable audit ordering is separate from readiness-based dispatch.
+        calls = [by_page[image.asset_id][stage] for image in pages for stage in ("primary", "secondary")]
+        return calls, by_page
+
     def recognize(self, *, images, target_unit=None):
         if target_unit is not None and target_unit != self.target_unit:
             # Keep all current routing clients (including judgment_client),
@@ -815,15 +891,10 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             return local.recognize(images=images)
         pages = list(self._images(images).values())
         started = time.monotonic()
-        calls, by_page = [], {}
-        with ThreadPoolExecutor(max_workers=8, thread_name_prefix="xueban-two-model") as pool:
-            pending = [(image.asset_id, stage, pool.submit(self._read_and_judge, client, image, stage))
-                       for image in pages
-                       for stage, client in (("primary", self.client), ("secondary", self.review_client))]
-            for asset_id, stage, future in pending:
-                call = future.result()
-                calls.append(call)
-                by_page.setdefault(asset_id, {})[stage] = call
+        navigation_enabled = (self.structure_navigation_enabled
+                              and getattr(self, "_original_recheck_target", None) is None)
+        calls, by_page = self._read_pages(pages, navigation_enabled=navigation_enabled)
+        structure_shared = any(call.get("structure_navigation", {}).get("structure_shared") for call in calls)
         metadata = WholePageCorrectionPipeline._metadata(calls, started)
         metadata = replace(metadata, requested_model="two_model")
         if not any(call["code"] == "ok" for call in calls):
@@ -1086,17 +1157,26 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                     if call.get("observation_normalizations") else {})
                  | ({"alignment": call["alignment"]} if "alignment" in call else {})
                  | ({"image_views": call["image_views"]} if call.get("image_views") else {})
+                 | ({"structure_navigation": call["structure_navigation"]}
+                    if "structure_navigation" in call else {})
+                 | ({"navigation_report": call["navigation_report"]}
+                    if "navigation_report" in call else {})
                  | ({key: call[key] for key in ("batch_index", "batch_count", "target_labels")}
                     if "batch_index" in call else {})
                  | ({"applications": call["applications"]} if "applications" in call else {}) for call in calls]
         return PipelineResult({
             "items": items,
             "coverage": {"collection_scope": "partial" if items else "unknown", "unrecognized_regions": [],
-                         "note": "整页独立核读仍可能漏项，不能据此宣称全部作业无错。"},
-            "multimodel_audit": {"mode": "two_model", "independent_before_comparison": True, "calls": audit,
-                                "label_alignments": label_alignments, "target_unit": self.target_unit},
+                         "note": ("本次整页识读仍可能漏项，不能据此宣称全部作业无错。" if navigation_enabled
+                                  else "整页独立核读仍可能漏项，不能据此宣称全部作业无错。")},
+            "multimodel_audit": {"mode": "two_model", "independent_before_comparison": not structure_shared,
+                                "calls": audit, "label_alignments": label_alignments, "target_unit": self.target_unit,
+                                **({"structure_navigation": {"protocol": structure_navigation.PROTOCOL,
+                                    "enabled": True, "structure_shared": structure_shared, "content_shared": False}}
+                                   if navigation_enabled else {})},
         }, metadata, prompt_version=(PROMPT_VERSION if self.target_unit == question_units.LEGACY_UNIT
-                                        else PROMPT_VERSION + ".question-experimental"))
+                                        else PROMPT_VERSION + ".question-experimental")
+                                     + (".structure-navigation-experimental-v1" if navigation_enabled else ""))
 
     def rerecognize_original(self, *, images, question, attempt, input_versions):
         from .original_recheck import run

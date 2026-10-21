@@ -86,6 +86,13 @@ def test_omitted_review_settings_keep_responses_and_enabled_thinking():
         assert pipeline.visual_client.settings.total_timeout_seconds == 118
         assert pipeline.visual_client.settings.max_attempts == 1
         assert pipeline.visual_client is not pipeline.review_client
+        assert pipeline.structure_navigation_enabled is False
+
+
+@pytest.mark.parametrize("enabled", ["0", "1"])
+def test_navigation_experiment_requires_explicit_opt_in(enabled):
+    with two_model.TwoModelWholePagePipeline.from_env({"STRUCTURE_NAVIGATION_ENABLED": enabled}) as pipeline:
+        assert pipeline.structure_navigation_enabled is (enabled == "1")
 
 
 def test_visual_model_can_be_explicit_and_uses_primary_gateway_fallback():
@@ -106,6 +113,9 @@ def test_visual_model_can_be_explicit_and_uses_primary_gateway_fallback():
     {"VISUAL_REVIEW_MODEL": ""}, {"VISUAL_REVIEW_MODEL": None},
     {"VISUAL_REVIEW_MODEL": "gpt-6-astra\n"}, {"VISUAL_REVIEW_MODEL": 6},
     {"VISUAL_REVIEW_MODEL": "m" * 201},
+    {"STRUCTURE_NAVIGATION_ENABLED": ""}, {"STRUCTURE_NAVIGATION_ENABLED": "true"},
+    {"STRUCTURE_NAVIGATION_ENABLED": None}, {"STRUCTURE_NAVIGATION_ENABLED": True},
+    {"STRUCTURE_NAVIGATION_ENABLED": 1},
 ])
 def test_invalid_review_settings_fail_before_client_creation(monkeypatch, values):
     def forbidden(*args, **kwargs):
