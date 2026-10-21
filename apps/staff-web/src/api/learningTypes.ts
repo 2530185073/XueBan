@@ -93,7 +93,18 @@ export interface KnowledgeState extends EvidenceSources {
 }
 export interface NamedKnowledgeState extends KnowledgeState { name: string; chapter_id: string | null; chapter_name: string | null }
 export interface ChapterRollup { chapter_id: string; name: string; objectives: number; status_counts: Partial<Record<LearningStatus, number>> }
+export interface MappingCoverageItem {
+  case_id: string; question_id: string; homework_id: string; label: string; subject: string; stem_preview: string
+  source_role: 'model' | 'staff'; occurred_at: string; state?: 'no_direct_match' | 'mapping_pending' | 'not_linked'
+}
+export interface MappingCoverage {
+  scope: 'current_reliable_errors_in_selected_graph'; time_basis: 'current_attempt_occurred_at'; graph_version: string | null
+  window: { start: string | null; end_exclusive: string | null }; available: boolean
+  total: number; linked: number; unlinked: number; model_count: number; staff_count: number
+  items: MappingCoverageItem[]; truncated: boolean; notice: string
+}
 export interface StudentKnowledge {
+  mapping_coverage?: MappingCoverage
   student_id: string; graph_version: string | null; graph_review_status: string
   projection: { pending: boolean; projected_at: string | null; state_version: number }
   states: NamedKnowledgeState[]; chapters: ChapterRollup[]; notice: string
@@ -111,10 +122,24 @@ export function isKnowledgeState(value: unknown): value is KnowledgeState {
 const isNamedState = (value: unknown): value is NamedKnowledgeState => isKnowledgeState(value) && record(value) && text(value.name, 200) && optStr(value.chapter_id) && optStr(value.chapter_name)
 const isRollup = (value: unknown): value is ChapterRollup => record(value) && id(value.chapter_id) && text(value.name, 200) && count(value.objectives) &&
   record(value.status_counts) && Object.entries(value.status_counts).every(([key, n]) => status(key) && count(n))
+export function isMappingCoverage(value: unknown): value is MappingCoverage {
+  return record(value) && value.scope === 'current_reliable_errors_in_selected_graph' && value.time_basis === 'current_attempt_occurred_at'
+    && optStr(value.graph_version) && record(value.window) && optTime(value.window.start) && optTime(value.window.end_exclusive)
+    && typeof value.available === 'boolean' && [value.total, value.linked, value.unlinked, value.model_count, value.staff_count].every(count)
+    && value.total === (value.linked as number) + (value.unlinked as number) && value.total === (value.model_count as number) + (value.staff_count as number)
+    && typeof value.truncated === 'boolean' && text(value.notice, 1000)
+    && list(value.items, item => record(item) && id(item.case_id) && id(item.question_id) && id(item.homework_id)
+      && str(item.label, 80) && text(item.subject, 40) && str(item.stem_preview, 180) && time(item.occurred_at)
+      && oneOf(['model', 'staff'] as const)(item.source_role)
+      && (item.state === undefined || oneOf(['no_direct_match', 'mapping_pending', 'not_linked'] as const)(item.state)), 30)
+    && (value.items as unknown[]).length <= (value.unlinked as number)
+    && value.truncated === ((value.unlinked as number) > (value.items as unknown[]).length)
+}
 export function isStudentKnowledge(value: unknown): value is StudentKnowledge {
   return record(value) && id(value.student_id) && (value.graph_version === null || text(value.graph_version, 64)) && str(value.graph_review_status, 64) &&
     record(value.projection) && typeof value.projection.pending === 'boolean' && optTime(value.projection.projected_at) && count(value.projection.state_version) &&
     list(value.states, isNamedState, 2000) && list(value.chapters, isRollup, 500) && str(value.notice, 500)
+    && (value.mapping_coverage === undefined || isMappingCoverage(value.mapping_coverage))
 }
 
 export interface Evidence {
@@ -213,6 +238,7 @@ export interface FocusItem extends EvidenceSources {
   status_at_period_end: LearningStatus; status_label: string; verified_scope: string[]; possible_causes: string[]; unknown: string[]; cards: EvidenceCard[]; next_step: string
 }
 export interface ReportSnapshot {
+  mapping_coverage?: MappingCoverage
   period: { start: string; end_exclusive: string }
   coverage: { observed_days: number; observed_dates: string[]; homeworks: number; partial_period: boolean; first_seen_date: string | null }
   school_tasks: { questions: number; staff_verified: number; awaiting_verification: number; not_judged: number; verdicts: Record<'correct' | 'incorrect' | 'partially_correct' | 'unanswered', number>; corrected_resolved: number; correction_open: number; ai_judged?: number; ai_corrected_pending?: number; ai_verdicts?: Record<'correct' | 'incorrect' | 'partially_correct' | 'unanswered', number> }
@@ -244,6 +270,7 @@ export function isReportSnapshot(value: unknown): value is ReportSnapshot {
   const { period, coverage, school_tasks: tasks, help, sections } = value
   const verdicts = tasks.verdicts
   return day(period.start) && day(period.end_exclusive) &&
+    (value.mapping_coverage === undefined || isMappingCoverage(value.mapping_coverage)) &&
     count(coverage.observed_days) && list(coverage.observed_dates, day, 31) && count(coverage.homeworks) && typeof coverage.partial_period === 'boolean' && nullable(day)(coverage.first_seen_date) &&
     [tasks.questions, tasks.staff_verified, tasks.awaiting_verification, tasks.not_judged, tasks.corrected_resolved, tasks.correction_open].every(count) &&
     record(verdicts) && ['correct', 'incorrect', 'partially_correct', 'unanswered'].every(key => count(verdicts[key])) &&

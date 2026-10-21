@@ -360,7 +360,7 @@ export default function App() {
     {ready && <nav className="area-nav" aria-label="工作区">{areas.map(([value, text, Icon]) =>
       <button key={value} aria-current={area === value ? 'page' : undefined} className={area === value ? 'active' : ''} onClick={() => { setArea(value); setError(null); setNotice(null) }}><Icon size={15} />{text}</button>)}</nav>}
     {ready && area === 'links' ? <KnowledgeLinkArea ctx={ctx} onOpenCase={openCase} />
-    : ready && area === 'profile' ? <StudentProfileArea ctx={ctx} studentId={student} onStudent={setStudentId} />
+    : ready && area === 'profile' ? <StudentProfileArea ctx={ctx} studentId={student} onStudent={setStudentId} onOpenCase={openCase} />
     : ready && area === 'memory' ? <MemoryArea ctx={ctx} studentId={student} onStudent={setStudentId} />
     : ready && area === 'daily' ? <DailyFeedbackArea ctx={ctx} />
     : ready && area === 'reports' ? <ReportArea ctx={ctx} studentId={student} onStudent={setStudentId} />

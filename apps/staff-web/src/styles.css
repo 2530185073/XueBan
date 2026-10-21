@@ -191,3 +191,10 @@ details.card>summary{list-style:none;cursor:pointer}
 .item-list small{margin-top:3px}
 @media(max-width:1150px){.learning-area{grid-template-columns:1fr;margin:0 20px}.learning-side{border-right:0;border-bottom:1px solid var(--line)}.learning-side .queue-list{max-height:320px}.area-nav{margin:0 20px 14px}}
 @media(max-width:760px){.learning-area{margin:0 12px}.learning-main{padding:16px 12px}.area-nav{margin:0 12px 12px}.area-nav button{flex:1 1 40%}}
+
+.mapping-gap-note{padding:18px 20px;border:1px solid #dfdccd;border-left:3px solid #a78e52;background:#fcfaef;border-radius:8px;margin-bottom:18px}
+.mapping-gap-note h3{font-size:16px;margin:0 0 10px}.mapping-gap-note p{font-size:13px;line-height:1.7}.mapping-gap-note ul{list-style:none;margin:10px 0;padding:0}
+.mapping-gap-note li{display:flex;justify-content:space-between;align-items:center;gap:14px;border-top:1px solid #e8e1cc;padding:12px 0}.mapping-gap-note li>div{min-width:0}.mapping-gap-note li p{white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0}.mapping-gap-note small{font-size:11px;color:#77715f}.mapping-gap-note button{flex-shrink:0}
+@media(max-width:600px){.mapping-gap-note li{align-items:flex-start;flex-direction:column}}
+
+.mapping-gap-note summary{cursor:pointer;padding:8px 0;font-size:13px;font-weight:600}

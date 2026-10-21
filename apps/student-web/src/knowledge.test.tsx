@@ -79,3 +79,37 @@ it('shows source-verified AI graph with its real review provenance', () => {
   expect(html).toContain('目录来源已核对，知识点关系由 AI 整理')
   expect(html).toContain(syntheticBook.source_note!)
 })
+
+const mappingCoverage = {
+  scope: 'current_reliable_errors_in_selected_graph' as const, time_basis: 'current_attempt_occurred_at' as const,
+  graph_version: 'graph-test', window: { start: null, end_exclusive: null }, available: true,
+  total: 2, linked: 1, unlinked: 1, model_count: 2, staff_count: 0, truncated: false,
+  notice: '只看当前教材内的当前作答，未关联不等于新的薄弱点。',
+  items: [{ case_id: 'case-unlinked', question_id: 'question-unlinked', homework_id: 'homework-unlinked', label: '1', subject: '数学',
+    stem_preview: '18 - 7 = ____', source_role: 'model' as const, occurred_at: '2026-10-22T01:00:00Z', state: 'no_direct_match' as const }],
+}
+
+describe('current error mapping coverage', () => {
+  it('accepts old maps but rejects malformed or inconsistent new coverage', () => {
+    expect(isKnowledgeMap(graphMap)).toBe(true)
+    expect(isKnowledgeMap({ ...graphMap, mapping_coverage: mappingCoverage })).toBe(true)
+    for (const patch of [{ total: 4 }, { unlinked: -1 }, { truncated: true }, { items: Array(31).fill(mappingCoverage.items[0]) },
+      { items: [{ ...mappingCoverage.items[0], state: 'confirmed_weakness' }] }, { scope: 'all_past_errors' }]) {
+      expect(isKnowledgeMap({ ...graphMap, mapping_coverage: { ...mappingCoverage, ...patch } })).toBe(false)
+    }
+  })
+  it('shows the gap separately from graph states and preserves original question access', () => {
+    const before = JSON.stringify(graphMap.states)
+    const html = renderToStaticMarkup(<KnowledgeMapView map={{ ...graphMap, mapping_coverage: mappingCoverage }} onOpen={noop} onOpenHomework={noop} />)
+    for (const text of ['还有 1 道错题', '18 - 7', '暂未找到直接对应', 'AI 初判，尚未经老师核实', '回看原题']) expect(html).toContain(text)
+    expect(html).not.toContain('教材没有该知识点')
+    expect(JSON.stringify(graphMap.states)).toBe(before)
+    expect(renderToStaticMarkup(<KnowledgeMapView map={graphMap} onOpen={noop} />)).not.toContain('尚未关联知识点')
+  })
+  it('distinguishes a pending mapping from no match and displays total even with truncated items', () => {
+    const html = renderToStaticMarkup(<KnowledgeMapView map={{ ...graphMap, mapping_coverage: { ...mappingCoverage,
+      total: 33, unlinked: 32, model_count: 33, truncated: true, items: [{ ...mappingCoverage.items[0], state: 'mapping_pending' }] } }} onOpen={noop} />)
+    expect(html).toContain('还有 32 道错题'); expect(html).toContain('知识点归类尚未完成'); expect(html).toContain('最近 30 道')
+    expect(html).not.toContain('暂未找到直接对应')
+  })
+})

@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { StaffApi } from './api/client'
 import { LearningApi } from './api/learning'
 import {
-  isAgentRun, isCreatedShareLink, isEvidence, isGate, isGenerationStatus, isKnowledgeDetail, isKnowledgeLinkList, isLinkQueue, isMemoryList, isReport, isReportQueue, isShareLink, isStudentKnowledge, type AgentRun, type KnowledgeLink,
+  isAgentRun, isCreatedShareLink, isEvidence, isGate, isGenerationStatus, isKnowledgeDetail, isKnowledgeLinkList, isLinkQueue, isMemoryList, isReport, isReportQueue, isShareLink, isStudentKnowledge, type AgentRun, type KnowledgeLink, type ReportSnapshot,
 } from './api/learningTypes'
 import {
   diagnosisIssue, finishedPeriods, helpSeen, lastFinishedPeriod, memoryIssue, parseAnswerValues, periodFinished, periodFromStart, periodLabel, primaryConflict,
@@ -352,5 +352,27 @@ describe('practice generation status', () => {
     expect(generationText({ ...base, status: 'succeeded', candidate_item_ids: ['item_a', 'item_b'] }, false)).toContain('2 道')
     expect(generationText({ ...base, status: 'failed', failure_code: 'provider_disabled' }, false)).toContain('模型服务未开启')
     expect(generationText(null, false)).toContain('稍后刷新')
+  })
+})
+
+const mappingCoverage = {
+  scope: 'current_reliable_errors_in_selected_graph' as const, time_basis: 'current_attempt_occurred_at' as const,
+  graph_version: 'graph-test', window: { start: '2026-10-15T16:00:00Z', end_exclusive: '2026-10-31T16:00:00Z' }, available: true,
+  total: 2, linked: 1, unlinked: 1, model_count: 2, staff_count: 0, truncated: false,
+  notice: '当前教材内的当前作答，不含其他学科与旧版作业。',
+  items: [{ case_id: 'case-gap', question_id: 'question-gap', homework_id: 'homework-gap', label: '1', subject: '数学',
+    stem_preview: '18 - 7 = ____', source_role: 'model' as const, occurred_at: at }],
+}
+
+describe('half-month coverage snapshot', () => {
+  it('keeps older reports valid and does not pretend an absent field is zero', () => {
+    expect(isReport(report)).toBe(true)
+    expect(renderToStaticMarkup(createElement(SnapshotView, { snap: report.snapshot as ReportSnapshot }))).not.toContain('尚未关联知识点')
+    const body = { ...report, snapshot: { ...snapshot, mapping_coverage: mappingCoverage } }
+    expect(isReport(body)).toBe(true)
+    const html = renderToStaticMarkup(createElement(SnapshotView, { snap: body.snapshot as ReportSnapshot }))
+    for (const text of ['还有 1 道错题', '生成这份报告时', '18 - 7', 'AI 初判，尚未经老师核实', '后续订正请以新版本为准']) expect(html).toContain(text)
+    expect(html).not.toContain('归类尚未完成')
+    expect(isReport({ ...body, snapshot: { ...body.snapshot, mapping_coverage: { ...mappingCoverage, total: 9 } } })).toBe(false)
   })
 })

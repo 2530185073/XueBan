@@ -2,12 +2,27 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, ArrowUpRight, BookOpen, ChevronRight, CircleDot, Clock3, Compass, Leaf, List, LoaderCircle, Map as MapIcon, RefreshCw, X } from 'lucide-react'
 import { safeError } from '../core'
 import { CurriculumBookPicker } from './CurriculumBookPicker'
-import type { EvidenceSources, KnowledgeDetail, KnowledgeGraphEdge, KnowledgeGraphNode, KnowledgeMap } from '../core/learning'
+import type { EvidenceSources, KnowledgeDetail, KnowledgeGraphEdge, KnowledgeGraphNode, KnowledgeMap, MappingCoverage } from '../core/learning'
 import type { Workspace } from '../useStudentWorkspace'
 import { assistanceLabel, dayLabel, eventLabel, GRAPH_NODE_HEIGHT, GRAPH_NODE_WIDTH, knowledgeChapters, knowledgeNodes, layoutKnowledgeGraph, nodeNameLines, PENDING_NOTICE, reasonText, resultLabels, statusLabels } from '../learning'
 
 type OpenHomework = (homeworkId: string, caseId: string) => void
 const sourceLabel = (source: EvidenceSources['assessment_source']) => source === 'model' ? 'AI 初判' : source === 'staff' ? '老师核实' : source === 'mixed' ? 'AI + 老师' : source === 'none' ? '待积累记录' : '来源待核实'
+
+const mappingStateText = { no_direct_match: '暂未找到直接对应的教材知识点', mapping_pending: '知识点归类尚未完成', not_linked: '尚未形成有效的知识点关联' }
+
+export function MappingCoverageNote({ coverage, onOpenHomework }: { coverage?: MappingCoverage; onOpenHomework?: OpenHomework }) {
+  if (!coverage?.unlinked) return null
+  return <section className="knowledge-mapping-gap" aria-label="尚未关联的错题">
+    <div><span className="eyebrow">学习足迹 · 仍待归类</span><h3>还有 {coverage.unlinked} 道错题，尚未关联知识点</h3>
+      <p>当前教材范围内，仍判错或部分正确的 {coverage.total} 道题中，{coverage.linked} 道已关联。原题和订正记录都还在。</p></div>
+    <details><summary>看看哪些题</summary><ul>{coverage.items.map(item => <li key={item.case_id}>
+      <span><strong>{item.subject}{item.label ? ` · ${item.label}` : ''}</strong><span className="mapping-question">{item.stem_preview}</span>
+        <small>{item.source_role === 'model' ? 'AI 初判，尚未经老师核实' : '老师已核实'} · {mappingStateText[item.state ?? 'not_linked']}</small></span>
+      {onOpenHomework && <button className="text-button" onClick={() => onOpenHomework(item.homework_id, item.case_id)}>回看原题 <ArrowUpRight size={15} /></button>}
+    </li>)}</ul>{coverage.truncated && <p className="small muted">这里列出最近 30 道，总数包含全部符合范围的题目。</p>}<p className="small muted">{coverage.notice}</p></details>
+  </section>
+}
 
 export function EvidenceSourceNote({ sources }: { sources: EvidenceSources | null | undefined }) {
   if (!sources?.assessment_source || sources.assessment_source === 'none') return null
@@ -107,7 +122,7 @@ function MapEmpty({ pending, hasScope }: { pending: boolean; hasScope: boolean }
 }
 
 /** Current-student nodes and actual prerequisite edges only. No inferred mastery. */
-export function KnowledgeMapView({ map, onOpen, selectedId }: { map: KnowledgeMap; onOpen: (knowledgeId: string) => void; selectedId?: string | null }) {
+export function KnowledgeMapView({ map, onOpen, selectedId, onOpenHomework }: { map: KnowledgeMap; onOpen: (knowledgeId: string) => void; selectedId?: string | null; onOpenHomework?: OpenHomework }) {
   const [subject, setSubject] = useState('all'), [chapterId, setChapterId] = useState('all'), [view, setView] = useState<'map' | 'list'>('map')
   const nodes = useMemo(() => knowledgeNodes(map), [map])
   const subjects = [...new Set(nodes.map(node => node.subject).filter((value): value is string => !!value))]
@@ -116,6 +131,7 @@ export function KnowledgeMapView({ map, onOpen, selectedId }: { map: KnowledgeMa
   const chapters = knowledgeChapters(scoped), activeChapter = chapters.find(chapter => chapter.id === chapterId)
   const visible = activeChapter?.nodes ?? scoped, recorded = nodes.filter(node => node.valid_evidence_count > 0).length, pending = map.projection.pending
   return <div className="knowledge-map-overview">
+    <MappingCoverageNote coverage={map.mapping_coverage} onOpenHomework={onOpenHomework} />
     {pending && <p className="knowledge-pending" role="status"><RefreshCw size={17} /> {PENDING_NOTICE}</p>}
     {!nodes.length ? <MapEmpty pending={pending} hasScope={!!map.grade} /> : <>
       <div className="knowledge-map-intro"><div><span className="knowledge-folio"><Leaf size={16} /> 我的学习足迹</span><h2>看见一点点，走稳每一步。</h2><p>选择一个知识点，看看它和哪次作答有关。</p></div><div className="knowledge-map-tally">{pending ? <><Clock3 size={24} /><span>更新中</span></> : <><strong>{recorded}<small> / {nodes.length}</small></strong><span>个知识点有作答记录</span></>}</div></div>
@@ -160,6 +176,6 @@ export function KnowledgeMapPage({ workspace, map, loading, loadError, onRefresh
     <CurriculumBookPicker workspace={workspace} grade={map?.grade} onChanged={() => { setOpenId(null); onRefresh() }} />
     {loading ? <div className="knowledge-loading" role="status"><LoaderCircle className="spin" size={26} /><h2>正在打开你的知识地图</h2><p>读取当前教材范围与最新作答记录…</p></div>
       : !map ? <div className="knowledge-load-error" role="alert"><BookOpen size={28} /><h2>这次没有读到知识地图</h2><p>{loadError || '稍后再试，已有作答记录会保留。'}</p><button className="button secondary" onClick={onRefresh}><RefreshCw size={16} /> 再试一次</button></div>
-        : <div className={`knowledge-layout ${openId ? 'has-detail' : ''}`}><KnowledgeMapView map={map} onOpen={open} selectedId={openId} />{openId && <aside className="knowledge-detail-panel" aria-label="所选知识点详情">{error ? <div className="knowledge-load-error" role="alert"><p>{error}</p><button className="text-button" onClick={close}><ArrowLeft size={16} /> 回到地图</button></div> : detail ? <KnowledgeDetailView detail={detail} onBack={close} pending={map.projection.pending} onOpenNode={open} onOpenHomework={onOpenHomework} busy={!!workspace.busy} /> : <div className="knowledge-detail-loading" role="status"><LoaderCircle className="spin" size={22} /><p>正在打开这个知识点…</p><button className="text-button" onClick={close}>回到地图</button></div>}</aside>}</div>}
+        : <div className={`knowledge-layout ${openId ? 'has-detail' : ''}`}><KnowledgeMapView map={map} onOpen={open} selectedId={openId} onOpenHomework={onOpenHomework} />{openId && <aside className="knowledge-detail-panel" aria-label="所选知识点详情">{error ? <div className="knowledge-load-error" role="alert"><p>{error}</p><button className="text-button" onClick={close}><ArrowLeft size={16} /> 回到地图</button></div> : detail ? <KnowledgeDetailView detail={detail} onBack={close} pending={map.projection.pending} onOpenNode={open} onOpenHomework={onOpenHomework} busy={!!workspace.busy} /> : <div className="knowledge-detail-loading" role="status"><LoaderCircle className="spin" size={22} /><p>正在打开这个知识点…</p><button className="text-button" onClick={close}>回到地图</button></div>}</aside>}</div>}
   </section>
 }

@@ -66,7 +66,18 @@ export interface CurriculumBookIdentity {
   isbn: string | null; term: 'up' | 'down' | 'full'; review_status: string; review_label: string; source_note: string | null
 }
 export interface CurriculumBooks { student_id: string; profile_revision: number; current_binding: CurriculumBookIdentity | null; books: CurriculumBookIdentity[] }
+export interface MappingCoverageItem {
+  case_id: string; question_id: string; homework_id: string; label: string; subject: string; stem_preview: string
+  source_role: 'model' | 'staff'; occurred_at: string; state?: 'no_direct_match' | 'mapping_pending' | 'not_linked'
+}
+export interface MappingCoverage {
+  scope: 'current_reliable_errors_in_selected_graph'; time_basis: 'current_attempt_occurred_at'; graph_version: string | null
+  window: { start: string | null; end_exclusive: string | null }; available: boolean
+  total: number; linked: number; unlinked: number; model_count: number; staff_count: number
+  items: MappingCoverageItem[]; truncated: boolean; notice: string
+}
 export interface KnowledgeMap {
+  mapping_coverage?: MappingCoverage
   student_id: string; grade?: number | null; projection: LearningProjection
   graph_version?: string | null; graph_review_status?: string
   nodes?: KnowledgeGraphNode[]; edges?: KnowledgeGraphEdge[]; book_identity?: CurriculumBookIdentity | null; source_note?: string | null
@@ -174,7 +185,17 @@ const isGraphNode = shape<KnowledgeGraphNode>({ ...evidenceSourceFields, id, nod
 const isGraphEdge = shape<KnowledgeGraphEdge>({ id, from_id: id, to_id: id, relation_type: oneOf(['prerequisite_of'] as const), scope: nullable(text), rationale: nullable(text) })
 const isBookIdentity = shape<CurriculumBookIdentity>({ graph_version: id, title: text, subject: text, grade: gradeValue, publisher_code: text, publisher_name: text, isbn: nullable(text), term: oneOf(['up', 'down', 'full'] as const), review_status: text, review_label: text, source_note: nullable(text) })
 export const isCurriculumBooks = shape<CurriculumBooks>({ student_id: id, profile_revision: count, current_binding: nullable(isBookIdentity), books: list(isBookIdentity, 100) })
-export const isKnowledgeMap = shape<KnowledgeMap>({ student_id: id, grade: optional(nullable(gradeValue)), graph_version: optional(nullable(id)), graph_review_status: optional(text), projection: isProjection, nodes: optional(list(isGraphNode, 3000)), edges: optional(list(isGraphEdge, 6000)), book_identity: optional(nullable(isBookIdentity)), source_note: optional(nullable(text)), states: list(isKnowledgeState), chapters: list(isChapter), subjects: optional(list(isCurriculumSubject)), notice: text })
+const mappingCoverageShape = shape<MappingCoverage>({
+  scope: oneOf(['current_reliable_errors_in_selected_graph'] as const), time_basis: oneOf(['current_attempt_occurred_at'] as const),
+  graph_version: nullable(id), window: shape({ start: nullable(date), end_exclusive: nullable(date) }), available: v => typeof v === 'boolean',
+  total: count, linked: count, unlinked: count, model_count: count, staff_count: count, truncated: v => typeof v === 'boolean', notice: text,
+  items: list(shape<MappingCoverageItem>({ case_id: id, question_id: id, homework_id: id, label: text, subject: text, stem_preview: text,
+    source_role: oneOf(['model', 'staff'] as const), occurred_at: date, state: optional(oneOf(['no_direct_match', 'mapping_pending', 'not_linked'] as const)) }), 30),
+})
+export const isMappingCoverage: Guard<MappingCoverage> = (value): value is MappingCoverage => mappingCoverageShape(value)
+  && value.total === value.linked + value.unlinked && value.total === value.model_count + value.staff_count
+  && value.items.length <= value.unlinked && value.truncated === (value.unlinked > value.items.length)
+export const isKnowledgeMap = shape<KnowledgeMap>({ mapping_coverage: optional(isMappingCoverage), student_id: id, grade: optional(nullable(gradeValue)), graph_version: optional(nullable(id)), graph_review_status: optional(text), projection: isProjection, nodes: optional(list(isGraphNode, 3000)), edges: optional(list(isGraphEdge, 6000)), book_identity: optional(nullable(isBookIdentity)), source_note: optional(nullable(text)), states: list(isKnowledgeState), chapters: list(isChapter), subjects: optional(list(isCurriculumSubject)), notice: text })
 export { isCurriculumCatalog, isStudentCurriculum }
 const isEvidence = shape<KnowledgeEvidence>({ id, occurred_at: date, question_text: nullable(text), homework_title: nullable(text), result: oneOf(evidenceResults), assistance_level: text, event_type: text, source_role: optional(oneOf(['model', 'sitting_teacher', 'unknown'] as const)), case_id: optional(id), question_id: optional(id), homework_id: optional(id), attempt_id: optional(id), decision_id: optional(id) })
 export const isKnowledgeDetail = shape<KnowledgeDetail>({

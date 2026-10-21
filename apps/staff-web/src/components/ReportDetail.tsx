@@ -1,3 +1,4 @@
+import MappingCoverageNote from './MappingCoverageNote'
 import { useEffect, useRef, useState } from 'react'
 import { Check, Copy, FileText, Send, Share2, TriangleAlert } from 'lucide-react'
 import type { FocusItem, Report, ReportSnapshot } from '../api/learningTypes'
@@ -43,6 +44,7 @@ export function SnapshotView({ snap }: { snap: ReportSnapshot }) {
         <dt>待老师核实</dt><dd>{tasks.awaiting_verification} 道 AI 候选待确认 · {tasks.not_judged} 道尚无判断</dd>
       </dl>
     </section>
+    <MappingCoverageNote coverage={snap.mapping_coverage} snapshot />
     {snap.focus.length > 0 && <><h3 className="block-title">具体问题</h3>{snap.focus.map(item => <Focus key={item.knowledge_id} item={item} />)}</>}
     {snap.steady.length > 0 && <section className="report-block"><h4>本期做得好的</h4><ul className="plain-list">{snap.steady.map(item =>
       <li key={item.knowledge_id}>{item.name}：答对 {item.correct} 次（独立完成 {item.independent_correct} 次；{evidenceSourceCounts(item)}）</li>)}</ul></section>}

@@ -37,6 +37,7 @@ from .learning_models import (KnowledgeDiagnosis, KnowledgeNode, LearningEvidenc
 from .learning_projection import (fingerprints, new_id, published_graph, register_periodic, register_projection_followup)
 from .learning_rules import compute_state, model_decision_usable
 from .models import Homework, Student
+from .learning_coverage import mapping_coverage
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 REPORT_RULE = "report-r2-evidence-source"
@@ -256,6 +257,8 @@ def build_snapshot(session, student: Student, start: date, end: date, cadence: s
         "focus": focus, "steady": steady, "unknown_current": unknown,
         "sufficient": bool(focus or steady), "evidence_ids": sorted(evidence_ids), "sections": sections,
         "limitations": LIMITATIONS}
+    if cadence == "half_month":
+        snapshot["mapping_coverage"] = mapping_coverage(session, student, start=window_start, end=window_end, include_states=False)
     if cadence == "daily":
         snapshot.update(daily_facts(session, student, entities, period_homeworks, window_start, window_end))
         snapshot["rule_version"], snapshot["limitations"], snapshot["unknown_current"] = DAILY_RULE, DAILY_LIMITATIONS, []
@@ -709,6 +712,13 @@ def render_report(body):
                  f"<dt>订正完成</dt><dd>老师确认 {e(tasks['corrected_resolved'])} 道；"
                  f"AI 初判订正正确、待核实 {e(tasks.get('ai_corrected_pending', 0))} 道；仍在订正 {e(tasks['correction_open'])} 道</dd>"
                  f"<dt>待老师核实</dt><dd>{e(tasks['awaiting_verification'] + tasks['not_judged'])} 道</dd></dl></section>")
+    mapping = snap.get("mapping_coverage")
+    if mapping and mapping["unlinked"]:
+        rows = "".join(f"<li>{e(item['subject'])} · {e(item['stem_preview'])}（{('AI 初判，尚未经老师核实' if item['source_role'] == 'model' else '老师已核实')}）</li>" for item in mapping["items"])
+        parts.append(f"<section class=notice><h2>还有错题尚未关联知识点</h2><p>生成这份报告时，本期当前作答仍判错或部分正确的 {e(mapping['total'])} 道题中，"
+                     f"{e(mapping['linked'])} 道已关联当前教材知识点，{e(mapping['unlinked'])} 道尚未关联。它们仍保留在原作业中，不计为新的薄弱点。</p><ul>{rows}</ul>"
+                     + ("<p class=muted>这里仅列最近 30 道，以上总数包含全部符合范围的题目。</p>" if mapping["truncated"] else "")
+                     + f"<p class=muted>{e(mapping['notice'])}这是生成时的记录，后续订正请以新版本为准。</p></section>")
     if snap["focus"]:
         parts.append("<h2>具体问题</h2>")
         for item in snap["focus"]:

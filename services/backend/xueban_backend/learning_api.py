@@ -28,6 +28,7 @@ from .curriculum_catalog import (canonical_subject, curriculum_stage, graph_is_u
                                  curriculum_matches_scope,
                                  supported_scopes, supported_scope)
 from .curriculum_binding import book_payload
+from .learning_coverage import mapping_coverage
 
 KID = r"^[a-z][a-z0-9_-]{2,63}$"
 STAFF = {"sitting_teacher", "campus_admin"}
@@ -436,6 +437,7 @@ def install_learning(app, engine, cfg, database_session, current_actor):
                           for edge in scoped_edges(session, graph, by_id)],
                 "states": items, "chapters": chapter_rollup([_node_dict(n) for n in nodes], states),
                 "subjects": subjects,
+                "mapping_coverage": mapping_coverage(session, session.get(Student, student_id)),
                 "notice": "仅统计当前年级与所选教材范围内的有效判定；参考分来自已拍作业样本，不代表整本教材掌握率。具体书图的知识点与关系由项目 AI 整理并经独立 AI 审查，不等于教师审核；未建模内容暂不判断。"}
 
     @app.get("/v1/students/{student_id}/knowledge/{knowledge_id}", operation_id="getStudentKnowledgeNode")

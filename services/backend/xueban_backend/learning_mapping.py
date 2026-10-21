@@ -435,6 +435,28 @@ def _digest(value):
                                      separators=(",", ":")).encode()).hexdigest()
 
 
+def model_input_binding(case, question, attempt, decision_row, homework, graph, profile, scoped):
+    """Pure provenance key shared by the mapper and its read-only coverage view.
+
+    Callers validate the current observation and curriculum before using this.
+    It does not authorize mapping, a model request, or a new learning fact.
+    """
+    q, a, decision = question.document, attempt.document, decision_row.document
+    binding = {
+        "case_id": case.id, "question_id": question.id, "question_revision": question.revision,
+        "attempt_id": attempt.id, "attempt_revision": attempt.revision,
+        "attempt_recognition_revision": a.get("recognition_revision"),
+        "decision_id": decision_row.id, "decision_revision": decision_row.revision,
+        "graph_version": graph.version, "profile_revision": profile.revision,
+    }
+    # Content binding also catches legacy/internal writes that omitted revision
+    # increments. The opaque digest never substitutes for the save-time checks.
+    binding["input_key"] = _digest({"protocol": MAPPING_VERSION, "binding": binding,
+        "question": q, "annotations": question.annotations, "attempt": a, "decision": decision,
+        "curriculum": homework.curriculum, "scope": scope_payload(scoped)})
+    return binding
+
+
 def _model_input(session, tenant_id, student_id, case_id):
     """Return only current, fully bound, scorable AI evidence in this book."""
     case = session.get(Entity, case_id)
@@ -479,18 +501,7 @@ def _model_input(session, tenant_id, student_id, case_id):
             or scoped is None or not curriculum_matches_scope(homework.curriculum or {}, scoped)
             or scope_payload(scoped)["catalog_status"] != "available"):
         return None
-    binding = {
-        "case_id": case.id, "question_id": question.id, "question_revision": question.revision,
-        "attempt_id": attempt.id, "attempt_revision": attempt.revision,
-        "attempt_recognition_revision": a.get("recognition_revision"),
-        "decision_id": decision_row.id, "decision_revision": decision_row.revision,
-        "graph_version": graph.version, "profile_revision": profile.revision,
-    }
-    # Content binding also catches legacy/internal writes that omitted revision
-    # increments. The opaque digest never substitutes for the save-time checks.
-    binding["input_key"] = _digest({"protocol": MAPPING_VERSION, "binding": binding,
-        "question": q, "annotations": question.annotations, "attempt": a, "decision": decision,
-        "curriculum": homework.curriculum, "scope": scope_payload(scoped)})
+    binding = model_input_binding(case, question, attempt, decision_row, homework, graph, profile, scoped)
     return {"binding": binding, "question": question, "attempt": attempt, "decision": decision,
             "homework": homework, "graph": graph, "scope": scoped}
 

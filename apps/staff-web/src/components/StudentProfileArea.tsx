@@ -5,8 +5,9 @@ import { dateTime, evidenceSourceCounts, openQuestionLabels, reasonLabels, statu
 import KnowledgeDetailPanel from './KnowledgeDetailPanel'
 import { LoadNote, RefreshButton, StatusTag, StudentPicker, useLoad, type LearningContext } from './LearningCommon'
 import LearningProfileEditor from './LearningProfileEditor'
+import MappingCoverageNote from './MappingCoverageNote'
 
-export default function StudentProfileArea({ ctx, studentId, onStudent }: { ctx: LearningContext; studentId: string | null; onStudent: (id: string) => void }) {
+export default function StudentProfileArea({ ctx, studentId, onStudent, onOpenCase }: { ctx: LearningContext; studentId: string | null; onStudent: (id: string) => void; onOpenCase?: (id: string) => void }) {
   const knowledge = useLoad(studentId, signal => ctx.learning.knowledge(studentId!, signal), ctx.version)
   const [chosen, setChosen] = useState<string | null>(null)
   const data = knowledge.data
@@ -33,6 +34,7 @@ export default function StudentProfileArea({ ctx, studentId, onStudent }: { ctx:
     </aside>
     <section className="learning-main">
       {!studentId ? <div className="learning-empty"><span className="round-icon"><UserRound size={23} /></span><h2>选择一位学员</h2><p>查看知识点状态、作答来源与诊断，并维护下一课 / 当前课次。</p></div> : <>
+        {data && <MappingCoverageNote coverage={data.mapping_coverage} onOpenCase={onOpenCase} />}
         {data && <div className="card">
           <p className="subtle">{data.notice}</p>
           <p className="subtle">{data.graph_version ? `课程图谱 ${data.graph_version}${data.graph_review_status.includes('unreviewed') ? '（试点版，尚未经教研审定）' : ''}` : '当前教材知识点目录待审核，暂不展示知识点状态。'}{data.projection.projected_at ? ` · 汇总于 ${dateTime(data.projection.projected_at)}` : ''}</p>
