@@ -8,7 +8,7 @@ export const learningErrorStatus: Record<string, number> = { forbidden: 403, opt
 const recoveryErrorCodes = new Set(['active', 'active_recovery', 'budget_exhausted', 'already_resolved', 'staff_confirmed', 'inactive_case', 'initial_recognition_pending', 'multiple_source_pages'].map(reason => `recognition_recheck_${reason}`))
 
 export class StudentApi {
-  constructor(readonly origin: string, private token: () => string | null, private revoked: () => void, private transport: typeof fetch = (...args) => globalThis.fetch(...args)) {}
+  constructor(readonly origin: string, private token: () => string | null, private revoked: () => void, private transport: typeof fetch = (...args) => globalThis.fetch(...args), private captureSessionFence: () => (() => boolean) = () => () => true) {}
   private async bounded(response: Response, maximum = 2_000_000): Promise<Uint8Array> {
     const reader = response.body?.getReader(); if (!reader) throw new StudentError('invalid_response', 502)
     const parts: Uint8Array[] = []; let size = 0
@@ -16,8 +16,9 @@ export class StudentApi {
     finally { await reader.cancel().catch(() => undefined) }
     const output = new Uint8Array(size); let offset = 0; for (const part of parts) { output.set(part, offset); offset += part.length } return output
   }
-  async request<T>(path: string, shape: string, body?: string, key?: string, publicRequest = false, method?: 'PUT'): Promise<T> {
+  async request<T>(path: string, shape: string, body?: string, key?: string, publicRequest = false, method?: 'PUT', onUnauthorized: () => void = this.revoked): Promise<T> {
     if (!path.startsWith('/v1/') || path.split('?')[0].includes('..') || path.includes('#') || path.includes('\\')) throw new StudentError('invalid_path', 422)
+    const stillCurrent = this.captureSessionFence()
     const token = this.token(); if (!publicRequest && !token) throw new StudentError('authentication_required', 401)
     const headers: Record<string, string> = { Accept: 'application/json' }
     if (!publicRequest) headers.Authorization = `Bearer ${token}`
@@ -30,7 +31,7 @@ export class StudentApi {
       let code = `http_${response.status}`
       try { const problem = JSON.parse(new TextDecoder().decode(await this.bounded(response))) as { code: string; status: number }; if (problem && problem.status === response.status && (valid('Problem', problem) || (path.startsWith('/v1/auth/') || path.startsWith('/v1/admin/')) && accountErrorStatus[problem.code] === response.status || shape === 'Learning' && learningErrorStatus[problem.code] === response.status || shape === 'RecognitionRecheckAccepted' && response.status === 409 && recoveryErrorCodes.has(problem.code))) code = problem.code } catch { /* No provider/body text escapes to the UI. */ }
       // A mistyped current password does not revoke an otherwise valid session.
-      if (response.status === 401 && !publicRequest && !(path === '/v1/auth/change-password' && code === 'invalid_credentials')) this.revoked()
+      if (response.status === 401 && !publicRequest && !(path === '/v1/auth/change-password' && code === 'invalid_credentials') && stillCurrent()) onUnauthorized()
       throw new StudentError(code, response.status)
     }
     let value: unknown

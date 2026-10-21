@@ -59,6 +59,7 @@ export class StudentClient {
   private currentIdentity: IdentityContext | null = null
   private student: string | null = null
   private epoch = 0
+  private identityFlight: { epoch: number; session: Session | null; promise: Promise<IdentityContext> } | null = null
   private listeners = new Set<() => void>()
   private api: StudentApi
   private store: DraftStore
@@ -77,7 +78,7 @@ export class StudentClient {
     if (url.origin !== this.origin || !['http:', 'https:'].includes(url.protocol)) throw new StudentError('invalid_origin', 422)
     this.storage = options.storage ?? sessionStorage; this.store = options.store ?? new DraftStore()
     this.normalize = options.normalize ?? normalizePhoto; this.edit = options.edit ?? editPhoto; this.sleep = options.sleep ?? (ms => new Promise(resolve => setTimeout(resolve, ms)))
-    this.api = new StudentApi(this.origin, () => this.token(), () => this.disconnect(), options.transport)
+    this.api = new StudentApi(this.origin, () => this.token(), () => this.disconnect(), options.transport, () => { const epoch = this.epoch, session = this.session; return () => this.currentSession(epoch, session) })
     this.housekeeping = this.store.purgeExpired().catch(() => null)
   }
   /** blob: URLs for photos of the signed-in student; all are revoked on sign-out or account loss. */
@@ -95,7 +96,7 @@ export class StudentClient {
   private load<T>(name: string): T | null { try { return JSON.parse(this.storage.getItem(this.storageKey(name)) ?? 'null') as T | null } catch { return null } }
   private persist(name: string, value: unknown) { try { this.storage.setItem(this.storageKey(name), JSON.stringify(value)) } catch { throw new StudentError('session_storage_unavailable', 0, '无法保存本次会话，请允许浏览器会话存储后重试。') } }
   private token() { if (this.session && Date.parse(this.session.expires_at) <= Date.now()) this.disconnect(); return this.session?.access_token ?? null }
-  private clearSession(clearPending = true) { this.epoch++; this.session = null; this.currentAccount = null; this.currentIdentity = null; this.student = null; this.dropMedia(); if (clearPending) this.pendingAuth.clear(); this.storage.removeItem(this.storageKey('session')); this.storage.removeItem(this.storageKey('selected')); this.storage.removeItem(this.storageKey('pair')); this.storage.removeItem(this.storageKey('scope')); this.changed() }
+  private clearSession(clearPending = true) { this.epoch++; this.identityFlight = null; this.session = null; this.currentAccount = null; this.currentIdentity = null; this.student = null; this.dropMedia(); if (clearPending) this.pendingAuth.clear(); this.storage.removeItem(this.storageKey('session')); this.storage.removeItem(this.storageKey('selected')); this.storage.removeItem(this.storageKey('pair')); this.storage.removeItem(this.storageKey('scope')); this.changed() }
   disconnect() { this.clearSession() }
   // Identifiers only (already used as IndexedDB scope keys), so a later account
   // failure during restore can still find the device data it must remove.
@@ -112,25 +113,48 @@ export class StudentClient {
    * can no longer use the device data. Remove that scope's drafts, photos and
    * journal; a plain local expiry keeps them for the next sign-in.
    */
+  private currentSession(epoch: number, session: Session | null) { return this.epoch === epoch && this.session === session }
   private async identityRequest<T>(path: string, shape: string): Promise<T> {
-    const hint = this.scopeHint(), live = !!this.session && Date.parse(this.session.expires_at) > Date.now()
-    try { return await this.api.request<T>(path, shape) }
-    catch (error) {
-      if (!(error instanceof StudentError) || !(error.status === 403 && error.code === 'access_denied' || error.status === 401 && error.code === 'authentication_required' && live)) throw error
+    const epoch = this.epoch, session = this.session
+    const hint = this.scopeHint(), live = !!session && Date.parse(session.expires_at) > Date.now()
+    try {
+      // Identity reads own their rejection cleanup so an old 401 cannot sign out
+      // a newer login before the session fence is checked.
+      const value = await this.api.request<T>(path, shape, undefined, undefined, false, undefined, () => undefined)
+      if (!this.currentSession(epoch, session)) throw new StudentError('session_changed', 401)
+      return value
+    } catch (error) {
+      if (!this.currentSession(epoch, session)) throw new StudentError('session_changed', 401)
+      if (!(error instanceof StudentError) || !(error.status === 403 && error.code === 'access_denied' || error.status === 401 && error.code === 'authentication_required' && live)) {
+        if (error instanceof StudentError && error.status === 401) this.disconnect()
+        throw error
+      }
+      // Retire this session before asynchronous device cleanup. A later login
+      // must not be cleared when the old scope's cleanup finishes.
+      this.disconnect()
       if (hint.student) await this.store.purgeScopes(scope => this.matchesScope(scope, hint)).catch(() => null)
-      this.dropMedia(); this.disconnect()
       throw new StudentError('account_unavailable', error.status, error.status === 403 ? '这个账号目前不能查看作业，本机保存的草稿、照片和未确认的提交已清除。请联系老师确认账号。' : '登录已失效或账号已停用，本机保存的草稿和照片已清除。请重新登录。')
     }
   }
   selectStudent(id: string) { if (!this.currentAccount || this.currentAccount.student_id !== id || !this.currentIdentity?.authorized_students.some(s => s.student_id === id)) throw new StudentError('access_denied', 403); if (id !== this.student) { this.epoch++; this.student = id; this.dropMedia(); this.changed() } }
   private check(ctx: Context) { if (this.epoch !== ctx.epoch || !this.session || this.student !== ctx.student) throw new StudentError('session_changed', 401) }
   private async read<T>(ctx: Context, path: string, shape: string) { this.check(ctx); const value = await this.api.request<T>(path, shape); this.check(ctx); return value }
-  private async verifyIdentity(): Promise<IdentityContext> {
-    const epoch = this.epoch
+  private verifyIdentity(): Promise<IdentityContext> {
+    const epoch = this.epoch, session = this.session, existing = this.identityFlight
+    if (existing && existing.epoch === epoch && existing.session === session) return existing.promise
+    // Register before executing any identity update or synchronous subscriber.
+    const promise = Promise.resolve().then(() => this.fetchIdentity(epoch, session))
+    const flight = { epoch, session, promise }; this.identityFlight = flight
+    const clear = () => { if (this.identityFlight === flight) this.identityFlight = null }
+    void promise.then(clear, clear)
+    return promise
+  }
+  private async fetchIdentity(epoch: number, session: Session | null): Promise<IdentityContext> {
+    if (!this.currentSession(epoch, session)) throw new StudentError('session_changed', 401)
     let identity: IdentityContext
     try { identity = await this.identityRequest<IdentityContext>('/v1/me', 'IdentityContext') }
-    catch (error) { if (epoch === this.epoch) { this.epoch++; this.currentIdentity = null; this.student = null; this.dropMedia(); this.changed() } throw error }
-    if (epoch !== this.epoch) throw new StudentError('session_changed', 401)
+    catch (error) { if (this.currentSession(epoch, session)) { this.epoch++; this.currentIdentity = null; this.student = null; this.dropMedia(); this.changed() } throw error }
+    if (!this.currentSession(epoch, session)) throw new StudentError('session_changed', 401)
     if (this.currentIdentity && this.currentIdentity.actor_id !== identity.actor_id) { this.disconnect(); throw new StudentError('session_changed', 401) }
     if (this.student && !identity.authorized_students.some(s => s.student_id === this.student)) {
       this.epoch++; this.currentIdentity = null; this.student = null; this.dropMedia(); this.changed()
@@ -140,29 +164,34 @@ export class StudentClient {
     this.currentIdentity = identity
     // Initial login/restoration publishes once selection is ready. Emitting
     // earlier lets subscribers race authorize() against student selection.
-    if (changed && this.student) this.changed(); return identity
+    if (changed && this.student) this.changed()
+    if (!this.currentSession(epoch, session)) throw new StudentError('session_changed', 401)
+    return identity
   }
   private async readyAccount(): Promise<IdentityContext | null> {
-    const epoch = this.epoch
+    const epoch = this.epoch, session = this.session
     const account = await this.identityRequest<Account>('/v1/auth/account', 'Account')
-    if (epoch !== this.epoch) throw new StudentError('session_changed', 401)
+    if (!this.currentSession(epoch, session)) throw new StudentError('session_changed', 401)
     this.currentAccount = account
     if (account.must_change_password) { this.currentIdentity = null; this.student = null; this.changed(); return null }
     const identity = await this.verifyIdentity()
+    if (!this.currentSession(epoch, session)) throw new StudentError('session_changed', 401)
     if (account.student_id) {
       if (!identity.authorized_students.some(s => s.student_id === account.student_id)) { this.disconnect(); throw new StudentError('access_denied', 403) }
       this.student = account.student_id
     } else if (identity.roles.includes('student')) { this.disconnect(); throw new StudentError('access_denied', 403) }
-    this.changed(); return identity
+    this.changed()
+    if (!this.currentSession(epoch, session)) throw new StudentError('session_changed', 401)
+    return identity
   }
   async restore(): Promise<IdentityContext | null> {
     // Pairing is no longer a product login path. Never redeem an old pending code.
     this.storage.removeItem(this.storageKey('pair')); this.storage.removeItem(this.storageKey('selected'))
     const session = this.load<Session>('session')
     if (!session || session.kind !== 'account' || typeof session.access_token !== 'string' || !session.access_token || !Number.isFinite(Date.parse(session.expires_at)) || Date.parse(session.expires_at) <= Date.now()) { this.disconnect(); return null }
-    this.session = session
+    this.session = session; const epoch = this.epoch
     try { return await this.readyAccount() }
-    catch (error) { this.currentAccount = null; this.currentIdentity = null; this.student = null; this.dropMedia(); this.changed(); throw error }
+    catch (error) { if (this.currentSession(epoch, session)) { this.currentAccount = null; this.currentIdentity = null; this.student = null; this.dropMedia(); this.changed() } throw error }
   }
   private async authWrite<T>(path: string, payload: unknown, shape: string, publicRequest = false): Promise<T> {
     const body = JSON.stringify(payload), previous = this.pendingAuth.get(path)
@@ -213,12 +242,14 @@ export class StudentClient {
     if (!this.session) throw new StudentError('authentication_required', 401)
     if (this.currentAccount?.must_change_password) throw new StudentError('password_change_required', 403)
     if (!this.student) throw new StudentError('access_denied', 403)
-    const wanted = this.student, identity = await this.verifyIdentity()
+    const epoch = this.epoch, session = this.session, wanted = this.student, identity = await this.verifyIdentity()
+    if (!this.currentSession(epoch, session)) throw new StudentError('session_changed', 401)
     if (!wanted || this.student !== wanted || !identity.authorized_students.some(s => s.student_id === wanted)) { this.student = null; this.dropMedia(); this.changed(); throw new StudentError('access_denied', 403) }
     await this.housekeeping
+    if (!this.currentSession(epoch, session) || this.student !== wanted) throw new StudentError('session_changed', 401)
     const hint = JSON.stringify({ actor: identity.actor_id, student: wanted })
     if (this.storage.getItem(this.storageKey('scope')) !== hint) try { this.storage.setItem(this.storageKey('scope'), hint) } catch { /* Only an optimization for later cleanup. */ }
-    const ctx = { student: wanted, epoch: this.epoch, scope: JSON.stringify([this.origin, identity.actor_id, wanted]) }
+    const ctx = { student: wanted, epoch, scope: JSON.stringify([this.origin, identity.actor_id, wanted]) }
     this.check(ctx); return ctx
   }
   /** One-time message about unconfirmed submissions that expired on this device. */
