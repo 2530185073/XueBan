@@ -2,31 +2,44 @@
 
 本包提供同步 Worker 调用组件；公开 API、授权、作业状态机和数据落库由后端 Worker 负责。导入不启用模型；无凭据或无明确 base URL 时拒绝调用。部署端负责注入已核实的服务域名与凭据，不从学生客户端接受这些配置。
 
-## 整页双模型路径
+## 当前整页双模型路径（v5.2）
 
-`CORRECTION_MODE=two_model` 使用 `TwoModelWholePagePipeline`，提示版本为
-`photo-correction.two-model.v2`。每张原图并行调用 DeepSeek（`ARK_*`）与
-Astra（`ZYAI_*`、`REVIEW_MODEL`）；两方独立读题、抄学生笔迹和判题，互相看不到候选文字、
-答案或结论。不先分框，不为每道题另发模型请求，不设置第三轮投票。
+`CORRECTION_MODE=two_model` 使用 `TwoModelWholePagePipeline`。默认按 `answer_slot`
+记录，`CORRECTION_TARGET_UNIT=question` 是尚未通过原图验收的实验选项。
+首轮每张完整原图并行交给两路模型；每路都独立读取题面、学生笔迹并判断，
+没有先做像素切题。主路使用 `ARK_*`；第二路使用 `REVIEW_API`、`REVIEW_MODEL`、
+`REVIEW_THINKING` 和 `ZYAI_*`（缺省凭据可回退 ARK），不能仅据默认值推断部署型号。
 
-服务端按来源照片和逐空题号匹配，两份完整题干、选项、学生作答和判定都一致且没有疑点，
-才输出确定的 AI 候选。明确错误还要求两方都有答案和改法，并且最终答案一致。任何一方
-失败、漏题或存在分歧时，仅对应题保留待核，不把不确定性转成错题或薄弱点。每空保留原图
-关联、双方原始观察及请求账本；两份 `correct` 仍不等于教师确认。
+完整题面、选项、作答和判定一致且无实质疑点时，形成明确的 AI 候选；不升级为老师核实。
+格式、表述和判定差异可进入批量图像复核。每批最多六个目标，单批失败不使整页失效。
+真实笔迹或必要条件分歧另作独立原图核读；实际判题分歧由 `VISUAL_REVIEW_MODEL`
+指定的模型裁决。它不是简单多数票，也不能用相同答案补写原笔迹。
 
-结果使用 `items[].assessment`，其中 `verification.mode=two_model`，
-`verification.status` 为 `matched/conflict/degraded`，`reason_codes` 说明分歧来源。
-明确错误提供 `correct_answer/correction_method`；知识点只取双方标签交集，且学科不一致时
-返回空标签，最终教材范围由 Worker 校验。`recognize` 一次完成整页候选判题，正常上传不应再逐题
-调用 `check`；兼容的 `check/recheck` 入口只用于显式重试，重新读取当前作答原图并核对目标题。
+v5.2 允许明确的计算指令翻译及完整计算题头差异由 AI 核对；必须保留完整相同算式，
+不消除数字、正负号、变量、单位、声调、运算要求或题号冲突。复核选源绑定原始题面、
+作答、引文和来源哈希；选第三路观察时还需与实际原题绑定。未知、超时和看不清分别记录，
+不会据此形成确定薄弱点，也不自动创建老师求助。
 
-两方均使用可取消的 HTTP 总截止时间：DeepSeek 整页调用最多 200 秒，Astra 仍为 118 秒。
-每方最多一次供应商请求，不因失败自动增加付费重试；截止时间覆盖排队、传输及读体，
-到期保留待核和调用账本，不能用成功的一方直接放行。Responses 默认使用 SSE，必须收到完整 terminal response；构造时 `stream=False`
-可兼容非流接口，仍使用同一总截止时间、严格 schema 与失败审计。
+`items[].assessment.verification` 记录 matched / reviewed / conflict / degraded 等状态、
+实际原因及独立核读依据。完整观察和调用账本保留在内部审计中，公开接口不泄露模型配置。
+图像与同题订正仍由持久化层的资产、版本、权限和当前作答指针约束。
 
-`CORRECTION_MODE=multimodel` 保留原三模型兼容路径；`single` 保留以下逐题旧接口。
-未设置模式的底层工厂仍为 `single`，运行脚本负责显式选择体验版本。
+同一作答的原图重核由 `original_recheck.py` 限定一个原有目标，只传题号、位置与单元提示，
+不传旧答案或旧判定。服务层每组作答原图最多派发两次；恢复成功修订识读版本，
+保留原作答 ID、照片、时间、帮助记录及历史快照。任务完成不等于恢复已应用，
+客户端必须读取真实 `last_outcome`。学生重新作答仍走新照片订正流程。
+
+整页初读每方最多一次实际供应商请求，不隐式重试。主路总截止配置为 200 秒，
+第二路和独立视觉客户端为 118 秒；后续复核另有调度预算，因此这些数值不是整页 SLA。
+Responses 默认 SSE，须收到完整终结响应。服务失败与已经派发的计费状态分别审计，
+不能推断超时免费。线上效果与工程测试分别验收，现有原图质量和时延阻断见
+[持续交付记录](../../../../docs/CONTINUOUS_DELIVERY.md)。
+
+## 旧单路与三模型适配器
+
+`CORRECTION_MODE=multimodel` 和 `single` 保留兼容路径。下方逐题 API、默认提示版本和
+重试参数属于旧适配器，不能据此推断上面的整页模式行为。底层工厂未设置模式时仍为
+`single`；运行脚本必须显式选择。
 
 ```python
 from xueban_backend.providers import ArkClient, ArkSettings
