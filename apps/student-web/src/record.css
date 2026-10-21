@@ -151,6 +151,7 @@ del.timeline-title,.timeline-item.invalid .timeline-text{color:#8d9488;font-weig
 .recognition-answer.correct{border-left-color:#4d9662;background:#edf6eb;color:#285b3c}
 .recognition-answer.incorrect{border-left-color:#c46550;background:#fff0eb;color:#914333}
 .recognition-answer.uncertain{border-left-color:#c29a50;background:#fff7e7;color:#795b2b}
+.recognition-answer.unanswered{border-left-color:#9aa892;background:#f4f5ed;color:#52604f}
 .recognition-answer-slots{display:grid;gap:8px}
 .slot-verdict{font-size:13px;font-weight:600;margin-left:12px;white-space:nowrap}
 .recognition-answer .slot-correction{font-size:14px;color:#285b3c}

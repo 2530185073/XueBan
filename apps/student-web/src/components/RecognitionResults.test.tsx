@@ -36,6 +36,24 @@ describe('per-blank student feedback', () => {
     expect(html).not.toContain('aria-label="逐空判定"')
     expect(html).toContain('我的作答')
   })
+  it('keeps an unanswered blank neutral and distinct from an unreadable answer', () => {
+    const value = row()
+    value.question.blank_count = 3
+    value.case.current_decision!.answer_checks = [
+      { index: 1, prompt: '第一空', student_answer: '3', verdict: 'correct', correct_answer: null, explanation: '正确。' },
+      { index: 2, prompt: '第二空', student_answer: null, verdict: 'unanswered', correct_answer: '不应提前显示的答案', explanation: '尚未作答。' },
+      { index: 3, prompt: '第三空', student_answer: null, verdict: 'unable_to_judge', correct_answer: '不可靠的候选答案', explanation: '笔迹暂未读清。' },
+    ]
+    const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} />)
+    expect(html).toContain('class="recognition-answer unanswered"')
+    expect(html).toContain('未作答 <span class="slot-verdict">待完成</span>')
+    expect(html).toContain('class="recognition-answer uncertain"')
+    expect(html).toContain('暂未读到清楚的作答 <span class="slot-verdict">待核对</span>')
+    expect(html).not.toContain('✕ 错误')
+    expect(html).not.toContain('class="recognition-answer incorrect"')
+    expect(html).not.toContain('不应提前显示的答案')
+    expect(html).not.toContain('不可靠的候选答案')
+  })
 })
 
 const removedLegacySummary = '旧模型审核（完成 2/3 轮）：正确 67% / 错误 33%（模型估计，未经校准）；存在分歧或证据不足，按保守策略标错，请核对参考答案。'

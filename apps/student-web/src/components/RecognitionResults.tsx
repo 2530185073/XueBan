@@ -29,6 +29,13 @@ const stateLabels: Record<StudentResultState, string> = {
   service_failure: '服务失败',
 }
 
+const slotFeedback = {
+  correct: { tone: 'correct', label: '✓ 正确' },
+  incorrect: { tone: 'incorrect', label: '✕ 错误' },
+  unanswered: { tone: 'unanswered', label: '待完成' },
+  unable_to_judge: { tone: 'uncertain', label: '待核对' },
+} as const
+
 const controlledServiceUncertaintyMessages = new Set([
   '请先在学生档案设置已支持的年级，并选择本题学科。',
   '本题不在已配置的首发年级、学科和教材出版社范围内，暂不提供判题结论。',
@@ -79,10 +86,10 @@ export function QuestionCard({ row, index, open, onToggle, subjects = [], onSele
         {!!row.question.blank_count && <span className="blank-note">填空题 · {row.question.blank_count} 个空</span>}
       </div>
       {usable && decision.answer_checks?.length ? <div className="recognition-answer-slots" aria-label="逐空判定">
-        {decision.answer_checks.map(part => <div key={part.index} className={`recognition-answer ${part.verdict === 'correct' ? 'correct' : part.verdict === 'unable_to_judge' ? 'uncertain' : 'incorrect'}`}>
+        {decision.answer_checks.map(part => <div key={part.index} className={`recognition-answer ${slotFeedback[part.verdict].tone}`}>
           <span className="recognition-label">第{part.index}{row.question.blank_count ? '空' : '项'} · {part.prompt}</span>
-          <p>{part.student_answer || '未作答'} <span className="slot-verdict">{part.verdict === 'correct' ? '✓ 正确' : part.verdict === 'unable_to_judge' ? '待核对' : '✕ 错误'}</span></p>
-          {part.verdict !== 'correct' && part.correct_answer && <p className="slot-correction">应填：{part.correct_answer}</p>}
+          <p>{part.student_answer || (part.verdict === 'unanswered' ? '未作答' : '暂未读到清楚的作答')} <span className="slot-verdict">{slotFeedback[part.verdict].label}</span></p>
+          {part.verdict === 'incorrect' && part.correct_answer && <p className="slot-correction">应填：{part.correct_answer}</p>}
         </div>)}
       </div> : <div className={`recognition-answer ${state}`}>
         <span className="recognition-label">我的作答</span>
