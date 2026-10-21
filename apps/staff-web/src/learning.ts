@@ -1,7 +1,7 @@
 import type { AttemptRead, Hint } from './api/contracts.generated'
 import type {
   AgentRun, AssistanceInput, Certainty, Delivery, Evidence, GateReason, KnowledgeLink, KnowledgeNode, LearningStatus, LinkRole, Memory, MemoryInput, MemoryStatus,
-  Report, StaffMemoryCategory, EvidenceSources,
+  Report, ReportSnapshot, StaffMemoryCategory, EvidenceSources,
 } from './api/learningTypes'
 
 // Mastery is only ever shown as these words, never as a percentage or score.
@@ -25,6 +25,18 @@ export function evidenceSourceCounts(sources: EvidenceSources): string {
     sources.staff_verified_evidence_count !== undefined && `老师核实 ${sources.staff_verified_evidence_count} 次`,
   ].filter(Boolean)
   return parts.length ? parts.join(' · ') : '作答来源尚未分列'
+}
+// Older snapshots do not separate usable AI judgments from unfinished reads.
+// Interpret their stored totals only; never rewrite the historical snapshot.
+export function reportJudgmentCounts(tasks: ReportSnapshot['school_tasks']) {
+  const ai = tasks.ai_judged
+  const verdicts = tasks.ai_verdicts
+  const values = verdicts && [verdicts.correct, verdicts.incorrect, verdicts.partially_correct, verdicts.unanswered]
+  const separated = typeof ai === 'number' && Number.isSafeInteger(ai) && ai >= 0 && ai <= tasks.awaiting_verification &&
+    values !== undefined && values.every(n => Number.isSafeInteger(n) && n >= 0) && values.reduce((a, b) => a + b, 0) === ai
+  return separated
+    ? { ai: ai as number, unfinished: tasks.not_judged + tasks.awaiting_verification - (ai as number), unclassified: 0 }
+    : { ai: null, unfinished: tasks.not_judged, unclassified: tasks.awaiting_verification }
 }
 export const openQuestionLabels: Record<string, string> = { independence_unverified: '独立完成情况未核实', cause_not_diagnosed: '错误原因尚未诊断' }
 export const sufficiencyLabels: Record<string, string> = { substantial: '证据较充分', limited: '证据有限', insufficient: '证据不足' }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowRight, Check, CheckCheck, Copy, MessageSquareText, Plus, Send, TriangleAlert } from 'lucide-react'
 import type { QueuedReport, Report, ReportSnapshot } from '../api/learningTypes'
-import { dailyMessage, dateTime, dayLabel, deliveryLabel, evidenceSourceCounts, evidenceSourceLabel, recentDays, shareUrl } from '../learning'
+import { dailyMessage, dateTime, dayLabel, deliveryLabel, evidenceSourceCounts, evidenceSourceLabel, recentDays, reportJudgmentCounts, shareUrl } from '../learning'
 import { LoadNote, RefreshButton, useLoad, type LearningContext } from './LearningCommon'
 import { ShareLinkList } from './ShareLinkList'
 
@@ -9,17 +9,18 @@ const LINK_DAYS = 7
 
 export function DailySnapshotView({ snap }: { snap: ReportSnapshot }) {
   const { coverage, school_tasks: tasks, help } = snap
-  const pending = tasks.awaiting_verification + tasks.not_judged
+  const judgments = reportJudgmentCounts(tasks)
   const kinds = snap.activity_kinds
   const optional = snap.sections.optional_activity
   return <div className="snapshot">
-    {pending > 0 && <p className="preview-note"><TriangleAlert size={14} /> 还有 {pending} 道题未经老师核实。报告会分别标注 AI 初判与老师核实；尚不能判断的题不计作已确认对错。</p>}
     <section className="report-block">
       <h4>今天的作业</h4>
       {coverage.homeworks ? <dl className="facts">
         <dt>拍照作业</dt><dd>{coverage.homeworks} 份，共 {tasks.questions} 道题</dd>
         <dt>老师已核实</dt><dd>{tasks.staff_verified} 道：答对 {tasks.verdicts.correct} · 答错 {tasks.verdicts.incorrect} · 部分正确 {tasks.verdicts.partially_correct}</dd>
-        {tasks.ai_verdicts && <><dt>AI 初判（未核实）</dt><dd>{tasks.ai_judged ?? 0} 道：答对 {tasks.ai_verdicts.correct} · 答错 {tasks.ai_verdicts.incorrect} · 部分正确 {tasks.ai_verdicts.partially_correct} · 未作答 {tasks.ai_verdicts.unanswered}</dd></>}
+        {judgments.ai !== null && tasks.ai_verdicts ? <><dt>AI 初判，未经老师核实</dt><dd>{judgments.ai} 道：答对 {tasks.ai_verdicts.correct} · 答错 {tasks.ai_verdicts.incorrect} · 部分正确 {tasks.ai_verdicts.partially_correct} · 未作答 {tasks.ai_verdicts.unanswered}</dd></>
+          : <><dt>未分列的未核实记录</dt><dd>{judgments.unclassified} 道；这份记录未可靠分列有效 AI 初判与未完成识读。</dd></>}
+        <dt>{judgments.ai === null ? '尚无判定（已记录）' : '尚未形成可用判定'}</dt><dd>{judgments.unfinished} 道，不计作已确认对错。</dd>
         <dt>订正</dt><dd>已完成 {tasks.corrected_resolved} 道 · 还没完成 {tasks.correction_open} 道</dd>
         {!!tasks.ai_corrected_pending && <><dt>订正 AI 初判通过</dt><dd>{tasks.ai_corrected_pending} 道，尚未经老师核实</dd></>}
       </dl> : <p className="subtle">今天没有拍照提交学校作业。</p>}

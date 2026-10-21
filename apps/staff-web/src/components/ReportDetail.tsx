@@ -2,7 +2,7 @@ import MappingCoverageNote from './MappingCoverageNote'
 import { useEffect, useRef, useState } from 'react'
 import { Check, Copy, FileText, Send, Share2, TriangleAlert } from 'lucide-react'
 import type { FocusItem, Report, ReportSnapshot } from '../api/learningTypes'
-import { dateTime, evidenceSourceCounts, openQuestionLabels, periodLabel, regeneratedLabels, reportStatusLabels, shareUrl, statusLabel } from '../learning'
+import { dateTime, evidenceSourceCounts, openQuestionLabels, periodLabel, reportJudgmentCounts, regeneratedLabels, reportStatusLabels, shareUrl, statusLabel } from '../learning'
 import { LoadNote, RefreshButton, useLoad, type LearningContext } from './LearningCommon'
 import { ShareLinkList } from './ShareLinkList'
 
@@ -28,6 +28,7 @@ function Focus({ item }: { item: FocusItem }) {
 
 export function SnapshotView({ snap }: { snap: ReportSnapshot }) {
   const { coverage, school_tasks: tasks, help } = snap
+  const judgments = reportJudgmentCounts(tasks)
   const optional = snap.sections.optional_activity
   return <div className="snapshot">
     <section className="report-block">
@@ -38,10 +39,11 @@ export function SnapshotView({ snap }: { snap: ReportSnapshot }) {
         <dt>拍照作业</dt><dd>{coverage.homeworks} 份，共 {tasks.questions} 道题</dd>
         <dt>老师已核实</dt><dd>{tasks.staff_verified} / {tasks.questions} 道</dd>
         <dt>已核实中</dt><dd>答对 {tasks.verdicts.correct} · 需要订正 {tasks.verdicts.incorrect} · 部分正确 {tasks.verdicts.partially_correct} · 未作答 {tasks.verdicts.unanswered}</dd>
-        {tasks.ai_verdicts && <><dt>AI 初判（未核实）</dt><dd>{tasks.ai_judged ?? 0} 道：答对 {tasks.ai_verdicts.correct} · 需要订正 {tasks.ai_verdicts.incorrect} · 部分正确 {tasks.ai_verdicts.partially_correct} · 未作答 {tasks.ai_verdicts.unanswered}</dd></>}
+        {judgments.ai !== null && tasks.ai_verdicts ? <><dt>AI 初判，未经老师核实</dt><dd>{judgments.ai} 道：答对 {tasks.ai_verdicts.correct} · 需要订正 {tasks.ai_verdicts.incorrect} · 部分正确 {tasks.ai_verdicts.partially_correct} · 未作答 {tasks.ai_verdicts.unanswered}</dd></>
+          : <><dt>未分列的未核实记录</dt><dd>{judgments.unclassified} 道；这份记录未可靠分列有效 AI 初判与未完成识读。</dd></>}
+        <dt>{judgments.ai === null ? '尚无判定（已记录）' : '尚未形成可用判定'}</dt><dd>{judgments.unfinished} 道，不计作已确认对错。</dd>
         <dt>订正</dt><dd>完成 {tasks.corrected_resolved} 道 · 仍在订正 {tasks.correction_open} 道</dd>
         {!!tasks.ai_corrected_pending && <><dt>订正 AI 初判通过</dt><dd>{tasks.ai_corrected_pending} 道，尚未经老师核实</dd></>}
-        <dt>待老师核实</dt><dd>{tasks.awaiting_verification} 道 AI 候选待确认 · {tasks.not_judged} 道尚无判断</dd>
       </dl>
     </section>
     <MappingCoverageNote coverage={snap.mapping_coverage} snapshot />

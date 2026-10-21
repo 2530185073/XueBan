@@ -687,6 +687,27 @@ def render_missing():
             "<h1>链接不可用</h1><p>这个报告链接不存在、已过期或已被撤销。请联系托管班老师获取新的链接。</p></section></main></html>")
 
 
+def _report_judgment_counts(tasks):
+    """Read-only display of saved counts, including old unseparated snapshots."""
+    ai, verdicts = tasks.get("ai_judged"), tasks.get("ai_verdicts")
+    values = [verdicts.get(key) for key in VERDICT_LABEL] if isinstance(verdicts, dict) else []
+    separated = (type(ai) is int and 0 <= ai <= tasks["awaiting_verification"]
+                 and len(values) == len(VERDICT_LABEL)
+                 and all(type(value) is int and value >= 0 for value in values) and sum(values) == ai)
+    return ({"ai": ai, "unfinished": tasks["not_judged"] + tasks["awaiting_verification"] - ai, "unclassified": 0}
+            if separated else {"ai": None, "unfinished": tasks["not_judged"], "unclassified": tasks["awaiting_verification"]})
+
+
+def _render_judgment_summary(tasks):
+    counts = _report_judgment_counts(tasks)
+    e = lambda value: html.escape(str(value))  # noqa: E731
+    if counts["ai"] is None:
+        return (f"<dt>未分列的未核实记录</dt><dd>{e(counts['unclassified'])} 道；这份记录未可靠分列有效 AI 初判与未完成识读。</dd>"
+                f"<dt>尚无判定（已记录）</dt><dd>{e(counts['unfinished'])} 道，不计作已确认对错。</dd>")
+    return (f"<dt>AI 初判，未经老师核实</dt><dd>{e(counts['ai'])} 道</dd>"
+            f"<dt>尚未形成可用判定</dt><dd>{e(counts['unfinished'])} 道，不计作已确认对错。</dd>")
+
+
 def render_report(body):
     if body["report"]["cadence"] == "daily":
         return render_daily(body)
@@ -708,10 +729,10 @@ def render_report(body):
                  f"<dt>拍照作业</dt><dd>{e(coverage['homeworks'])} 份，共 {e(tasks['questions'])} 道题</dd>"
                  f"<dt>老师已核实</dt><dd>{e(tasks['staff_verified'])} / {e(tasks['questions'])} 道</dd>"
                  f"<dt>其中答对</dt><dd>{e(tasks['verdicts']['correct'])} 道；答错 {e(tasks['verdicts']['incorrect'])} 道；部分正确 {e(tasks['verdicts']['partially_correct'])} 道</dd>"
-                 f"<dt>AI 初判（单列）</dt><dd>{e(tasks.get('ai_judged', 0))} 道，尚未经老师核实</dd>"
+                 + _render_judgment_summary(tasks) +
                  f"<dt>订正完成</dt><dd>老师确认 {e(tasks['corrected_resolved'])} 道；"
-                 f"AI 初判订正正确、待核实 {e(tasks.get('ai_corrected_pending', 0))} 道；仍在订正 {e(tasks['correction_open'])} 道</dd>"
-                 f"<dt>待老师核实</dt><dd>{e(tasks['awaiting_verification'] + tasks['not_judged'])} 道</dd></dl></section>")
+                 f"AI 初判订正正确 {e(tasks.get('ai_corrected_pending', 0))} 道（尚未经老师核实）；仍在订正 {e(tasks['correction_open'])} 道</dd>"
+                 "</dl></section>")
     mapping = snap.get("mapping_coverage")
     if mapping and mapping["unlinked"]:
         rows = "".join(f"<li>{e(item['subject'])} · {e(item['stem_preview'])}（{('AI 初判，尚未经老师核实' if item['source_role'] == 'model' else '老师已核实')}）</li>" for item in mapping["items"])
@@ -782,15 +803,14 @@ def render_daily(body):
     if report["staff_note"] or report["next_step"]:
         parts.append(f"<section><h2 style='margin-top:0'>老师的话</h2><p>{e(report['staff_note'])}</p>"
                      + (f"<p><b>明天留意：</b>{e(report['next_step'])}</p>" if report["next_step"] else "") + "</section>")
-    pending = tasks["awaiting_verification"] + tasks["not_judged"]
     if coverage["homeworks"]:
         parts.append(f"<section><h2 style='margin-top:0'>今天的作业</h2><dl><dt>拍照作业</dt><dd>{e(coverage['homeworks'])} 份，共 {e(tasks['questions'])} 道题</dd>"
                      f"<dt>老师已核实</dt><dd>{e(tasks['staff_verified'])} 道：答对 {e(tasks['verdicts']['correct'])}，答错 {e(tasks['verdicts']['incorrect'])}，"
                      f"部分正确 {e(tasks['verdicts']['partially_correct'])}</dd>"
-                     f"<dt>AI 初判（单列）</dt><dd>{e(tasks.get('ai_judged', 0))} 道，尚未经老师核实</dd>"
+                     + _render_judgment_summary(tasks) +
                      f"<dt>订正</dt><dd>老师确认完成 {e(tasks['corrected_resolved'])} 道；"
-                     f"AI 初判订正正确、待核实 {e(tasks.get('ai_corrected_pending', 0))} 道；还没完成 {e(tasks['correction_open'])} 道</dd>"
-                     + (f"<dt>待核实</dt><dd>{e(pending)} 道（不计入老师已核实统计）</dd>" if pending else "") + "</dl></section>")
+                     f"AI 初判订正正确 {e(tasks.get('ai_corrected_pending', 0))} 道（尚未经老师核实）；还没完成 {e(tasks['correction_open'])} 道</dd>"
+                     "</dl></section>")
     else:
         parts.append("<section><h2 style='margin-top:0'>今天的作业</h2><p>今天没有在托管班拍照提交学校作业。</p></section>")
     if snap.get("mistakes"):

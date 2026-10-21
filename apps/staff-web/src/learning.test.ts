@@ -8,7 +8,7 @@ import {
 } from './api/learningTypes'
 import {
   diagnosisIssue, finishedPeriods, helpSeen, lastFinishedPeriod, memoryIssue, parseAnswerValues, periodFinished, periodFromStart, periodLabel, primaryConflict,
-  dailyMessage, dayLabel, deliveryLabel, evidenceSourceCounts, evidenceSourceLabel, recentDays, runView, shareState, shareUrl, statusLabel, statusLabels,
+  dailyMessage, dayLabel, deliveryLabel, evidenceSourceCounts, evidenceSourceLabel, recentDays, reportJudgmentCounts, runView, shareState, shareUrl, statusLabel, statusLabels,
 } from './learning'
 import { sampleWorkspace } from './sample'
 import { generationText } from './components/PracticeArea'
@@ -149,7 +149,7 @@ describe('状态文字', () => {
     const dailyHtml = renderToStaticMarkup(createElement(DailySnapshotView, { snap: body.snapshot }))
     const reportHtml = renderToStaticMarkup(createElement(SnapshotView, { snap: body.snapshot }))
     for (const html of [dailyHtml, reportHtml]) {
-      expect(html).toContain('AI 初判（未核实）')
+      expect(html).toContain('AI 初判，未经老师核实')
       expect(html).toContain('AI 初判 1 次')
       expect(html).toContain('老师核实 0 次')
       expect(html).toContain('订正 AI 初判通过')
@@ -375,4 +375,45 @@ describe('half-month coverage snapshot', () => {
     expect(html).not.toContain('归类尚未完成')
     expect(isReport({ ...body, snapshot: { ...body.snapshot, mapping_coverage: { ...mappingCoverage, total: 9 } } })).toBe(false)
   })
+})
+
+
+describe('report judgment wording', () => {
+  const known = { ...snapshot.school_tasks, questions: 9, staff_verified: 1, awaiting_verification: 6, not_judged: 2,
+    ai_judged: 4, ai_verdicts: { correct: 2, incorrect: 1, partially_correct: 1, unanswered: 0 } }
+  const renderBoth = (tasks: ReportSnapshot['school_tasks']) => [DailySnapshotView, SnapshotView].map(View =>
+    renderToStaticMarkup(createElement(View, { snap: { ...snapshot, school_tasks: tasks } as ReportSnapshot })))
+  it('separates usable AI judgments from unfinished reads without changing stored counts', () => {
+    const before = structuredClone(known)
+    expect(reportJudgmentCounts(known)).toEqual({ ai: 4, unfinished: 4, unclassified: 0 })
+    for (const html of renderBoth(known)) {
+      expect(html).toContain('<dt>AI 初判，未经老师核实</dt><dd>4 道')
+      expect(html).toContain('<dt>尚未形成可用判定</dt><dd>4 道')
+      expect(html).not.toContain('待老师核实')
+      expect(html).not.toContain('AI 候选待确认')
+    }
+    expect(known).toEqual(before)
+  })
+  it.each([
+    { ...known, ai_judged: undefined, ai_verdicts: undefined },
+    { ...known, ai_judged: undefined }, { ...known, ai_verdicts: undefined },
+    { ...known, ai_judged: 7 }, { ...known, ai_judged: 3 },
+  ])('keeps old or inconsistent snapshots unclassified, never guesses AI zero', tasks => {
+    const before = structuredClone(tasks)
+    expect(reportJudgmentCounts(tasks)).toEqual({ ai: null, unfinished: 2, unclassified: 6 })
+    for (const html of renderBoth(tasks)) {
+      expect(html).toContain('<dt>未分列的未核实记录</dt><dd>6 道')
+      expect(html).toContain('这份记录未可靠分列有效 AI 初判与未完成识读')
+      expect(html).toContain('<dt>尚无判定（已记录）</dt><dd>2 道')
+      expect(html).not.toContain('<dt>AI 初判，未经老师核实</dt>')
+      expect(html).not.toContain('待老师核实')
+    }
+    expect(tasks).toEqual(before)
+  })
+  it('distinguishes an explicit zero AI count from an absent field', () => {
+    const tasks = { ...known, ai_judged: 0, ai_verdicts: { correct: 0, incorrect: 0, partially_correct: 0, unanswered: 0 } }
+    expect(reportJudgmentCounts(tasks)).toEqual({ ai: 0, unfinished: 8, unclassified: 0 })
+    expect(renderBoth(tasks)[0]).toContain('<dt>AI 初判，未经老师核实</dt><dd>0 道')
+  })
+
 })
