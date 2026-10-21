@@ -166,7 +166,7 @@ def test_correct_chain_never_upgrades_old_incorrect_judgment():
 
 
 def test_initial_matched_pair_is_checked_independently_without_more_calls():
-    first = correct("14(2)", stem_text=STEM, answer_text=ANSWER)
+    first = correct("14(2)", stem_text=STEM, answer_text=ANSWER, correct_answer="-5/2")
     pipeline = TwoModelWholePagePipeline(FakeClient("first", {"items": [first]}), FakeClient("second", {"items": [first]}))
     result = pipeline.recognize(images=(picture(),))
     assert result.data["items"][0]["assessment"]["verdict"] == "incorrect"
@@ -199,7 +199,7 @@ def test_matched_requires_both_complete_identical_original_chains(changes):
 
 def test_incomplete_page_does_not_gain_matched_chain_authority():
     from test_partial_output_persistence import make_client
-    first = correct("14(2)", stem_text=STEM, answer_text=ANSWER)
+    first = correct("14(2)", stem_text=STEM, answer_text=ANSWER, correct_answer="-5/2")
     malformed = {**first, "label": "bad", "answer_text": {"bad": "shape"}}
     a, acalls = make_client([first, malformed], "first")
     b, bcalls = make_client([first, malformed], "second")
@@ -228,7 +228,7 @@ def test_supported_pair_can_differ_only_in_outer_layout_not_in_original_expressi
 
 def test_matched_wrong_initial_and_r1_synthetic_paths_reuse_two_reads_only(flow):
     from test_recognition_recheck import recheck, recovery, attempt_for
-    first = correct("14(2)", stem_text=STEM, answer_text=ANSWER, knowledge_points=[])
+    first = correct("14(2)", stem_text=STEM, answer_text=ANSWER, correct_answer="-5/2", knowledge_points=[])
     def matched():
         return TwoModelWholePagePipeline(FakeClient("first", {"items": [first]}), FakeClient("second", {"items": [first]}))
     flow.worker.pipeline = synthetic_flow(bad_source=True)

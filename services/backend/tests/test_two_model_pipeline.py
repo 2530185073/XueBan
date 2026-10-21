@@ -96,7 +96,7 @@ def test_live_page_typography_can_agree_without_weakening_mathematical_evidence(
         correct("3(1)#1", stem_text="若正方形的边长为 a，则正方形的面积是____", answer_text="a²"),
         correct("3(10)", stem_text="本月收入比上月的 2 倍多 10 元，本月收入____元", answer_text="12x"),
         correct("5#1", stem_text="当 a=−6，b=3 时，求 a²−2ab+b² 的值",
-                answer_text="36+36+9=81"),
+                answer_text="36+36+9=81", correct_answer="81"),
     ]
     second = [
         correct("2", stem_text="下列赋予代数式8a实际意义的例子中，错误的是（ ）。",

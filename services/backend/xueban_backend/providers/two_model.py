@@ -21,6 +21,7 @@ from .read_checkpoint import ReadCheckpointSink
 from .position_arithmetic import check_position_arithmetic
 from .equality_chain import check_equality_chain, check_matched_equality_chain, check_reviewed_equality_chain
 from .matched_position_arithmetic import check_matched_positions
+from .judgment_consistency import numeric_verdict_conflict
 from .correction_pipeline import (
     CorrectionPipeline, PipelineResult, QUESTION_OPTION, QUESTION_TYPES,
     _contains_credential, _object, _strip_field_label, _text, _validate,
@@ -992,6 +993,8 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             **({"evidence_binding": outcome["audit"]} if outcome.get("audit") else {}),
             **({"position_arithmetic": position_check["audit"]} if position_check is not None else {}),
             **({"equality_chain_arithmetic": chain_check["audit"]} if chain_check is not None else {}),
+            **({"judgment_field_conflict": outcome["judgment_field_conflict"]}
+               if outcome.get("judgment_field_conflict") else {}),
             **({"observation_issue_review": outcome["observation_issue_review"]}
                if "observation_issue_review" in outcome else {}),
         })
@@ -1127,6 +1130,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                                 latency_ms=metadata.latency_ms)
         items, label_alignments, alignment_dispatches, scope_dispatches = [], [], [], []
         matched_position_checks = []
+        judgment_field_conflicts = []
         matched_chain_checks = []
         alignment_jobs = []
         with ThreadPoolExecutor(max_workers=4, thread_name_prefix="xueban-alignment") as pool:
@@ -1226,6 +1230,16 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                     reasons.append("uncertain_observation")
                 if any(reconciliation.has_unreadable_observation(row or {}) for row in (a, b)):
                     reasons.append("visual_unreadable")
+                self_conflicting = False
+                for role, source in (("primary", a), ("secondary", b)):
+                    conflict = numeric_verdict_conflict(source)
+                    if conflict is not None:
+                        # Existing public reason and bounded review path. This
+                        # says the model contradicts itself, not that ink is wrong.
+                        self_conflicting = True
+                        judgment_field_conflicts.append({"asset_id": image.asset_id,
+                            "label": raw["label"], "role": role,
+                            "source_id": reconciliation.source_id(role, source), **conflict})
                 if a and b:
                     # Full stem equality only: extra mathematical conditions
                     # must not be silently treated as harmless prose.
@@ -1250,6 +1264,8 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                             reasons.append("correction_disagreement")
                     if _critical_print_review(a) or _critical_print_review(b):
                         reasons.append("critical_print_verification")
+                if self_conflicting:
+                    reasons.append("judgment_disagreement")
                 reasons = list(dict.fromkeys(reasons))
                 matched = not reasons
                 status = "matched" if matched else "degraded" if "provider_unavailable" in reasons else "conflict"
@@ -1476,6 +1492,8 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                                 "calls": audit, "label_alignments": label_alignments, "target_unit": self.target_unit,
                                 **({"alignment_dispatches": alignment_dispatches} if alignment_dispatches else {}),
                                 **({"scope_dispatches": scope_dispatches} if scope_dispatches else {}),
+                                **({"judgment_field_conflicts": judgment_field_conflicts}
+                                   if judgment_field_conflicts else {}),
                                 **({"matched_position_arithmetic": matched_position_checks}
                                    if matched_position_checks else {}),
                                 **({"matched_equality_chain_arithmetic": matched_chain_checks}

@@ -6,6 +6,7 @@ The reviewer can select that observation, but cannot create one or edit a source
 """
 
 from copy import deepcopy
+from .judgment_consistency import numeric_verdict_conflict
 import hashlib
 import json
 import re
@@ -688,6 +689,14 @@ def evaluate_review(review, primary, secondary, visual=None, critical_visual=Non
         # correction. This review independently judges the bound observation.
     if not note_review["clear"]:
         return reject(note_review["rejection_code"], note_review["cause"])
+    # Re-judge the bound original observation, not the old judge's fields.
+    # A valid independent review may resolve the old contradiction. It cannot
+    # repeat a numeric contradiction in its own correct/correct_answer claim.
+    conflict = numeric_verdict_conflict({**source, "verdict": review["verdict"],
+        "correct_answer": review["correct_answer"], "uncertainties": []})
+    if conflict is not None:
+        return {**reject("numeric_judgment_self_contradiction"),
+                "judgment_field_conflict": {"source_id": selected_id, **conflict}}
     code = {"equivalent": "semantic_review_equivalent", "non_material": "semantic_review_non_material",
             "visual_resolution": "visual_review_resolved"}[review["resolution"]]
     return {
