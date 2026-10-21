@@ -40,6 +40,7 @@ PYTHONPATH=services/backend services/backend/.venv/bin/python -m xueban_backend.
 | `UPLOAD_TICKET_TTL_SECONDS` | 默认900秒，服务端限定30—1800秒；读取票据固定120秒 |
 | `WORKER_LEASE_SECONDS` | 默认300秒；进程中断后到期可恢复 |
 | `READ_CHECKPOINT_ENABLED` | 默认 `0`；API 与 Worker 同时设 `1` 时，普通整页任务可保存及读取未核实首路草稿；不是结果、学习证据或中断续跑许可，学生网页另需构建期开关 |
+| `INITIAL_READ_RECOVERY_ENABLED` | 默认 `0`；新普通整页任务的完整首读可安全复用；要求首路草稿开启、answer_slot、结构导航关闭、各角色适配器单次请求。未知请求或已进入后续复核的任务不自动续跑，见 [恢复边界](../../docs/INITIAL_READ_RECOVERY.md) |
 | `CORS_ALLOWED_ORIGINS` | 精确来源列表，默认关闭；不允许 `*`，不启用 Cookie 凭证 |
 | `ARK_BASE_URL`、`ARK_API_KEY`、`ARK_MODEL`、`ARK_FALLBACK_MODEL` | 仅 Worker 使用；密钥不进入安卓/Web/响应/日志。兜底模型可选；配置 `gpt-6-astra` 时走 Responses API |
 

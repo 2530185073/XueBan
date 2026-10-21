@@ -67,6 +67,15 @@ class CorrectionWorker:
             task = session.scalar(select(Task).where(eligible).order_by(Task.available_at, Task.id).with_for_update(skip_locked=True).limit(1))
             if task is None:
                 return None
+            checkpoint_record = (task.audit or {}).get(recognition_checkpoint.KEY)
+            if (isinstance(checkpoint_record, dict)
+                    and checkpoint_record.get("protocol") == recognition_checkpoint.RECOVERY_PROTOCOL
+                    and getattr(self.pipeline, "initial_read_recovery_enabled", False) is not True):
+                set_task(session, self.contracts, task, "failed", failure={"code": "worker_failure", "message": recognition_checkpoint.RESUME_INTERRUPTED_MESSAGE, "retryable": False})
+                task.lease_token = None
+                task.lease_expires_at = None
+                session.commit()
+                return None
             if task.kind == recognition_recheck.KIND and (task.audit or {}).get("recheck_dispatched"):
                 set_task(session, self.contracts, task, "failed", failure={"code": "worker_failure", "message": "上次原图核对执行已中断，调用结果未知；不会自动再次调用。", "retryable": False})
                 recognition_recheck.record_outcome(task, "execution_unknown")
@@ -100,6 +109,13 @@ class CorrectionWorker:
             task = session.get(Task, identifier)
             if task is None or task.lease_token != token or task.status != "running":
                 return None
+            saved_checkpoint = (task.audit or {}).get(recognition_checkpoint.KEY)
+            if (isinstance(saved_checkpoint, dict)
+                    and saved_checkpoint.get("protocol") == recognition_checkpoint.RECOVERY_PROTOCOL
+                    and (task.kind != "recognize_homework"
+                         or getattr(self.pipeline, "initial_read_recovery_enabled", False) is not True
+                         or getattr(self.pipeline, "read_checkpoint_enabled", False) is not True)):
+                raise ProviderError("recognition_resume_unavailable")
             homework = session.get(Homework, task.homework_id)
             student = session.get(Student, homework.student_id)
             if homework.processing_blocked or student is None or not student.active:
@@ -111,9 +127,36 @@ class CorrectionWorker:
             context = {"images": images}
             if task.kind == "recognize_homework" and getattr(self.pipeline, "read_checkpoint_enabled", False) is True:
                 binding = recognition_checkpoint.capture(session, task, homework, images)
+                recovery = None
+                enable_recovery = getattr(self.pipeline, "initial_read_recovery_enabled", False) is True
+                if enable_recovery and recognition_checkpoint.KEY not in (task.audit or {}):
+                    # Only a genuinely new explicit task may remain on the old
+                    # path when this homework already has published cases.
+                    if not recognition_checkpoint.first_execution(task):
+                        raise ProviderError("recognition_resume_unavailable")
+                    if session.scalar(select(Entity.id).where(Entity.homework_id == homework.id,
+                            Entity.kind == "case").limit(1)) is not None:
+                        enable_recovery = False
+                if enable_recovery:
+                    contracts = self.pipeline.initial_read_contracts(images, identifier)
+                    # Release this read-only snapshot before the separate short
+                    # admission write (SQLite readers otherwise block commit).
+                    session.commit()
+                    recognition_checkpoint.initialize_recovery(self.engine, identifier, token, binding, contracts)
+                    recovery = {
+                        "reserve": lambda asset, stage, contract: recognition_checkpoint.reserve_or_reuse(
+                            self.engine, identifier, token, binding, asset, stage, contract),
+                        "complete": lambda event, metadata, role: recognition_checkpoint.complete_recovery(
+                            self.engine, identifier, token, binding, event, metadata, role),
+                        "failure": lambda asset, stage, metadata: recognition_checkpoint.fail_recovery(
+                            self.engine, identifier, token, binding, asset, stage, metadata),
+                        "downstream": lambda: recognition_checkpoint.mark_downstream(
+                            self.engine, identifier, token, binding),
+                    }
                 context["read_checkpoint"] = ReadCheckpointSink(
                     lambda event: recognition_checkpoint.persist(self.engine, identifier, token, binding, event),
-                    lambda: recognition_checkpoint.persist(self.engine, identifier, token, binding, failed=True))
+                    lambda: recognition_checkpoint.persist(self.engine, identifier, token, binding, failed=True),
+                    recovery=recovery, task_id=identifier)
             if task.kind == "recognize_attempt" and getattr(self.pipeline, "supports_target_unit", False):
                 original = get_entity(session, task.inputs["question_id"], "question")
                 context["target_unit"] = question_units.stored_unit(original.annotations)
@@ -413,8 +456,8 @@ class CorrectionWorker:
                     failure_code = "provider_unavailable"
                 # Inference timeouts can already have been billed. They are surfaced
                 # for an explicit retry, not automatically retried indefinitely.
-                retryable = task.kind != recognition_recheck.KIND and code in {"upstream_rate_limited", "upstream_unavailable", "concurrency_limit", "storage_error"} and task.tries < 3
-                set_task(session, self.contracts, task, "retryable_failed" if retryable else "failed", failure={"code": failure_code, "message": "处理未完成，未产生有效判断；请重试或请坐班老师核实。", "retryable": retryable})
+                retryable = (task.audit or {}).get(recognition_checkpoint.KEY, {}).get("protocol") != recognition_checkpoint.RECOVERY_PROTOCOL and task.kind != recognition_recheck.KIND and code in {"upstream_rate_limited", "upstream_unavailable", "concurrency_limit", "storage_error"} and task.tries < 3
+                set_task(session, self.contracts, task, "retryable_failed" if retryable else "failed", failure={"code": failure_code, "message": (recognition_checkpoint.RESUME_INTERRUPTED_MESSAGE if code == "recognition_resume_unavailable" else "处理未完成，未产生有效判断；请重试或请坐班老师核实。"), "retryable": retryable})
                 task.available_at = now() + timedelta(seconds=2 * task.tries)
                 execution.update(outcome="failed", finished_at=iso(), failure_code=failure_code)
                 if isinstance(error, ProviderError):

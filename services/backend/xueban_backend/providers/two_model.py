@@ -257,7 +257,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
 
     def __init__(self, client, review_client, *, reconciliation_client=None, secondary_thinking=True,
                  visual_client=None, judgment_client=None, target_unit="answer_slot",
-                 structure_navigation_enabled=False, partial_output_enabled=False, host_call_journal_enabled=False, read_checkpoint_enabled=False):
+                 structure_navigation_enabled=False, partial_output_enabled=False, host_call_journal_enabled=False, read_checkpoint_enabled=False, initial_read_recovery_enabled=False):
         self.target_unit = question_units.validate_unit(target_unit)
         # Validate replacement anchors before any provider request, including
         # when this instance normally handles only legacy saved cases.
@@ -267,7 +267,8 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             question_units.review_prompt(reconciliation.PROMPT, target_unit)
         if (type(secondary_thinking) is not bool or type(structure_navigation_enabled) is not bool
                 or type(partial_output_enabled) is not bool or type(host_call_journal_enabled) is not bool
-                or type(read_checkpoint_enabled) is not bool):
+                or type(read_checkpoint_enabled) is not bool or type(initial_read_recovery_enabled) is not bool
+                or initial_read_recovery_enabled and (not read_checkpoint_enabled or target_unit != "answer_slot" or structure_navigation_enabled)):
             raise ProviderError("invalid_configuration")
         super().__init__(client)
         self.review_client = review_client
@@ -279,6 +280,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         self.partial_output_enabled = partial_output_enabled
         self.host_call_journal_enabled = host_call_journal_enabled
         self.read_checkpoint_enabled = read_checkpoint_enabled
+        self.initial_read_recovery_enabled = initial_read_recovery_enabled
 
     @classmethod
     def from_env(cls, environ=None):
@@ -296,6 +298,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         partial_enabled = env.get("PARTIAL_PAGE_OUTPUT_ENABLED", "0")
         journal_enabled = env.get("HOST_CALL_JOURNAL_ENABLED", "0")
         checkpoint_enabled = env.get("READ_CHECKPOINT_ENABLED", "0")
+        recovery_enabled = env.get("INITIAL_READ_RECOVERY_ENABLED", "0")
         visual_model = env.get("VISUAL_REVIEW_MODEL", "gpt-6-astra")
         if (review_api not in ("chat", "responses") or review_thinking not in ("enabled", "disabled")
                 or reconciliation_provider not in ("primary", "secondary")
@@ -304,6 +307,8 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                 or partial_enabled not in ("0", "1")
                 or journal_enabled not in ("0", "1")
                 or checkpoint_enabled not in ("0", "1")
+                or recovery_enabled not in ("0", "1")
+                or recovery_enabled == "1" and (checkpoint_enabled != "1" or target_unit != "answer_slot" or navigation_enabled != "0")
                 or not isinstance(visual_model, str) or not _SAFE_TOKEN.fullmatch(visual_model)):
             raise ProviderError("invalid_configuration")
         secondary_thinking = review_thinking == "enabled"
@@ -337,7 +342,8 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                        structure_navigation_enabled=navigation_enabled == "1",
                        partial_output_enabled=partial_enabled == "1",
                        host_call_journal_enabled=journal_enabled == "1",
-                       read_checkpoint_enabled=checkpoint_enabled == "1")
+                       read_checkpoint_enabled=checkpoint_enabled == "1",
+                       initial_read_recovery_enabled=recovery_enabled == "1")
         except Exception:
             closed = set()
             for client in created:
@@ -380,6 +386,20 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         return HostCallJournal() if self.host_call_journal_enabled else None
 
     def _generate_with_journal(self, client, image, stage, *, target_labels=None, **kwargs):
+        sink = getattr(self, "_read_checkpoint", None)
+        if sink is not None and sink.recovery is not None:
+            contract = (self.initial_read_contract(image, stage, client, kwargs, sink.task_id)
+                        if stage in {"primary", "secondary"} else None)
+            saved = sink.before_generate(image, stage, contract)
+            if saved is not None:
+                from .ark import CandidateResult
+                # Original metadata is authoritative only in its persisted receipt.
+                # This invocation has no new HTTP, usage, Attempt or billed latency.
+                if any(_contains_credential(saved, secret) for secret in self._provider_secrets(client)):
+                    raise ProviderError("provider_credential_echo")
+                original = saved["metadata"]
+                return CandidateResult(saved["role"], deepcopy(saved["data"]),
+                    Metadata(original["requested_model"], original["model"], None, None, None, 0, ()))
         journal = getattr(self, "_host_call_journal", None)
         if journal is None:
             return client.generate(**kwargs)
@@ -411,10 +431,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             journal.finish(ticket, outcome="failed" if echoed else "returned", metadata=metadata, secrets=secrets)
             return result
 
-    def _read_and_judge(self, client, image, stage, *, navigation=None):
-        result = None
-        partition = None
-        isolate = self._partial_output_active() and navigation is None
+    def initial_read_request(self, image, stage, *, navigation=None):
         schema = question_units.schema_for(PAGE_SCHEMA, self.target_unit)
         prompt = question_units.page_prompt(PAGE_PROMPT, PAGE_RULES, self.target_unit)
         from .original_recheck import request_scope
@@ -422,16 +439,60 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         if navigation is not None:
             schema, prompt, task_input = structure_navigation.request_scope(
                 schema, prompt, task_input, navigation)
+        return dict(role="check", images=(image.data_url,), instructions=prompt,
+            text=json.dumps({"asset_id": image.asset_id, "task_input": task_input}, ensure_ascii=False),
+            output_schema=schema, max_tokens=OUTPUT_TOKENS,
+            thinking=self.secondary_thinking if stage != "primary" else False)
+
+    def initial_read_contract(self, image, stage, client, kwargs, task_id):
+        import hashlib
+        import hmac
+        from pathlib import Path
+        from .read_checkpoint import digest
+        # Per-task/role keyed digests detect key rotation without storing secrets.
+        providers = {}
+        for role, provider in (("primary", self.client), ("secondary", self.review_client),
+                ("review", self.reconciliation_client), ("visual", self.visual_client),
+                ("judge", self.judgment_client)):
+            if provider is None:
+                providers[role] = None
+                continue
+            settings = asdict(provider.settings)
+            key = settings.pop("api_key")
+            if not key or settings["max_attempts"] != 1:
+                raise ProviderError("invalid_configuration")
+            providers[role] = {"adapter": type(provider).__module__ + "." + type(provider).__qualname__,
+                "settings_sha256": digest(settings),
+                "credential_scope_sha256": hmac.new(key.encode(),
+                    ("xueban-initial-resume.v1\0" + task_id + "\0" + role).encode(), hashlib.sha256).hexdigest()}
+        directory = Path(__file__).parent
+        code = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(directory.glob("*.py"))}
+        return {"protocol": "initial-read.request.v1", "role": kwargs["role"],
+                "requested_model": client.settings.model,
+                "source_protocol_sha256": digest(code), "providers": providers,
+                "target_unit": self.target_unit, "partial_output": self.partial_output_enabled,
+                "navigation": self.structure_navigation_enabled,
+                "request_sha256": digest({key: value for key, value in kwargs.items() if key != "images"}),
+                "images_sha256": [hashlib.sha256(value.encode()).hexdigest() for value in kwargs["images"]],
+                "asset_id": image.asset_id, "stage": stage}
+
+    def initial_read_contracts(self, images, task_id):
+        return {image.asset_id: {stage: self.initial_read_contract(image, stage, client,
+                    self.initial_read_request(image, stage), task_id)
+                for stage, client in (("primary", self.client), ("secondary", self.review_client))}
+                for image in images}
+
+    def _read_and_judge(self, client, image, stage, *, navigation=None):
+        result = None
+        partition = None
+        isolate = self._partial_output_active() and navigation is None
+        request = self.initial_read_request(image, stage, navigation=navigation)
+        schema = request["output_schema"]
         try:
             secrets = self._provider_secrets(client)
             with partial_output.capture_page_failures(isolate):
                 try:
-                    result = self._generate_with_journal(client, image, stage,
-                        role="check", images=(image.data_url,), instructions=prompt,
-                        text=json.dumps({"asset_id": image.asset_id, "task_input": task_input}, ensure_ascii=False),
-                        output_schema=schema, max_tokens=OUTPUT_TOKENS,
-                        thinking=self.secondary_thinking if stage != "primary" else False,
-                    )
+                    result = self._generate_with_journal(client, image, stage, **request)
                 except partial_output.PageSchemaFailure as error:
                     # Consume once. The original billed attempt stays failed;
                     # only the unchanged valid source items may be reused.
@@ -515,7 +576,11 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             if sink is not None and not (partition and partition.rejected):
                 # Runs on the actual completing initial-read future, before the
                 # other source finishes. Raw original strings are not normalized.
-                sink.completed(image, stage, result.data)
+                sink.completed(image, stage, result.data, result.metadata)
+            elif sink is not None and sink.recovery is not None:
+                # Partial responses retain their billed failure metadata but
+                # are never complete, reusable initial sources.
+                sink.failure(image, stage, result.metadata)
             return {"stage": stage, "asset_id": image.asset_id, "model": client.settings.model,
                     "code": "partial_output" if partition and partition.rejected else "ok",
                     "items": indexed, "max_output_tokens": OUTPUT_TOKENS,
@@ -526,9 +591,15 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                     **({"navigation_report": navigation_report} if navigation_report is not None else {}),
                     "observation_normalizations": observation_normalizations,
                     "category_normalizations": category_normalizations,
+                    **({"source_reuse": {"receipt_id": sink.reused[(image.asset_id, stage)],
+                        "new_provider_call": False}} if sink is not None and
+                        (image.asset_id, stage) in sink.reused else {}),
                     "metadata": result.metadata}
         except ProviderError as error:
             failure_code, metadata = self._failure_metadata(error, result, client)
+            sink = getattr(self, "_read_checkpoint", None)
+            if sink is not None and sink.recovery is not None:
+                sink.failure(image, stage, metadata)
             return {"stage": stage, "asset_id": image.asset_id, "model": client.settings.model,
                     "code": failure_code, "items": {}, "max_output_tokens": OUTPUT_TOKENS,
                     **({"partial_output": partition.audit()} if partition and partition.rejected else {}),
@@ -1347,6 +1418,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         metadata = replace(WholePageCorrectionPipeline._metadata(calls, started), requested_model="two_model")
         audit = [{key: call[key] for key in ("stage", "asset_id", "model", "code", "max_output_tokens")}
                  | {"items": list(call["items"].values())}
+                 | ({"source_reuse": call["source_reuse"]} if "source_reuse" in call else {})
                  | ({"raw_items": call["raw_items"]} if "raw_items" in call else {})
                  | ({"category_normalizations": call["category_normalizations"]}
                     if call.get("category_normalizations") else {})
