@@ -929,7 +929,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         if not any(partial_output.available(call) for call in calls):
             raise ProviderError("multimodel_unavailable", attempts=metadata.attempts,
                                 latency_ms=metadata.latency_ms)
-        items, label_alignments = [], []
+        items, label_alignments, alignment_dispatches = [], [], []
         alignment_jobs = []
         with ThreadPoolExecutor(max_workers=4, thread_name_prefix="xueban-alignment") as pool:
             for image in pages:
@@ -947,6 +947,10 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                 a = {label: item for label, item in first["items"].items() if label not in second["items"]}
                 b = {label: item for label, item in second["items"].items() if label not in first["items"]}
                 if self.reconciliation_client and semantic_alignment.can_align(a, b):
+                    dispatch = semantic_alignment.alignment_dispatch(a, b, target_unit=self.target_unit)
+                    alignment_dispatches.append({"asset_id": image.asset_id, **dispatch})
+                    if dispatch["decision"] == "not_dispatched":
+                        continue
                     alignment_jobs.append((image, pool.submit(self._align_page, image, a, b)))
             for image, future in alignment_jobs:
                 call = future.result()
@@ -1216,6 +1220,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                          "note": coverage_note},
             "multimodel_audit": {"mode": "two_model", "independent_before_comparison": not structure_shared,
                                 "calls": audit, "label_alignments": label_alignments, "target_unit": self.target_unit,
+                                **({"alignment_dispatches": alignment_dispatches} if alignment_dispatches else {}),
                                 **({"structure_navigation": {"protocol": structure_navigation.PROTOCOL,
                                     "enabled": True, "structure_shared": structure_shared, "content_shared": False}}
                                    if navigation_enabled else {}),

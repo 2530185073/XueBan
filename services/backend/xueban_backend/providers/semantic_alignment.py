@@ -8,6 +8,8 @@ it does not clear their reading uncertainties or establish correctness.
 from collections import Counter
 from copy import deepcopy
 from collections.abc import Mapping
+import hashlib
+import json
 import re
 
 from .correction_pipeline import _object, _text
@@ -17,6 +19,7 @@ from .whole_page import normalize_literal_math, normalize_page_stem
 
 
 OUTPUT_TOKENS = 8192
+DISPATCH_PROTOCOL = "alignment-material-dispatch-v1"
 PAIR_SCHEMA = _object({
     "primary_source_id": _text(100),
     "secondary_source_id": _text(100),
@@ -161,6 +164,67 @@ def _printed_literals(source):
     return _critical_literals(text)
 
 
+def material_condition_signature(source):
+    """The existing printed-condition veto, computed once per observation.
+
+    Compatibility is only necessary for a consumable pair, never sufficient.
+    Do not include labels, answers, slot counts or new semantic heuristics.
+    """
+    return (tuple(_printed_literals(source)), tuple(_options(source)))
+
+
+def material_conditions_compatible(first_signature, second_signature):
+    return first_signature == second_signature
+
+
+def alignment_dispatch(primary, secondary, *, target_unit="answer_slot"):
+    """Skip only when every cross-source edge fails the existing material veto.
+
+    No rows are removed and no proposals are invented. Malformed/unknown input
+    falls back to the original request and validation path, not an all-veto
+    conclusion. Audit contains hashes/counts only, never observation content.
+    """
+    audit = {"protocol": DISPATCH_PROTOCOL, "decision": "dispatch",
+             "reason": "eligibility_check_unavailable", "target_unit": target_unit}
+    try:
+        question_units.validate_unit(target_unit)
+        indexed = _index(primary, secondary)
+        for entry in indexed.values():
+            source = entry["source"]
+            if (not isinstance(source, Mapping) or not isinstance(source.get("label"), str)
+                    or not isinstance(source.get("stem_text"), str)
+                    or not isinstance(source.get("options"), list)
+                    or any(not isinstance(option, Mapping)
+                           or not isinstance(option.get("label"), str)
+                           or not isinstance(option.get("text"), str) for option in source["options"])):
+                return audit
+        by_role = {role: [identity for identity, entry in indexed.items() if entry["role"] == role]
+                   for role in ("primary", "secondary")}
+        def digest(identities):
+            return hashlib.sha256(json.dumps(sorted(identities), separators=(",", ":")).encode()).hexdigest()
+        sources = {role: {"count": len(identities), "source_set_sha256": digest(identities)}
+                   for role, identities in by_role.items()}
+        signatures = {identity: material_condition_signature(entry["source"])
+                      for identity, entry in indexed.items()}
+        candidate_edges = len(by_role["primary"]) * len(by_role["secondary"])
+        compatible_edges = sum(material_conditions_compatible(signatures[a], signatures[b])
+                               for a in by_role["primary"] for b in by_role["secondary"])
+        audit.update(source_scope="complete_unmatched_inputs", input_sources=sources,
+                     source_set_sha256=digest(indexed), candidate_edges=candidate_edges,
+                     compatible_edges=compatible_edges, excluded_edges=candidate_edges-compatible_edges)
+        if not candidate_edges:
+            audit.update(decision="not_dispatched", reason="empty_source_side")
+        elif not compatible_edges:
+            audit.update(decision="not_dispatched", reason="no_eligible_printed_edge")
+        else:
+            audit.update(reason="compatible_printed_edge_exists")
+    except Exception:
+        # This optional optimization must not replace the original validator's
+        # handling of malformed rows, duplicate source IDs or hashing errors.
+        pass
+    return audit
+
+
 def evaluate_alignment(result, primary, secondary, *, target_unit="answer_slot"):
     """Validate each proposal locally; original labels and records never change.
 
@@ -170,6 +234,11 @@ def evaluate_alignment(result, primary, secondary, *, target_unit="answer_slot")
     """
     question_units.validate_unit(target_unit)
     indexed = _index(primary, secondary)
+    signatures = {}
+    def signature(identity):
+        if identity not in signatures:
+            signatures[identity] = material_condition_signature(indexed[identity]["source"])
+        return signatures[identity]
     pairs = result.get("pairs", [])
     endpoints = Counter(identity for pair in pairs for identity in (
         pair.get("primary_source_id"), pair.get("secondary_source_id"),
@@ -260,10 +329,7 @@ def evaluate_alignment(result, primary, secondary, *, target_unit="answer_slot")
             continue
         # This is a veto on a change, not fuzzy equality or a math proof.
         # Different symbol/number observations need fresh reading, not pairing.
-        condition_conflict = (
-            _printed_literals(a) != _printed_literals(b)
-            or _options(a) != _options(b)
-        )
+        condition_conflict = not material_conditions_compatible(signature(a_id), signature(b_id))
         if pair.get("match_type") == "reading_disagreement":
             if pair.get("conditions_same") is not False:
                 reject("inconsistent_condition_claim")
