@@ -14,6 +14,7 @@ from .ark import (ArkClient, Attempt, CandidateResult, Metadata, OutputDiagnosti
                   _token, _usage)
 from .bounded_http import read_response
 from .correction_pipeline import _contains_credential
+from .partial_output import PageSchemaFailure, capture_enabled
 
 
 _CONTENT_PATH = ("choices", 0, "message", "content")
@@ -154,6 +155,7 @@ class BoundedChatClient(ArkClient):
         cfg = replace(cfg, total_timeout_seconds=remaining)
         response = read_response(cfg, "/chat/completions", body, transport=self._async_transport)
         code, model, usage, response_id, diagnostic = response.code, None, None, None, None
+        rejected_candidate = None
         if code == "ok":
             layer, path = "envelope_json", ()
             try:
@@ -182,6 +184,10 @@ class BoundedChatClient(ArkClient):
                 code = "invalid_output"
                 if isinstance(error, ValidationError):
                     diagnostic = _schema_diagnostic(error)
+                    if capture_enabled():
+                        # Only complete, security-checked JSON reaches here.
+                        # Do not retain transport bodies or reasoning fields.
+                        rejected_candidate = data
                 elif isinstance(error, Unresolvable):
                     diagnostic = OutputDiagnostic("candidate_schema", "unresolvable_reference")
                 else:
@@ -195,6 +201,10 @@ class BoundedChatClient(ArkClient):
             diagnostic = OutputDiagnostic("transport", _TRANSPORT_RULES.get(code, "request_failed"))
         attempt = Attempt(1, response.status, code, _elapsed(started), response.request_id, model, usage, diagnostic=diagnostic)
         if code != "ok":
+            if rejected_candidate is not None:
+                metadata = Metadata(cfg.model, model, response.request_id, response_id, usage,
+                                    _elapsed(started), (attempt,))
+                raise PageSchemaFailure(rejected_candidate, validator.schema, metadata) from None
             raise ProviderError(code, attempts=(attempt,), latency_ms=_elapsed(started)) from None
         return CandidateResult(role, data, Metadata(cfg.model, model, response.request_id, response_id, usage,
                                                    _elapsed(started), (attempt,)))

@@ -24,6 +24,7 @@ from .correction_pipeline import (
 from .responses import ResponsesClient
 from .readback_views import ZONES, readback_views
 from . import reconciliation, semantic_alignment, visual_readback, question_units, structure_navigation
+from . import partial_output
 from .whole_page import (
     JUDGE_ITEM, JUDGE_PROMPT, PAGE_RULES, WholePageCorrectionPipeline, _answer_equal,
     _usable, canonical_label, normalize_literal_math, normalize_page_stem,
@@ -250,7 +251,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
 
     def __init__(self, client, review_client, *, reconciliation_client=None, secondary_thinking=True,
                  visual_client=None, judgment_client=None, target_unit="answer_slot",
-                 structure_navigation_enabled=False):
+                 structure_navigation_enabled=False, partial_output_enabled=False):
         self.target_unit = question_units.validate_unit(target_unit)
         # Validate replacement anchors before any provider request, including
         # when this instance normally handles only legacy saved cases.
@@ -258,7 +259,8 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             question_units.page_prompt(PAGE_PROMPT, PAGE_RULES, target_unit)
             question_units.visual_prompt(visual_readback.PROMPT, target_unit)
             question_units.review_prompt(reconciliation.PROMPT, target_unit)
-        if type(secondary_thinking) is not bool or type(structure_navigation_enabled) is not bool:
+        if (type(secondary_thinking) is not bool or type(structure_navigation_enabled) is not bool
+                or type(partial_output_enabled) is not bool):
             raise ProviderError("invalid_configuration")
         super().__init__(client)
         self.review_client = review_client
@@ -267,6 +269,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         self.visual_client = visual_client
         self.judgment_client = judgment_client
         self.structure_navigation_enabled = structure_navigation_enabled
+        self.partial_output_enabled = partial_output_enabled
 
     @classmethod
     def from_env(cls, environ=None):
@@ -281,11 +284,13 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         reconciliation_provider = env.get("RECONCILIATION_PROVIDER", "primary")
         visual_enabled = env.get("VISUAL_REVIEW_ENABLED", "1")
         navigation_enabled = env.get("STRUCTURE_NAVIGATION_ENABLED", "0")
+        partial_enabled = env.get("PARTIAL_PAGE_OUTPUT_ENABLED", "0")
         visual_model = env.get("VISUAL_REVIEW_MODEL", "gpt-6-astra")
         if (review_api not in ("chat", "responses") or review_thinking not in ("enabled", "disabled")
                 or reconciliation_provider not in ("primary", "secondary")
                 or visual_enabled not in ("0", "1")
                 or navigation_enabled not in ("0", "1")
+                or partial_enabled not in ("0", "1")
                 or not isinstance(visual_model, str) or not _SAFE_TOKEN.fullmatch(visual_model)):
             raise ProviderError("invalid_configuration")
         secondary_thinking = review_thinking == "enabled"
@@ -316,7 +321,8 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             return cls(primary, secondary, reconciliation_client=reconciliation_client,
                        secondary_thinking=secondary_thinking, visual_client=visual_client,
                        judgment_client=visual_client, target_unit=target_unit,
-                       structure_navigation_enabled=navigation_enabled == "1")
+                       structure_navigation_enabled=navigation_enabled == "1",
+                       partial_output_enabled=partial_enabled == "1")
         except Exception:
             closed = set()
             for client in created:
@@ -333,8 +339,32 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                 client.close()
                 closed.add(id(client))
 
+    def _partial_output_active(self):
+        return (self.partial_output_enabled and self.target_unit == question_units.LEGACY_UNIT
+                and getattr(self, "_original_recheck_target", None) is None
+                and not self.structure_navigation_enabled)
+
+    def _provider_secrets(self, client=None):
+        return [provider.settings.api_key for provider in
+                (self.client, self.review_client, self.reconciliation_client,
+                 self.visual_client, self.judgment_client, client) if provider is not None]
+
+    def _failure_metadata(self, error, result, client):
+        attempts = error.attempts
+        if result is not None and not attempts:
+            attempts = tuple(replace(attempt, code=error.code) for attempt in result.metadata.attempts)
+        code = error.code
+        if any(_contains_credential(asdict(attempt), secret)
+               for attempt in attempts for secret in self._provider_secrets(client)):
+            code = "provider_credential_echo"
+            attempts = tuple(replace(attempt, code=code, request_id=None, model=None) for attempt in attempts)
+        latency = error.latency_ms or (result.metadata.latency_ms if result is not None else 0)
+        return code, Metadata(client.settings.model, None, None, None, None, latency, attempts)
+
     def _read_and_judge(self, client, image, stage, *, navigation=None):
         result = None
+        partition = None
+        isolate = self._partial_output_active() and navigation is None
         schema = question_units.schema_for(PAGE_SCHEMA, self.target_unit)
         prompt = question_units.page_prompt(PAGE_PROMPT, PAGE_RULES, self.target_unit)
         from .original_recheck import request_scope
@@ -343,21 +373,33 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             schema, prompt, task_input = structure_navigation.request_scope(
                 schema, prompt, task_input, navigation)
         try:
-            result = client.generate(
-                role="check", images=(image.data_url,), instructions=prompt,
-                text=json.dumps({"asset_id": image.asset_id, "task_input": task_input}, ensure_ascii=False),
-                output_schema=schema, max_tokens=OUTPUT_TOKENS,
-                thinking=self.secondary_thinking if stage != "primary" else False,
-            )
-            secrets = [provider.settings.api_key for provider in
-                       (self.client, self.review_client, self.reconciliation_client, self.visual_client,
-                        self.judgment_client) if provider is not None]
+            secrets = self._provider_secrets(client)
+            with partial_output.capture_page_failures(isolate):
+                try:
+                    result = client.generate(
+                        role="check", images=(image.data_url,), instructions=prompt,
+                        text=json.dumps({"asset_id": image.asset_id, "task_input": task_input}, ensure_ascii=False),
+                        output_schema=schema, max_tokens=OUTPUT_TOKENS,
+                        thinking=self.secondary_thinking if stage != "primary" else False,
+                    )
+                except partial_output.PageSchemaFailure as error:
+                    # Consume once. The original billed attempt stays failed;
+                    # only the unchanged valid source items may be reused.
+                    raw = error.take_candidate(schema, secrets)
+                    result = partial_output.ObservedPageFragment(raw, error.metadata)
             if any(_contains_credential(result.data, secret)
                    or _contains_credential(asdict(result.metadata), secret) for secret in secrets):
                 raise ProviderError("provider_credential_echo",
                     attempts=tuple(replace(a, code="provider_credential_echo", request_id=None, model=None)
                                    for a in result.metadata.attempts),
                     latency_ms=result.metadata.latency_ms)
+            if isolate:
+                partition = partial_output.partition_page(result.data, schema)
+                if not partition.accepted and partition.rejected:
+                    raise ProviderError("invalid_output")
+                if partition.rejected:
+                    result = partial_output.ObservedPageFragment(
+                        {**result.data, "items": [row.item for row in partition.accepted]}, result.metadata)
             _validate(schema, result.data, code="invalid_output")
             indexed, category_normalizations, observation_normalizations = {}, [], []
             navigation_report = None
@@ -420,7 +462,9 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                     observation_normalizations.append({"label": label, "code": "navigation_locator_report_conflict"})
                 indexed[label] = item
             return {"stage": stage, "asset_id": image.asset_id, "model": client.settings.model,
-                    "code": "ok", "items": indexed, "max_output_tokens": OUTPUT_TOKENS,
+                    "code": "partial_output" if partition and partition.rejected else "ok",
+                    "items": indexed, "max_output_tokens": OUTPUT_TOKENS,
+                    **({"partial_output": partition.audit()} if partition and partition.rejected else {}),
                     **({"raw_items": deepcopy(result.data["items"])}
                        if self.target_unit == question_units.QUESTION_UNIT or observation_normalizations
                        or navigation is not None else {}),
@@ -429,13 +473,11 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                     "category_normalizations": category_normalizations,
                     "metadata": result.metadata}
         except ProviderError as error:
-            attempts = error.attempts
-            if result is not None and not attempts:
-                attempts = tuple(replace(a, code=error.code) for a in result.metadata.attempts)
-            latency = error.latency_ms or (result.metadata.latency_ms if result is not None else 0)
+            failure_code, metadata = self._failure_metadata(error, result, client)
             return {"stage": stage, "asset_id": image.asset_id, "model": client.settings.model,
-                    "code": error.code, "items": {}, "max_output_tokens": OUTPUT_TOKENS,
-                    "metadata": Metadata(client.settings.model, None, None, None, None, latency, attempts)}
+                    "code": failure_code, "items": {}, "max_output_tokens": OUTPUT_TOKENS,
+                    **({"partial_output": partition.audit()} if partition and partition.rejected else {}),
+                    "metadata": metadata}
 
     def _review_provider(self, targets, stage="reconciliation"):
         if self.judgment_client is not None and (stage == "visual_adjudication"
@@ -473,9 +515,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                 text=json.dumps({"asset_id": image.asset_id, "task_input": {"items": targets}}, ensure_ascii=False),
                 output_schema=schema, max_tokens=reconciliation.OUTPUT_TOKENS, thinking=False,
             )
-            secrets = [provider.settings.api_key for provider in
-                       (self.client, self.review_client, client, self.visual_client,
-                        self.judgment_client) if provider is not None]
+            secrets = self._provider_secrets(client)
             if any(_contains_credential(result.data, secret) or _contains_credential(asdict(result.metadata), secret)
                    for secret in secrets):
                 raise ProviderError("provider_credential_echo",
@@ -493,13 +533,10 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                     "code": "ok", "items": indexed, "max_output_tokens": reconciliation.OUTPUT_TOKENS,
                     "metadata": result.metadata}
         except ProviderError as error:
-            attempts = error.attempts
-            if result is not None and not attempts:
-                attempts = tuple(replace(a, code=error.code) for a in result.metadata.attempts)
-            latency = error.latency_ms or (result.metadata.latency_ms if result is not None else 0)
+            failure_code, metadata = self._failure_metadata(error, result, client)
             return {"stage": stage, "asset_id": image.asset_id, "model": client.settings.model,
-                    "code": error.code, "items": {}, "max_output_tokens": reconciliation.OUTPUT_TOKENS,
-                    "metadata": Metadata(client.settings.model, None, None, None, None, latency, attempts)}
+                    "code": failure_code, "items": {}, "max_output_tokens": reconciliation.OUTPUT_TOKENS,
+                    "metadata": metadata}
 
     def _bounded_review(self, image, targets, limiter, dispatch_deadline, stage="reconciliation",
                         batch_index=0, batch_count=1):
@@ -558,9 +595,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                 text=json.dumps({"asset_id": image.asset_id, "task_input": task_input}, ensure_ascii=False),
                 output_schema=schema, max_tokens=visual_readback.OUTPUT_TOKENS, thinking=True,
             )
-            secrets = [provider.settings.api_key for provider in
-                       (self.client, self.review_client, self.reconciliation_client, client,
-                        self.judgment_client) if provider is not None]
+            secrets = self._provider_secrets(client)
             if any(_contains_credential(result.data, secret) or _contains_credential(asdict(result.metadata), secret)
                    for secret in secrets):
                 raise ProviderError("provider_credential_echo",
@@ -584,14 +619,11 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                     "code": "ok", "items": indexed, "max_output_tokens": visual_readback.OUTPUT_TOKENS,
                     "image_views": views, "metadata": result.metadata}
         except ProviderError as error:
-            attempts = error.attempts
-            if result is not None and not attempts:
-                attempts = tuple(replace(a, code=error.code) for a in result.metadata.attempts)
-            latency = error.latency_ms or (result.metadata.latency_ms if result is not None else 0)
+            failure_code, metadata = self._failure_metadata(error, result, client)
             return {"stage": stage, "asset_id": image.asset_id, "model": client.settings.model,
-                    "code": error.code, "items": {}, "max_output_tokens": visual_readback.OUTPUT_TOKENS,
+                    "code": failure_code, "items": {}, "max_output_tokens": visual_readback.OUTPUT_TOKENS,
                     "image_views": views,
-                    "metadata": Metadata(client.settings.model, None, None, None, None, latency, attempts)}
+                    "metadata": metadata}
 
     def _align_page(self, image, primary, secondary):
         client, result = self.reconciliation_client, None
@@ -605,9 +637,9 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                 output_schema=semantic_alignment.SCHEMA,
                 max_tokens=semantic_alignment.OUTPUT_TOKENS, thinking=False,
             )
-            for provider in (self.client, self.review_client, client, self.visual_client, self.judgment_client):
-                if provider and (_contains_credential(result.data, provider.settings.api_key)
-                                 or _contains_credential(asdict(result.metadata), provider.settings.api_key)):
+            for secret in self._provider_secrets(client):
+                if (_contains_credential(result.data, secret)
+                        or _contains_credential(asdict(result.metadata), secret)):
                     raise ProviderError("provider_credential_echo",
                                         attempts=tuple(replace(a, code="provider_credential_echo",
                                                                request_id=None, model=None)
@@ -620,15 +652,12 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                     "alignment": semantic_alignment.evaluate_alignment(result.data, primary, secondary, target_unit=self.target_unit),
                     "metadata": result.metadata}
         except ProviderError as error:
-            attempts = error.attempts
-            if result is not None and not attempts:
-                attempts = tuple(replace(a, code=error.code) for a in result.metadata.attempts)
-            latency = error.latency_ms or (result.metadata.latency_ms if result else 0)
+            failure_code, metadata = self._failure_metadata(error, result, client)
             return {"stage": "semantic_alignment", "asset_id": image.asset_id,
-                    "model": client.settings.model, "code": error.code, "items": {},
+                    "model": client.settings.model, "code": failure_code, "items": {},
                     "max_output_tokens": semantic_alignment.OUTPUT_TOKENS,
                     "alignment": {"pairs": [], "rejected": [], "unmatched_source_ids": []},
-                    "metadata": Metadata(client.settings.model, None, None, None, None, latency, attempts)}
+                    "metadata": metadata}
 
     def _visual_gate(self, call, label, outcome, *, options_required=False, preflight=False):
         def reject(code, cause, uncertainties=()):
@@ -897,7 +926,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         structure_shared = any(call.get("structure_navigation", {}).get("structure_shared") for call in calls)
         metadata = WholePageCorrectionPipeline._metadata(calls, started)
         metadata = replace(metadata, requested_model="two_model")
-        if not any(call["code"] == "ok" for call in calls):
+        if not any(partial_output.available(call) for call in calls):
             raise ProviderError("multimodel_unavailable", attempts=metadata.attempts,
                                 latency_ms=metadata.latency_ms)
         items, label_alignments = [], []
@@ -905,6 +934,9 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         with ThreadPoolExecutor(max_workers=4, thread_name_prefix="xueban-alignment") as pool:
             for image in pages:
                 first, second = by_page[image.asset_id]["primary"], by_page[image.asset_id]["secondary"]
+                # Filtering a bad row must not turn previously ambiguous
+                # printed content into an allegedly unique cross-label pair.
+                # Partial pages can compare existing same-label items only.
                 if first["code"] != "ok" or second["code"] != "ok":
                     continue
                 aligned, mappings = _align_secondary_labels(first["items"], second["items"])
@@ -952,12 +984,16 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                            if canonical_label(raw["label"]) in identity_conflicts else [])
                 uncertainties = _bounded_uncertainties((a or {}).get("uncertainties", []),
                                                         (b or {}).get("uncertainties", []))
-                if first["code"] != "ok" or second["code"] != "ok":
+                if not partial_output.available(first) or not partial_output.available(second):
                     reasons.append("provider_unavailable")
                 if self.client.settings.model == self.review_client.settings.model:
                     reasons.append("independent_model_required")
                 if not a or not b:
                     reasons.append("unmatched_label")
+                    if first["code"] == "partial_output" or second["code"] == "partial_output":
+                        # No claim that a malformed row is this same question:
+                        # only that this page source did not fully complete.
+                        reasons.extend(("provider_unavailable", "provider_item_invalid"))
                 if not _usable(a) or not _usable(b):
                     reasons.append("uncertain_observation")
                 if any(reconciliation.has_unreadable_observation(row or {}) for row in (a, b)):
@@ -1002,9 +1038,10 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                 verification = {
                     "mode": "two_model", "status": status, "primary_model": self.client.settings.model,
                     "readback_model": self.review_client.settings.model, "review_model": self.review_client.settings.model,
-                    "independent_readback": b is not None and second["code"] == "ok",
-                    "reviewed": b is not None and second["code"] == "ok",
-                    "independent_judgments": 2 if a and b and first["code"] == second["code"] == "ok" else 1,
+                    "independent_readback": b is not None and partial_output.available(second),
+                    "reviewed": b is not None and partial_output.available(second),
+                    "independent_judgments": int(a is not None and partial_output.available(first))
+                        + int(b is not None and partial_output.available(second)),
                     "reason_codes": reasons,
                 }
                 assessment = {
@@ -1060,6 +1097,8 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
 
                 for image in pages:
                     first, second = by_page[image.asset_id]["primary"], by_page[image.asset_id]["secondary"]
+                    # The experimental isolation has no paid rescue stage.
+                    # Even unrelated conflicts on a partial page stay pending.
                     if first["code"] != "ok" or second["code"] != "ok":
                         continue
                     targets, selected_rows = [], []
@@ -1155,6 +1194,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                     if call.get("category_normalizations") else {})
                  | ({"observation_normalizations": call["observation_normalizations"]}
                     if call.get("observation_normalizations") else {})
+                 | ({"partial_output": call["partial_output"]} if "partial_output" in call else {})
                  | ({"alignment": call["alignment"]} if "alignment" in call else {})
                  | ({"image_views": call["image_views"]} if call.get("image_views") else {})
                  | ({"structure_navigation": call["structure_navigation"]}
@@ -1164,19 +1204,29 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                  | ({key: call[key] for key in ("batch_index", "batch_count", "target_labels")}
                     if "batch_index" in call else {})
                  | ({"applications": call["applications"]} if "applications" in call else {}) for call in calls]
+        rejected_count = sum(len(call.get("partial_output", {}).get("rejected", [])) for call in calls)
+        coverage_note = ("本次整页识读仍可能漏项，不能据此宣称全部作业无错。" if navigation_enabled
+                         else "整页独立核读仍可能漏项，不能据此宣称全部作业无错。")
+        if rejected_count:
+            coverage_note = (f"本页有{rejected_count}个模型返回项未通过格式或目标校验，核对服务尚未全部完成；"
+                             "原图已保留，其他已核对结果可继续查看。这不计为答错或薄弱点。" + coverage_note)
         return PipelineResult({
             "items": items,
             "coverage": {"collection_scope": "partial" if items else "unknown", "unrecognized_regions": [],
-                         "note": ("本次整页识读仍可能漏项，不能据此宣称全部作业无错。" if navigation_enabled
-                                  else "整页独立核读仍可能漏项，不能据此宣称全部作业无错。")},
+                         "note": coverage_note},
             "multimodel_audit": {"mode": "two_model", "independent_before_comparison": not structure_shared,
                                 "calls": audit, "label_alignments": label_alignments, "target_unit": self.target_unit,
                                 **({"structure_navigation": {"protocol": structure_navigation.PROTOCOL,
                                     "enabled": True, "structure_shared": structure_shared, "content_shared": False}}
-                                   if navigation_enabled else {})},
+                                   if navigation_enabled else {}),
+                                **({"partial_output": {"protocol": partial_output.PROTOCOL,
+                                    "enabled": self._partial_output_active(), "requested": True,
+                                    "rejected_source_items": rejected_count}}
+                                   if self.partial_output_enabled else {})},
         }, metadata, prompt_version=(PROMPT_VERSION if self.target_unit == question_units.LEGACY_UNIT
                                         else PROMPT_VERSION + ".question-experimental")
-                                     + (".structure-navigation-experimental-v1" if navigation_enabled else ""))
+                                     + (".structure-navigation-experimental-v1" if navigation_enabled else "")
+                                     + ("." + partial_output.PROTOCOL if self._partial_output_active() else ""))
 
     def rerecognize_original(self, *, images, question, attempt, input_versions):
         from .original_recheck import run
