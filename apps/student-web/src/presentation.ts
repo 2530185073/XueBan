@@ -42,13 +42,23 @@ function checkInProgress(row: CaseDetail) {
   return !!row.checkJob && ['queued', 'running', 'retryable_failed'].includes(row.checkJob.status)
 }
 
+/** Presentation only: a failed service is not evidence of unreadable handwriting or an unknown subject. */
+export function studentUnresolvedKind(row: CaseDetail): 'service' | 'handwriting' | 'other' | null {
+  const decision = currentStudentDecision(row)
+  if (checkInProgress(row) || !decision || decision.validity !== 'needs_review' && decision.verdict !== 'unable_to_judge') return null
+  const reasons = decision.origin === 'model' ? decision.verification?.reason_codes ?? [] : []
+  if (reasons.some(reason => ['provider_unavailable', 'reconciliation_unavailable'].includes(reason))) return 'service'
+  if (reasons.includes('visual_unreadable')) return 'handwriting'
+  return 'other'
+}
+
 function unresolvedPresentation(row: CaseDetail): { label: string; tone: Tone; note: string } {
-  const reasons = currentStudentDecision(row)?.verification?.reason_codes ?? []
-  if (reasons.some(reason => ['provider_unavailable', 'reconciliation_unavailable'].includes(reason))) return {
+  const kind = studentUnresolvedKind(row)
+  if (kind === 'service') return {
     label: 'AI 核对暂未完成', tone: 'amber',
     note: '这道题暂不判对错，核对服务没有完成。原图和作答已保留，可以先继续其他题。',
   }
-  if (reasons.includes('visual_unreadable')) return {
+  if (kind === 'handwriting') return {
     label: '这处笔迹暂时看不清，可补拍', tone: 'amber',
     note: '这道题暂不判对错。可以对照原图查看这处笔迹，必要时补拍题目和作答；也可以先继续其他题。',
   }

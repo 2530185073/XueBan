@@ -4,7 +4,7 @@ import type { CaseDetail } from '../core/types'
 import type { CurriculumScope } from '../core/learning'
 import type { Workspace } from '../useStudentWorkspace'
 import { effectiveDecision } from '../core'
-import { casePresentation, studentQuestionText, studentResultState, studentResultUncertain, type StudentResultState } from '../presentation'
+import { casePresentation, studentQuestionText, studentResultState, studentResultUncertain, studentUnresolvedKind, type StudentResultState } from '../presentation'
 import { ResultsSummary } from './ResultsSummary'
 import { QuestionDetail } from './QuestionDetail'
 
@@ -59,6 +59,7 @@ function ResultIcon({ state }: { state: StudentResultState }) {
 
 export function QuestionCard({ row, index, open, onToggle, subjects = [], onSelectSubject = () => {}, workspace, onCorrection, onContinue, onVariant, variantBusy = false }: { row: CaseDetail; index: number; open: boolean; onToggle: () => void; subjects?: CurriculumScope[]; onSelectSubject?: (subject: string) => void; workspace?: Workspace; onCorrection?: (camera: boolean) => void; onContinue?: () => void; onVariant?: () => void; variantBusy?: boolean }) {
   const state = studentResultState(row)
+  const serviceIncomplete = studentUnresolvedKind(row) === 'service'
   const decision = effectiveDecision(row)
   const usable = state !== 'processing' && decision && decision.validity !== 'needs_review' && decision.verdict !== 'unable_to_judge'
   const firstUncertainty = decision?.uncertainties?.[0]
@@ -92,15 +93,16 @@ export function QuestionCard({ row, index, open, onToggle, subjects = [], onSele
           {part.verdict === 'incorrect' && part.correct_answer && <p className="slot-correction">应填：{part.correct_answer}</p>}
         </div>)}
       </div> : <div className={`recognition-answer ${state}`}>
-        <span className="recognition-label">我的作答</span>
-        <p>{answerText(row)}</p>
+        <span className="recognition-label">{serviceIncomplete ? 'AI 识读草稿' : '我的作答'}</span>
+        <p>{serviceIncomplete ? row.attempt.answer_text || 'AI 暂未读到作答，仍需结合原图核对。' : answerText(row)}</p>
+        {serviceIncomplete && <small>这段文字尚未完成核对，可能与照片不同，请以原图为准。</small>}
       </div>}
       {state === 'incorrect' && <div className="recognition-correct-answer">
         <span className="recognition-label">正确答案</span>
         <p>{decision?.correct_answer?.trim() || '暂未生成正确答案，请重新识别或请老师核对。'}</p>
       </div>}
       <div className="recognition-learning">
-        {!row.question.subject && subjects.length > 0 && <div className="recognition-subject-picker">
+        {!row.question.subject && !serviceIncomplete && subjects.length > 0 && <div className="recognition-subject-picker">
           <span className="recognition-label">无法确定学科</span>
           <div><select aria-label="选择题目学科" disabled={!!workspace?.busy} defaultValue="" onChange={event => { if (event.target.value) onSelectSubject(event.target.value) }}>
             <option value="">请选择本题学科</option>
