@@ -52,6 +52,11 @@ export function studentUnresolvedKind(row: CaseDetail): 'service' | 'handwriting
   return 'other'
 }
 
+/** Compact service UI must not conceal an explicit unreadable-handwriting result. */
+export function studentServiceOnlyIncomplete(row: CaseDetail): boolean {
+  return studentUnresolvedKind(row) === 'service' && !currentStudentDecision(row)?.verification?.reason_codes.includes('visual_unreadable')
+}
+
 function unresolvedPresentation(row: CaseDetail): { label: string; tone: Tone; note: string } {
   const kind = studentUnresolvedKind(row)
   if (kind === 'service') return {

@@ -3,10 +3,11 @@ import { ArrowUpRight, Camera, Lightbulb, MessageCircle, ScanText, Sparkles, Ima
 import type { CaseDetail } from '../core/types'
 import { effectiveDecision } from '../core'
 import type { Workspace } from '../useStudentWorkspace'
-import { casePresentation, studentResultState } from '../presentation'
+import { casePresentation, studentResultState, studentServiceOnlyIncomplete } from '../presentation'
 import { CaseRecordPanel } from './CaseRecord'
 import { AgentTipsPanel } from './AgentTips'
 import { RecognitionRecoveryPanel } from './RecognitionRecovery'
+import './serviceIncomplete.css'
 
 export function QuestionDetail({ row, workspace, onCorrection, onUpload, onContinue, embedded = false }: { row: CaseDetail; workspace: Workspace; onCorrection: () => void; onUpload?: () => void; onContinue?: () => void; embedded?: boolean }) {
   const presentation = casePresentation(row)
@@ -18,6 +19,22 @@ export function QuestionDetail({ row, workspace, onCorrection, onUpload, onConti
   const visibleHint = !needsConfirmation && hint?.validity === 'active' && hint.attempt_id === row.attempt.id && hint.source_decision_id === decision?.id && hint.source_decision_revision === decision?.revision ? hint : null
   useEffect(() => { if (visibleHint) workspace.hintViewed(visibleHint) }, [visibleHint?.id])
   const canHint = row.attempt.recognition_status === 'ready' && decision != null && !needsConfirmation
+  if (embedded && studentServiceOnlyIncomplete(row)) return <section className="question-detail service-incomplete-detail" aria-label="这道题的作答与提示">
+    <div className="service-next-step"><p role="status">{presentation.note}</p>{onContinue && <button className="text-button" onClick={onContinue}>先看其他题 <ArrowUpRight size={14} /></button>}</div>
+    <RecognitionRecoveryPanel key={`${row.case.id}:${row.case.revision}:${row.attempt.id}:${row.case.current_question_revision}:${row.attempt.recognition_revision}`} row={row} workspace={workspace} needed />
+    <AgentTipsPanel caseId={row.case.id} workspace={workspace} />
+    <div className="service-secondary-actions"><button className="text-button" disabled={!!workspace.busy} onClick={() => void workspace.requestHelp(row, 'question')}><MessageCircle size={17} /> 请老师帮忙 <ArrowUpRight size={14} /></button></div>
+    <details className="service-supplement">
+      <summary><ImagePlus size={17} />补充新照片或核对文字</summary>
+      <div className="service-supplement-body">
+        <button className="button secondary correction-button" disabled={!!workspace.busy} onClick={onCorrection}><Camera size={18} /> 我已在纸上订正，拍新作答</button>
+        <p className="muted small correction-note">可以拍整页，也可以只拍这道题。保留题干和新作答，学伴会把这次订正接在原题记录后面。</p>
+        {onUpload && <button className="button secondary" disabled={!!workspace.busy} onClick={onUpload}><ImagePlus size={16} />从相册选择订正照片</button>}
+        <button className="text-button subtle" disabled={!!workspace.busy} onClick={() => void workspace.requestHelp(row, 'recognition')}>文字和照片不一样？请老师核对 <ArrowUpRight size={14} /></button>
+      </div>
+    </details>
+    <CaseRecordPanel row={row} workspace={workspace} />
+  </section>
   return <section className="question-detail" aria-label="这道题的作答与提示">
     <div className={`result-callout ${presentation.tone}`} role="status"><span className="status-dot" /><div><strong>{presentation.label}</strong><p>{presentation.note}</p></div></div>
     {needsConfirmation && onContinue && <button className="text-button" onClick={onContinue}>先看其他题 <ArrowUpRight size={14} /></button>}

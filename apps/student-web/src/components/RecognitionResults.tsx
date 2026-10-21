@@ -4,7 +4,7 @@ import type { CaseDetail } from '../core/types'
 import type { CurriculumScope } from '../core/learning'
 import type { Workspace } from '../useStudentWorkspace'
 import { effectiveDecision } from '../core'
-import { casePresentation, studentQuestionText, studentResultState, studentResultUncertain, studentUnresolvedKind, type StudentResultState } from '../presentation'
+import { casePresentation, studentQuestionText, studentResultState, studentResultUncertain, studentUnresolvedKind, studentServiceOnlyIncomplete, type StudentResultState } from '../presentation'
 import { ResultsSummary } from './ResultsSummary'
 import { QuestionDetail } from './QuestionDetail'
 import { MathText } from './MathText'
@@ -64,6 +64,7 @@ export function QuestionCard({ row, index, open, onToggle, subjects = [], onSele
   const [copyStatus, setCopyStatus] = useState('')
   const state = studentResultState(row)
   const serviceIncomplete = studentUnresolvedKind(row) === 'service'
+  const compactService = !!workspace && !!onCorrection && studentServiceOnlyIncomplete(row)
   const decision = effectiveDecision(row)
   const usable = state !== 'processing' && decision && decision.validity !== 'needs_review' && decision.verdict !== 'unable_to_judge'
   const firstUncertainty = decision?.uncertainties?.[0]
@@ -137,7 +138,7 @@ export function QuestionCard({ row, index, open, onToggle, subjects = [], onSele
         <span className="recognition-label">正确答案</span>
         <p><MathText text={originalMath ? decision?.correct_answer || displayedCorrect : displayedCorrect} original={originalMath} /></p>
       </div>}
-      <div className="recognition-learning">
+      {(!compactService || points.length > 0) && <div className="recognition-learning">
         {!row.question.subject && !serviceIncomplete && subjects.length > 0 && <div className="recognition-subject-picker">
           <span className="recognition-label">无法确定学科</span>
           <div><select aria-label="选择题目学科" disabled={!!workspace?.busy} defaultValue="" onChange={event => { if (event.target.value) onSelectSubject(event.target.value) }}>
@@ -147,8 +148,8 @@ export function QuestionCard({ row, index, open, onToggle, subjects = [], onSele
         </div>}
         <div className="recognition-learning-row"><span>知识点</span><div className="knowledge-tags">{points.length ? points.map(point => <span key={point}>{point}</span>) : <em>暂未识别</em>}</div></div>
         {method && usable && decision && ['incorrect', 'partially_correct', 'unanswered'].includes(decision.verdict) && <div className="recognition-learning-row correction-method"><span><Lightbulb size={15} />改正方法</span><p>{method}</p></div>}
-      </div>
-      {uncertainties.length > 0 && <p className="recognition-uncertainty">{state === 'uncertain' ? casePresentation(row).note : state === 'processing' ? '正在检查这道题的作答，可以先继续其他题。' : controlledServiceMessage ?? '* AI 对这道题的识别或判断存在不确定，请结合原图核对。'}</p>}
+      </div>}
+      {!compactService && uncertainties.length > 0 && <p className="recognition-uncertainty">{state === 'uncertain' ? casePresentation(row).note : state === 'processing' ? '正在检查这道题的作答，可以先继续其他题。' : controlledServiceMessage ?? '* AI 对这道题的识别或判断存在不确定，请结合原图核对。'}</p>}
       {workspace && onCorrection && <QuestionDetail row={row} workspace={workspace} embedded onCorrection={() => onCorrection(true)} onUpload={() => onCorrection(false)} onContinue={onContinue} />}
       {onVariant && usable && decision && ['incorrect', 'partially_correct'].includes(decision.verdict) && <div className="recognition-variant-action"><button type="button" className="button secondary" disabled={variantBusy || !!workspace?.busy} onClick={onVariant}>{variantBusy ? <LoaderCircle className="spin" size={16} /> : <Shuffle size={16} />}{variantBusy ? '正在提交生成请求' : '选做一道同题型'}</button><span className="muted small">AI 生成并核验一道，想试试时再开始。</span></div>}
     </div>}
