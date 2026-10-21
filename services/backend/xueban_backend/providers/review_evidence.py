@@ -12,6 +12,7 @@ import re
 
 from .correction_pipeline import _object, _text
 from . import question_units
+from .printed_identity import full_printed_presentation_rule
 from .whole_page import normalize_literal_math, normalize_page_stem
 
 
@@ -204,6 +205,13 @@ def target_link(review, primary, secondary, selected, source_id):
     for role, original in (("primary", primary), ("secondary", secondary)):
         if _whole_printed_match(original, selected):
             return {"clear": True, "basis": "full_original_printed_observation",
+                    "original_source_id": source_id(role, original), "selected_source_id": selected_id,
+                    "original_observation": {"stem_text": original.get("stem_text"), "options": deepcopy(original.get("options", []))},
+                    "selected_observation": {"stem_text": selected.get("stem_text"), "options": deepcopy(selected.get("options", []))}}
+        presentation_rule = full_printed_presentation_rule(original, selected)
+        if presentation_rule:
+            return {"clear": True, "basis": "full_original_printed_presentation",
+                    "presentation_rule": presentation_rule,
                     "original_source_id": source_id(role, original), "selected_source_id": selected_id,
                     "original_observation": {"stem_text": original.get("stem_text"), "options": deepcopy(original.get("options", []))},
                     "selected_observation": {"stem_text": selected.get("stem_text"), "options": deepcopy(selected.get("options", []))}}
