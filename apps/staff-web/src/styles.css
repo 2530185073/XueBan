@@ -21,10 +21,10 @@
 .form-issue{font-size:11px;color:#a3603b;line-height:1.7}
 
 /* Queue */
-.queue-switch{display:flex;gap:6px;margin:0 17px 14px;padding:4px;background:#eef1e8;border-radius:9px}
-.queue-switch button{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;border:0;background:transparent;border-radius:7px;padding:9px 6px;font-size:12px;color:#6f7f6b;min-height:38px}
+.queue-switch{display:flex;gap:4px;margin:0 17px 14px;padding:4px;background:#eef1e8;border-radius:9px}
+.queue-switch button{flex:1;display:flex;align-items:center;justify-content:center;gap:4px;border:0;background:transparent;border-radius:7px;padding:9px 2px;font-size:11px;color:#6f7f6b;min-height:38px;white-space:nowrap}
 .queue-switch button.active{background:var(--paper);color:var(--green);font-weight:600;box-shadow:0 1px 4px #2e45391a}
-.queue-switch .count{font-size:10px;min-width:20px;padding:1px 6px;border-radius:10px;background:#e1e8da;color:#5f7a58}
+.queue-switch .count{font-size:10px;min-width:14px;padding:1px 3px;border-radius:10px;background:#e1e8da;color:#5f7a58}
 .queue-switch button.active .count{background:var(--green);color:#fff}
 .queue-avatar.appeal{color:#a07a3a;border-color:#eadfc4}
 .tag.rose{background:#f6e4dc;color:#a35c3f}.tag.muted{background:#eef0ea;color:#9aa492}

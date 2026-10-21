@@ -101,7 +101,7 @@ function DailyDetail({ ctx, reportId, name, day }: { ctx: LearningContext; repor
       {report.published_at && <small className="subtle">发布于 {dateTime(report.published_at)}</small>}
       {draft && <small className="subtle">草稿会随作业和老师核实自动更新</small>}
     </div>
-    {draft && report.supersedes_id && <p className="preview-note">发送之后今天的情况又有变化（新作业、订正或改判），这是更新后的内容。家长原来的链接会自动显示最新版。</p>}
+    {draft && report.supersedes_id && <p className="preview-note">上一版发布后，今天的记录又有变化（新作业、订正或改判）。这是更新草稿；核对并发布后，已生成的家长链接才会显示新版。是否已发送以发送记录为准。</p>}
     <DailySnapshotView snap={report.snapshot} />
 
     <section className="report-block">
@@ -191,7 +191,7 @@ export default function DailyFeedbackArea({ ctx }: { ctx: LearningContext }) {
     <section className="learning-main">
       {selected?.report ? <DailyDetail key={selected.report.id} ctx={ctx} reportId={selected.report.id} name={selected.student.display_name} day={day} />
         : <div className="learning-empty"><span className="round-icon"><Check size={23} /></span><h2>今天交了什么、错在哪、订正了没有</h2>
-          <p>每份反馈只汇总这一天在托管班拍照提交的作业，对错以老师核实为准。草稿随作业和核实自动更新；发送后又有变化时会生成更新版本，家长原来的链接自动显示最新内容。</p></div>}
+          <p>每份反馈只汇总这一天在托管班拍照提交的作业，对错以老师核实为准。草稿随作业和核实自动更新；发布后记录变化会生成更新草稿。老师核对并发布新版后，已生成的家长链接才显示新内容。</p></div>}
     </section>
   </main>
 }

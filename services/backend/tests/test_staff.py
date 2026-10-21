@@ -41,6 +41,7 @@ def staff_setup(flow, tmp_path):
 
 def test_admin_creates_campus_teacher_who_sees_queue(flow, tmp_path):
     case = flow.ready()
+    flow.pipeline.verdict = "unable_to_judge"
     flow.start_check(case)
     assert flow.worker.run_once()
     cfg, client, admin = staff_setup(flow, tmp_path)
@@ -63,7 +64,7 @@ def test_admin_creates_campus_teacher_who_sees_queue(flow, tmp_path):
     # Campus grant reaches the learner without a per-learner grant.
     queue = client.get("/v1/review-queue", headers=token).json()
     assert [item["case_id"] for item in queue["items"]] == [case["id"]]
-    assert queue["items"][0]["reason"] == "verify_candidate"
+    assert queue["items"][0]["reason"] == "unable_to_judge"
     assert queue["items"][0]["student_name"] == "合成学生甲"
     assert client.get(f"/v1/cases/{case['id']}", headers=token).status_code == 200
     assert client.get("/v1/students/student_b/homeworks", headers=token).status_code == 404
