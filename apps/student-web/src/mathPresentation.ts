@@ -4,8 +4,10 @@ export type MathPresentation = { kind: 'fraction'; numerator: string; denominato
 const MAX_TEXT = 4000, MAX_EXPONENTS = 32, MAX_GROUP = 80
 const closes: Record<string, string> = { '(': ')', '{': '}', '[': ']' }
 const isBoundary = (tail: string, grouped: boolean) => {
-  const next = tail.trimStart()[0]
-  return !next || grouped && /[+\-−/]/u.test(next) || /[\u3400-\u9fff，。；：、！？=<>≤≥≠×÷*·,;:!?\])}]/u.test(next)
+  const rest = tail.trimStart(), next = rest[0]
+  // Do not guess an ungrouped exponent's endpoint across comma/ratio notation.
+  if (!grouped && /^[,，:：]/u.test(rest)) return false
+  return !next || grouped && /[+\-−/!！]/u.test(next) || /[\u3400-\u9fff，。；：、？=<>≤≥≠×÷*·,;:?\])}]/u.test(next)
 }
 function balanced(text: string) {
   const stack: string[] = []
