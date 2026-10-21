@@ -179,6 +179,14 @@ export function useStudentWorkspace() {
     openDraft: (id: string) => action('正在打开作业', () => selectDraft(id)),
     run: () => action('正在检查作业', async () => { if (!draft) return; const next = await client.runDraft(draft.id, { retryFailed: draft.stage === 'failed' }); setDraft(next); setDetail(next.detail); setRecordVersion(v => v + 1); await sync() }),
     rerecognize: () => action('正在重新识别', async () => { if (!draft) return; const next = await client.runDraft(draft.id, { rerecognize: true }); setDraft(next); setDetail(next.detail); setRecordVersion(v => v + 1); await sync() }),
+    // Completion of another photo/attempt must never replace the currently open work.
+    refreshRecognition: async (row: CaseDetail, stillCurrent: () => boolean) => {
+      const draftId = activeDraft.current, student = client.selectedStudentId
+      if (!stillCurrent() || !draftId || student !== row.case.scope.student_id || detail?.homework.id !== row.case.homework_id) return
+      const next = await client.refreshRecognitionDraft(draftId, row.case.homework_id)
+      if (!stillCurrent() || activeDraft.current !== draftId || client.selectedStudentId !== student) return
+      setDraft(next); setDetail(next.detail); setRecordVersion(v => v + 1)
+    },
     refreshDetail: () => action('正在刷新结果', refreshOpened),
     loadHistory: (more = false) => action('正在读取历史', async () => {
       const page = await client.history(more ? cursor ?? undefined : undefined)

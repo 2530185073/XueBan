@@ -1,4 +1,4 @@
-import type { Account, AdminRequestOptions, AuthSession, Accepted, AssetAccess, AttemptRead, CaseDetail, CaseRecord, CheckRun, CorrectionCase, CreateCorrection, CreateHelp, DecisionRead, DraftSummary, DraftView, HelpRequest, Hint, HomeworkDetail, HomeworkPage, HomeworkSession, HomeworkSummary, IdentityContext, ImageAsset, InputVersions, Job, JournalEntry, NormalizedPhoto, QuestionRead, RequestHint, Review, StoredDraft, StoredPage, UploadTicket } from './types'
+import type { Account, AdminRequestOptions, AuthSession, Accepted, RecognitionRecoveryStatus, RecognitionRecheckAccepted, AssetAccess, AttemptRead, CaseDetail, CaseRecord, CheckRun, CorrectionCase, CreateCorrection, CreateHelp, DecisionRead, DraftSummary, DraftView, HelpRequest, Hint, HomeworkDetail, HomeworkPage, HomeworkSession, HomeworkSummary, IdentityContext, ImageAsset, InputVersions, Job, JournalEntry, NormalizedPhoto, QuestionRead, RequestHint, Review, StoredDraft, StoredPage, UploadTicket } from './types'
 import { StudentApi } from './api'
 import { StudentError, safeError } from './errors'
 import { DRAFT_FORMAT, DraftStore, LEGACY_PAGE_ID, type PurgeReport } from './store'
@@ -350,6 +350,56 @@ export class StudentClient {
     return { case: c, question: q.record, attempt: a.record }
   }
   private async caseDetail(ctx: Context, id: string): Promise<CaseDetail> { return this.rowFor(ctx, await this.caseRecordRead(ctx, id)) }
+  private async recoveryStatus(ctx: Context, caseId: string, attemptId: string): Promise<RecognitionRecoveryStatus> {
+    const value = await this.read<RecognitionRecoveryStatus>(ctx, `/v1/cases/${encoded(caseId)}/recognition-rechecks/status`, 'RecognitionRecoveryStatus')
+    if (value.case_id !== caseId || value.attempt_id !== attemptId) throw new StudentError('stale_input', 409)
+    if (value.used + value.remaining !== value.limit || value.active_job_id && value.eligible) throw new StudentError('invalid_response', 502)
+    return value
+  }
+  /** Read-only recovery progress, bound to the current student's original attempt. */
+  async recognitionRecoveryStatus(caseId: string, attemptId: string) {
+    const ctx = await this.authorize(), c = await this.caseRecordRead(ctx, caseId)
+    if (c.current_attempt_id !== attemptId) throw new StudentError('stale_input', 409)
+    return this.recoveryStatus(ctx, caseId, attemptId)
+  }
+  /** Explicit user action only. Unknown writes retain their original key/body across reloads. */
+  async startRecognitionRecheck(row: CaseDetail): Promise<RecognitionRecoveryStatus> {
+    const ctx = await this.authorize(), current = await this.caseDetail(ctx, row.case.id)
+    if (current.attempt.id !== row.attempt.id) throw new StudentError('stale_input', 409)
+    const status = await this.recoveryStatus(ctx, row.case.id, row.attempt.id)
+    if (status.active_job_id) return status
+    const id = `recognition-recheck:${row.case.id}:${row.attempt.id}`
+    const previous = await this.store.operation(ctx.scope, id); this.check(ctx)
+    // An unresolved submission is replayed once only after an explicit click;
+    // neither polling nor a 503 chooses a new idempotency key.
+    if (previous?.response === undefined && previous) {
+      const accepted = await this.replay<RecognitionRecheckAccepted>(ctx, previous)
+      this.checkRecoveryAccepted(accepted, row)
+      return this.recoveryStatus(ctx, row.case.id, row.attempt.id)
+    }
+    if (!status.eligible) return status
+    if (current.case.revision !== row.case.revision || current.case.current_question_revision !== row.case.current_question_revision || current.attempt.recognition_revision !== row.attempt.recognition_revision) throw new StudentError('revision_conflict', 409)
+    if (previous) await this.store.removeOperation(ctx.scope, id)
+    try {
+      const accepted = await this.write<RecognitionRecheckAccepted>(ctx, id, `/v1/cases/${encoded(row.case.id)}/recognition-rechecks`, {
+        expected_revision: current.case.revision, attempt_id: current.attempt.id,
+        question_revision: current.case.current_question_revision, attempt_recognition_revision: current.attempt.recognition_revision,
+      }, 'RecognitionRecheckAccepted', 'StartRecognitionRecheck')
+      this.checkRecoveryAccepted(accepted, row)
+      return this.recoveryStatus(ctx, row.case.id, row.attempt.id)
+    } catch (error) {
+      // A network/503 result may have committed. Recover by GET, never another POST.
+      const recovered = await this.recoveryStatus(ctx, row.case.id, row.attempt.id).catch(() => null)
+      if (recovered?.active_job_id) return recovered
+      throw error
+    }
+  }
+  private checkRecoveryAccepted(value: RecognitionRecheckAccepted, row: CaseDetail) {
+    if (value.job.kind !== 'recognition_recheck' || value.recovery.case_id !== row.case.id || value.recovery.attempt_id !== row.attempt.id
+      || value.recovery.active_job_id && value.recovery.active_job_id !== value.job.id
+      || value.job.result && (value.job.result.resource_type !== 'attempt' || value.job.result.resource_id !== row.attempt.id)
+      || value.created_resource && (value.created_resource.resource_type !== 'attempt' || value.created_resource.resource_id !== row.attempt.id)) throw new StudentError('invalid_response', 502)
+  }
   /** All case records of a homework, following layout-repair replacements that the homework list may not name yet. */
   private async caseRecords(ctx: Context, homework: HomeworkSession) {
     const records = new Map<string, CorrectionCase>(), queue = [...homework.case_ids]
@@ -435,6 +485,21 @@ export class StudentClient {
     detail.draftId = d.id
     await this.save(ctx, d)
     return detail
+  }
+  /** Refresh the currently opened cache, including a correction-photo draft.
+   * GET only: never resumes uploads/checks or creates a replacement draft.
+   */
+  async refreshRecognitionDraft(id: string, homeworkId: string): Promise<DraftView> {
+    const ctx = await this.authorize(), opened = await this.store.draft(ctx.scope, id)
+    this.check(ctx)
+    if (opened.homeworkId !== homeworkId) throw new StudentError('stale_input', 409)
+    const detail = await this.detail(ctx, homeworkId)
+    // Re-read after network work so unrelated local edits/operation state survive.
+    const latest = await this.store.draft(ctx.scope, id); this.check(ctx)
+    if (latest.homeworkId !== homeworkId) throw new StudentError('stale_input', 409)
+    latest.detail = { ...detail, draftId: latest.id }
+    await this.save(ctx, latest)
+    return this.view(latest)
   }
   async assetBlob(id: string): Promise<Blob> {
     const ctx = await this.authorize(), key = ctx.scope + ':' + id
@@ -590,7 +655,10 @@ export class StudentClient {
         }
         this.jobSucceeded(recognitionJob)
       }
-      d.detail = await this.detail(ctx, d.homeworkId); d.stage = 'checking'; await this.save(ctx, d)
+      d.detail = await this.detail(ctx, d.homeworkId)
+      // Recovery is a server-owned original-image task, not a new /checks request.
+      if (d.detail.jobs.some(job => job.kind === 'recognition_recheck' && active(job))) { d.stage = 'waiting'; d.error = null; await this.save(ctx, d); return this.view(d) }
+      d.stage = 'checking'; await this.save(ctx, d)
       const forced = new Set(options.forceCheckCaseIds ?? [])
       const ids = forced.size ? [...forced] : d.correction ? [d.correction.caseId] : d.detail.cases.map(row => row.case.id)
       const knownJobs = new Map(d.detail.jobs.map(job => [job.id, job]))

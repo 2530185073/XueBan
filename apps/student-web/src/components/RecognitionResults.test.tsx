@@ -181,10 +181,10 @@ describe('correction controls in each result card', () => {
     const hints = html.match(/<button\b[\s\S]*?<\/button>/g)!.find(tag => tag.includes('给我一点方向'))
     expect(hints).toContain('disabled')
   })
-  it('offers a deliberate retry for a failed check while keeping the answer unjudged', () => {
+  it('offers original-image recovery for a failed check while keeping the answer unjudged', () => {
     const value = row(); value.case.current_decision = null; value.checkJob = { status: 'failed' } as CaseDetail['checkJob']
     const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} workspace={workspace} onCorrection={() => {}} />)
-    expect(html).toContain('服务失败'); expect(html).toContain('重新检查这道题')
+    expect(html).toContain('服务失败'); expect(html).toContain('重新核对原图'); expect(html).not.toContain('重新检查这道题')
     expect(html).not.toContain('正确答案</span>')
   })
 })

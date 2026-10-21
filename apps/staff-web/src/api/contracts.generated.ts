@@ -55,7 +55,7 @@ export type TechnicalFailure = { "code": "provider_timeout" | "provider_unavaila
 
 export type ResultRef = { "resource_type": "homework" | "attempt" | "check" | "hint" | "deletion"; "resource_id": string }
 
-export type Job = { "id": string; "revision": number; "kind": "recognize_homework" | "recognize_attempt" | "check" | "hint" | "delete" | "repair_layout"; "status": JobStatus; "created_at": string; "updated_at": string; "retry_after_seconds": number | null; "failure": TechnicalFailure | null; "result": ResultRef | null }
+export type Job = { "id": string; "revision": number; "kind": "recognize_homework" | "recognize_attempt" | "check" | "hint" | "delete" | "repair_layout" | "recognition_recheck"; "status": JobStatus; "created_at": string; "updated_at": string; "retry_after_seconds": number | null; "failure": TechnicalFailure | null; "result": ResultRef | null }
 
 export type Accepted = { "job": Job; "created_resource": ResultRef | null }
 
@@ -84,6 +84,10 @@ export type QuestionRead = { "record": CapturedQuestionRevision; "current_revisi
 export type AttemptRead = { "record": Attempt; "current_revision": number; "currently_effective": boolean }
 
 export type DecisionRead = { "record": Decision; "current_revision": number; "currently_effective": boolean }
+
+export type RecognitionRecoveryStatus = { "case_id": string; "attempt_id": string; "limit": 2; "used": number; "remaining": number; "active_job_id": string | null; "last_job_id": string | null; "last_outcome": null | "applied" | "unchanged_pending" | "target_unconfirmed" | "scope_change_required" | "service_failed" | "stale_input" | "execution_unknown"; "eligible": boolean; "blocked_reason": null | "active_recovery" | "budget_exhausted" | "already_resolved" | "staff_confirmed" | "inactive_case" | "initial_recognition_pending" | "multiple_source_pages" }
+
+export type RecognitionRecheckAccepted = { "job": Job; "created_resource": ResultRef | null; "recovery": RecognitionRecoveryStatus }
 
 export type CreateHomework = { "curriculum": CurriculumContext; "title": string | null; "occurred_at": string; "collection_scope": "partial" | "declared_complete" | "unknown" }
 
@@ -120,3 +124,5 @@ export type RequestDeletion = { "reason": string; "confirmation": "delete_author
 export type RenewUpload = { "expected_revision": number }
 
 export type RepairLayout = { "expected_revision": number; "supersede_questions": Array<{ "question_id": string; "expected_revision": number }>; "replacement_regions": Array<{ "regions": Array<Region>; "stem_text": string | null }>; "reason": string }
+
+export type StartRecognitionRecheck = { "expected_revision": number; "attempt_id": string; "question_revision": number; "attempt_recognition_revision": number }
