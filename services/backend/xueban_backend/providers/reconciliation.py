@@ -411,6 +411,61 @@ def enclosing_presentation_same(first, second):
     return has_heading and bodies[0] == bodies[1]
 
 
+
+def terminal_choice_presentation_same(first, second):
+    """Compare one optional terminal choice slot; never remove an operand.
+
+    Only complete, identical, ordered options and the same single-letter
+    present answer qualify. The entire remaining printed stem is compared
+    verbatim. This is a routing view; release still needs a source-bound
+    equivalent/presentation review and every existing consumer gate.
+    """
+    labels = [item.get("label") for item in (first, second)]
+    if (not all(isinstance(label, str) and label.strip() for label in labels)
+            or canonical_label(labels[0]) != canonical_label(labels[1])
+            or not re.fullmatch(r"\d+(?:\(\d+\))*", canonical_label(labels[0]))
+            or any(question_units.source_unit(item) != question_units.LEGACY_UNIT
+                   for item in (first, second))
+            or not question_units.same_unit_identity(first, second)
+            or (first.get("source_asset_id") and second.get("source_asset_id")
+                and first["source_asset_id"] != second["source_asset_id"])):
+        return False
+    if any(item.get("question_type") != "single_choice"
+           or item.get("uncertainties") != [] or item.get("answer_status") != "present"
+           for item in (first, second)):
+        return False
+    options = first.get("options")
+    if (not isinstance(options, list) or not 2 <= len(options) <= 12
+            or options != second.get("options")):
+        return False
+    if any(not isinstance(option, dict) or not isinstance(option.get("label"), str)
+           or re.fullmatch(r"[A-Z]", option["label"]) is None
+           or not isinstance(option.get("text"), str) or not option["text"].strip()
+           for option in options):
+        return False
+    option_labels = [option["label"] for option in options]
+    if (len(set(option_labels)) != len(option_labels)
+            or first.get("answer_text") != second.get("answer_text")
+            or first.get("answer_text") not in option_labels):
+        return False
+    stems, slots = [], []
+    for item in (first, second):
+        text = item.get("stem_text")
+        if not isinstance(text, str):
+            return False
+        text = text.strip()
+        match = re.fullmatch(r"(.+?)(_{2,})", text)
+        stem = match[1].rstrip() if match else text
+        # A Chinese prose boundary, not '=____', a missing operand, or an
+        # internal/multiple answer position. All operators/variables stay.
+        if (not re.search(r"[\u4e00-\u9fff]$", stem)
+                or re.search(r"[_＿□▢]|[（(\[【]\s*[）)\]】]", stem)):
+            return False
+        stems.append(stem)
+        slots.append(match is not None)
+    return stems[0] == stems[1] and slots[0] != slots[1]
+
+
 def _condition_literals(value):
     """Contextual condition veto; student-transcription veto stays unchanged.
 
@@ -586,6 +641,7 @@ def evaluate_review(review, primary, secondary, visual=None, critical_visual=Non
         return reject("comparison_unresolved")
     requires_visual_support = review["resolution"] == "visual_resolution"
     power_property_context = False
+    terminal_choice_context = False
     if review["resolution"] in {"equivalent", "non_material"}:
         def comparable(role, item):
             # This is a boolean eligibility check, not a new or rewritten source.
@@ -601,7 +657,11 @@ def evaluate_review(review, primary, secondary, visual=None, critical_visual=Non
         if _critical_literals(primary.get("answer_text")) != _critical_literals(secondary.get("answer_text")):
             return reject("material_observation_change")
         first_conditions, second_conditions = _conditions(primary), _conditions(secondary)
-        if _condition_literal_change(primary, secondary):
+        terminal_choice_context = (review["resolution"] == "equivalent"
+                                   and review["observation_basis"] == "direct_image"
+                                   and comparison["difference_type"] == "presentation"
+                                   and terminal_choice_presentation_same(primary, secondary))
+        if _condition_literal_change(primary, secondary) and not terminal_choice_context:
             return reject("material_condition_change")
         # A reviewer can resolve an added heading without a third reader:
         # the complete shorter stem is still present and every critical
@@ -621,7 +681,8 @@ def evaluate_review(review, primary, secondary, visual=None, critical_visual=Non
         requires_visual_support = (
             resolved_source == "visual" or not _answer_equal(primary, secondary)
             or (first_conditions != second_conditions and not (enclosing_context or instruction_context
-                                                                      or power_property_context))
+                                                                      or power_property_context
+                                                                      or terminal_choice_context))
         )
         # Do not require the original judges to agree, or to have supplied a
         # correction. This review independently judges the bound observation.
@@ -658,6 +719,8 @@ def evaluate_review(review, primary, secondary, visual=None, critical_visual=Non
             "condition_comparison_policy": "contextual_literals_with_source_review",
             **({"condition_presentation_rule": "numeric_power_property_copula_v1"}
                if power_property_context and not requires_visual_support else {}),
+            **({"condition_presentation_rule": "single_choice_optional_terminal_slot_v1"}
+               if terminal_choice_context and not requires_visual_support else {}),
             "reviewed_visual_source_id": source_id("visual", visual) if visual is not None else None,
             "observation_issue_review": deepcopy(note_review),
             "target_identity": deepcopy(identity),

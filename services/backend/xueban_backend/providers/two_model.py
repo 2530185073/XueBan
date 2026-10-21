@@ -173,6 +173,8 @@ def _needs_condition_readback(first, second):
     a, b = normalize_page_stem(first), normalize_page_stem(second)
     if a == b:
         return False
+    if reconciliation.terminal_choice_presentation_same(first, second):
+        return False
     if reconciliation._condition_literals(a) != reconciliation._condition_literals(b):
         return True
     if reconciliation.instruction_presentation_same(a, b):
