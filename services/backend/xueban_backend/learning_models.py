@@ -67,7 +67,7 @@ class StudentLearningProfile(Base):
 
 
 class QuestionKnowledgeLink(Base):
-    """Append-only: the newest row per (question_id, knowledge_id) is current."""
+    """Append-only attribution; machine links bind the observations they read."""
     __tablename__ = "question_knowledge_links"
     __table_args__ = (student_fk(), Index("ix_qkl_question", "question_id"), Index("ix_qkl_student", "student_id"))
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -80,6 +80,9 @@ class QuestionKnowledgeLink(Base):
     graph_version: Mapped[str] = mapped_column(String(64), nullable=False)
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     source: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Staff links cover the question. Missing legacy machine provenance stays
+    # SQL NULL; it must never be guessed from the latest/current attempt.
+    observation_bindings: Mapped[list | None] = mapped_column(JSON(none_as_null=True))
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     rationale: Mapped[str | None] = mapped_column(Text)
     actor_id: Mapped[str | None] = mapped_column(String(64))

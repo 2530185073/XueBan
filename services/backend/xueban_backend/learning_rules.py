@@ -14,6 +14,9 @@ Evidence rules (blueprint 02 section 4/5):
   only when staff confirmed it was done without hints, adult or peer help.
 * A knowledge link belongs to one question revision and curriculum version.
   Old mappings remain auditable but cannot tag a revised question or graph.
+  Machine mappings additionally belong to one identified answer observation;
+  a new answer's error attribution never rewrites an older answer's evidence.
+  Staff question-level confirmation or rejection has separate authority.
 * A wrong answer on a multi-knowledge question is negative evidence only for the
   confirmed primary link (the located error); secondary links get it as
   unscorable. A correct answer supports every confirmed link.
@@ -26,7 +29,9 @@ import hashlib
 import json
 from zoneinfo import ZoneInfo
 
-RULE_VERSION = "r1.4-versioned-knowledge"
+from .learning_link_scope import select_current_links
+
+RULE_VERSION = "r1.5-observation-bound"
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 STABLE_MIN_SPAN = timedelta(hours=24)
 DELAYED_AFTER = timedelta(days=7)
@@ -110,20 +115,15 @@ def derive_evidence(*, cases, attempts, decisions, hints, questions, links, cond
     hints_by_case = defaultdict(list)
     for hint in hints:
         hints_by_case[hint["case_id"]].append(hint)
-    current_links = defaultdict(dict)
-    for link in sorted(links, key=lambda row: (row["created_at"], row["id"])):
-        question = questions.get(link["question_id"])
-        if (question is None or link.get("question_revision") != question.get("revision")
-                or link.get("graph_version") != graph_version):
-            continue
-        current_links[link["question_id"]][link["knowledge_id"]] = link
+    links_by_question = defaultdict(list)
+    for link in links:
+        links_by_question[link["question_id"]].append(link)
     output = []
     for case in cases:
         if case.get("lifecycle", "active") != "active":
             continue
         question = questions.get(case["question_id"])
-        confirmed = [l for l in current_links.get(case["question_id"], {}).values() if l["status"] == "confirmed"]
-        if question is None or not confirmed:
+        if question is None:
             continue
         family = question.get("bank_question_id") or question["question_id"]
         for attempt_id in case["attempt_ids"]:
@@ -142,6 +142,11 @@ def derive_evidence(*, cases, attempts, decisions, hints, questions, links, cond
                     or attempt.get("answer_status") == "unclear"
                     or attempt.get("recognition_uncertainties")
                     or question.get("recognition_uncertainties")):
+                continue
+            current_links = select_current_links(links_by_question.get(case["question_id"], []),
+                question_revision=question["revision"], graph_version=graph_version, attempt=attempt, decision=decision)
+            confirmed = [link for link in current_links.values() if link["status"] == "confirmed"]
+            if not confirmed:
                 continue
             result = RESULT.get(decision["verdict"])
             if result is None:

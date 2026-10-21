@@ -238,6 +238,11 @@ def record_outcome(task, value, **details):
 def apply_result(worker, session, task, homework, result):
     case = get_entity(session, task.inputs["case_id"], "case")
     question = get_entity(session, task.inputs["question_id"], "question")
+    # Knowledge-link review uses this same question lock. Reload after taking
+    # it so a teacher confirmation committed while the model was running is
+    # never superseded by the machine-attribution withdrawal below.
+    question = session.scalar(select(Entity).where(Entity.id == question.id).with_for_update()
+                              .execution_options(populate_existing=True))
     attempt = get_entity(session, task.inputs["attempt_id"], "attempt")
     if not current(session, task, case, question, attempt):
         record_outcome(task, "stale_input")
@@ -268,12 +273,20 @@ def apply_result(worker, session, task, homework, result):
             from .providers import ProviderError
             raise ProviderError("invalid_output")
     before = deepcopy(task.inputs["input_versions"])
+    from .learning_mapping import inherit_staff_links_for_unchanged_question, withdraw_model_links_for_recognition
+    withdrawn_links = withdraw_model_links_for_recognition(
+        session, question, homework, attempt_id=attempt.id,
+        recognition_revision=attempt.document["recognition_revision"], job_id=task.id)
     invalidate(session, worker.contracts, case, "model_recognition_revision")
+    inherited_links = []
     if question.document.get("recognition_uncertainties"):
         # R1 never changes printed content; clearing stale question notes is a
         # real revision and intentionally invalidates mappings of the old one.
+        previous_question = deepcopy(question.document)
         document = {**question.document, "revision": question.revision + 1, "recognition_uncertainties": []}
         save_entity(session, worker.contracts, homework.id, "question", document, row=question)
+        inherited_links = inherit_staff_links_for_unchanged_question(
+            session, question, previous_question, job_id=task.id)
         for sibling in session.scalars(select(Entity).where(Entity.homework_id == homework.id, Entity.kind == "case")):
             if sibling.id != case.id and sibling.document["question_id"] == question.id and sibling.document["lifecycle"] == "active":
                 invalidate(session, worker.contracts, sibling, "model_recognition_revision")
@@ -299,7 +312,9 @@ def apply_result(worker, session, task, homework, result):
     project_student(session, homework.tenant_id, homework.student_id)
     record_outcome(task, "applied", before=before,
                    after=deepcopy(case.document["current_decision"]["input_versions"]),
-                   question_id=question.id, attempt_id=attempt.id)
+                   question_id=question.id, attempt_id=attempt.id,
+                   withdrawn_knowledge_links=withdrawn_links,
+                   inherited_staff_knowledge_links=inherited_links)
     return reference
 
 

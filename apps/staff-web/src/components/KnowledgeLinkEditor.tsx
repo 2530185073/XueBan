@@ -55,22 +55,23 @@ export default function KnowledgeLinkEditor({ ctx, questionId, locked }: { ctx: 
 
   return <section className="panel-section link-editor" aria-label="题目知识点">
     <div className="section-heading"><span><Link2 size={17} />题目知识点</span><RefreshButton state={links} label="刷新知识点关联" /></div>
-    <p className="subtle">只有老师确认的关联才会让已核实的作答成为该知识点的证据。一道题最多一个主要知识点（定位错误的那一个），其余为次要。</p>
+    <p className="subtle">此处显示最新作答的 AI 归因，只有识读和判断通过核验后才计入图谱。历史作答保留各自的归因。老师确认的关联适用于这道题；主要知识点用于定位错误，其余为次要。</p>
     {locked && <div className="preview-note">{locked}</div>}
     {scopeMismatch && <p className="warning-text" role="alert">题目使用的教材范围已更新。请刷新后重新选择知识点，当前选择不会提交。</p>}
     <LoadNote state={links}>
-      {confirmed.length === 0 && <p className="subtle">还没有老师确认的知识点。</p>}
+      {confirmed.length === 0 && <p className="subtle">还没有可用于本次作答的知识点关联。</p>}
       <ul className="link-list">{confirmed.map(link => <li key={link.id} className="confirmed">
-        <div className="help-row"><UserCheck size={13} /><strong>{link.knowledge_name ?? link.knowledge_id}</strong><span className={`tag ${link.role === 'primary' ? '' : 'muted'}`}>{roleLabels[link.role]}</span></div>
-        {link.rationale && <small>说明：{link.rationale}</small>}
+        <div className="help-row">{link.source === 'model' ? <Bot size={13} /> : <UserCheck size={13} />}<strong>{link.knowledge_name ?? link.knowledge_id}</strong><span className={`tag ${link.role === 'primary' ? '' : 'muted'}`}>{roleLabels[link.role]}</span><span className="tag muted">{link.source === 'model' ? 'AI 归因 · 最新作答' : '老师确认 · 本题'}</span></div>
+        {link.rationale && <small>{link.source === 'model' ? 'AI 理由' : '说明'}：{link.rationale}</small>}
         <div className="button-row wrap">
+          {link.source === 'model' && <button className="button" disabled={disabled} onClick={() => void decide(decision(link, link.knowledge_id, link.role, 'confirmed', link.rationale), '老师已确认本题的知识点关联。')}><Check size={14} />确认本题关联</button>}
           <button className="button" disabled={disabled} onClick={() => void decide(decision(link, link.knowledge_id, link.role === 'primary' ? 'secondary' : 'primary', 'confirmed', link.rationale), '已调整主次。')}>改为{link.role === 'primary' ? '次要' : '主要'}</button>
           <button className="button" disabled={disabled} onClick={() => { setReplacing(link); setRole(link.role); setAdding(null); setIssue(null) }}><Replace size={14} />替换为…</button>
           <button className="button" disabled={disabled} onClick={() => void decide(decision(link, link.knowledge_id, link.role, 'rejected'), '已驳回该关联。')}><X size={14} />驳回</button>
         </div>
       </li>)}</ul>
       {candidates.length > 0 && <>
-        <p className="field-title">AI 候选（未经老师确认，不产生证据）</p>
+        <p className="field-title">AI 待核关联（暂不产生证据）</p>
         <ul className="link-list">{candidates.map(link => <li key={link.id} className="candidate">
           <div className="help-row"><Bot size={13} /><strong>{link.knowledge_name ?? link.knowledge_id}</strong><span className="tag amber">建议{link.role === 'primary' ? '主要' : '次要'}</span></div>
           {link.rationale && <small>AI 理由：{link.rationale}</small>}

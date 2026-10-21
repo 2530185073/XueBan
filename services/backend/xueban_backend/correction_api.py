@@ -96,12 +96,20 @@ def install_correction(app, engine, cfg, database_session, current_actor):
 
     def authorize(session, actor, homework_id, *, lock=False):
         query = select(Homework).where(Homework.id == homework_id, Homework.tenant_id == actor.tenant_id)
-        if lock:
-            query = query.with_for_update()
         homework = session.scalar(query.execution_options(populate_existing=True))
         if homework is None:
             raise Problem(404, "not_found", "not_found", "资源不存在或不可访问。")
         require_student(session, actor, homework.student_id)
+        if lock:
+            from .student_locks import lock_student
+            student_id = homework.student_id
+            lock_student(session, student_id, tenant_id=actor.tenant_id)
+            homework = session.scalar(query.with_for_update().execution_options(populate_existing=True))
+            if homework is None or homework.student_id != student_id:
+                raise Problem(404, "not_found", "not_found", "资源不存在或不可访问。")
+            # Deletion/access may have changed while this transaction waited
+            # for the student. The initial read only located its lock scope.
+            require_student(session, actor, student_id)
         if homework.processing_blocked:
             raise Problem(409, "conflict", "processing_blocked", "该作业已停止处理。")
         return homework

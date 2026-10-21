@@ -31,6 +31,7 @@ from .curriculum_catalog import (canonical_subject, graph_is_usable, node_matche
                                  scope_for_profile, scope_payload, curriculum_matches_scope)
 from .layout_repair import apply_repair, recognize_replacements
 from .models import Homework, Student
+from .student_locks import lock_task_student, task_scope_current
 from .providers import ProviderError
 from . import recognition_recheck
 from .providers import question_units
@@ -290,12 +291,14 @@ class CorrectionWorker:
     def _dispatch_original_recheck(self, identifier, token):
         """Reserve the one external execution durably before making any call."""
         with Session(self.engine) as session:
-            task = session.scalar(select(Task).where(Task.id == identifier).with_for_update())
+            scope = lock_task_student(session, identifier)
+            task = session.scalar(select(Task).where(Task.id == identifier).with_for_update()
+                                  .execution_options(populate_existing=True))
             if task is None or task.kind != recognition_recheck.KIND or task.status != "running" or task.lease_token != token:
                 return False
-            homework = session.scalar(select(Homework).where(Homework.id == task.homework_id).with_for_update())
-            student = session.get(Student, homework.student_id)
-            if homework.processing_blocked or student is None or not student.active:
+            homework = session.scalar(select(Homework).where(Homework.id == task.homework_id).with_for_update()
+                                      .execution_options(populate_existing=True))
+            if not task_scope_current(scope, homework) or homework.processing_blocked or not scope["student"].active:
                 return False
             case = get_entity(session, task.inputs["case_id"], "case")
             question = get_entity(session, task.inputs["question_id"], "question")
@@ -347,16 +350,18 @@ class CorrectionWorker:
 
     def finish(self, identifier, token, *, result=None, error=None):
         with Session(self.engine) as session:
-            task = session.scalar(select(Task).where(Task.id == identifier).with_for_update())
+            scope = lock_task_student(session, identifier)
+            task = session.scalar(select(Task).where(Task.id == identifier).with_for_update()
+                                  .execution_options(populate_existing=True))
             if task is None or task.status != "running" or task.lease_token != token:
                 return self._late_original_recheck(session, task, token, result, error)
             # Expired executions cannot commit even if another worker has not yet claimed.
             from datetime import timezone
             if task.lease_expires_at.replace(tzinfo=task.lease_expires_at.tzinfo or timezone.utc) <= now():
                 return self._late_original_recheck(session, task, token, result, error)
-            homework = session.scalar(select(Homework).where(Homework.id == task.homework_id).with_for_update())
-            student = session.get(Student, homework.student_id)
-            if homework.processing_blocked or student is None or not student.active:
+            homework = session.scalar(select(Homework).where(Homework.id == task.homework_id).with_for_update()
+                                      .execution_options(populate_existing=True))
+            if not task_scope_current(scope, homework) or homework.processing_blocked or not scope["student"].active:
                 error = Problem(409, "conflict", "processing_blocked", "处理已停止。")
             ledger = deepcopy(task.audit or {"executions": []})
             execution = ledger["executions"][-1]

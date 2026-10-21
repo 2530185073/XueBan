@@ -1,7 +1,7 @@
 """Batch semantic attribution over synthetic text only; never calls a model API."""
 from copy import deepcopy
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 from types import SimpleNamespace
 
@@ -12,11 +12,11 @@ from sqlalchemy.orm import Session
 from test_correction_flow import flow, teacher  # noqa: F401
 from test_curriculum_binding import choose, publish_book
 from test_learning import evidence_count, knowledge, learning, link, prepare_latest_math_curriculum
-from test_learning_mapping_versions import ai_case as original_ai_case
+from test_learning_mapping_versions import ai_case as original_ai_case, _current_links
 from test_multimodal_worker import assessment, enable_page_assessments
 from xueban_backend.correction_models import Entity
 from xueban_backend.learning_mapping import (
-    MAX_BATCH, _current_links, _model_input, enqueue_model_batches, map_model_batch,
+    MAX_BATCH, _model_input, enqueue_model_batches, map_model_batch,
 )
 from xueban_backend.learning_models import CurriculumGraph, LearningOutbox, QuestionKnowledgeLink, StudentLearningProfile
 from xueban_backend.learning_projection import new_id, project_student, published_graph
@@ -375,3 +375,100 @@ def test_provider_failure_keeps_bounded_retry_audit_without_any_link(flow):
         job.tries = 5
     queue(flow, FailedClient())
     assert len(jobs(flow)) == 1
+
+
+def legacy_unbound_mapping(flow, case, *, status="confirmed", recognition_revision=2, downgrade=False):
+    """No provenance can be recovered from these synthetic historical rows."""
+    with Session(flow.database.engine) as session, session.begin():
+        attempt = session.get(Entity, case["current_attempt_id"])
+        decision = session.get(Entity, case["current_decision"]["id"])
+        attempt.document = {**attempt.document, "recognition_revision": recognition_revision}
+        decision.document = {**decision.document, "input_versions": {
+            **decision.document["input_versions"], "attempt_recognition_revision": recognition_revision}}
+        saved = session.get(Entity, case["id"])
+        saved.document = {**saved.document, "current_decision": decision.document}
+        anchor = datetime.now(timezone.utc)
+        values = dict(tenant_id="tenant_a", student_id="student_a", homework_id=flow.homework_id,
+            question_id=case["question_id"], question_revision=1, knowledge_id="kp-rational-add-sub",
+            graph_version=published_graph(session).version, role="primary", source="model",
+            observation_bindings=None, actor_id=None)
+        session.add(QuestionKnowledgeLink(id="qkl-legacy-unbound", **values, status=status,
+            rationale="历史机器映射，来源观察不可确定。", supersedes_id=None, created_at=anchor))
+        if downgrade:
+            session.add(QuestionKnowledgeLink(id="qkl-legacy-downgrade", **values, status="candidate",
+                rationale="[system_migration:r1.4] 自动降级旧机器映射。", supersedes_id="qkl-legacy-unbound",
+                created_at=anchor + timedelta(seconds=5)))
+    return anchor
+
+
+@pytest.mark.parametrize("status", ["confirmed", "candidate", "rejected"])
+@pytest.mark.parametrize("recognition_revision", [1, 2])
+def test_unbound_legacy_mapping_does_not_schedule_paid_backfill(flow, status, recognition_revision):
+    case = ai_case(flow, labels=[])
+    legacy_unbound_mapping(flow, case, status=status, recognition_revision=recognition_revision)
+    client = BatchClient()
+    learning(flow, client).drain()
+    learning(flow, client).drain()
+    assert jobs(flow) == [] and client.calls == [] and evidence_count(flow) == 0
+    with Session(flow.database.engine) as session:
+        assert _current_links(session, case["question_id"]) == {}
+        assert session.get(QuestionKnowledgeLink, "qkl-legacy-unbound").status == status
+
+
+@pytest.mark.parametrize("change", ["recognition", "attempt"])
+@pytest.mark.parametrize("downgrade", [False, True])
+def test_new_observation_is_not_blocked_by_older_unbound_mapping(flow, change, downgrade):
+    case = ai_case(flow, labels=[])
+    anchor = legacy_unbound_mapping(flow, case, downgrade=downgrade)
+    client = BatchClient()
+    queue(flow, client)
+    assert jobs(flow) == []
+    with Session(flow.database.engine) as session, session.begin():
+        saved = session.get(Entity, case["id"])
+        old_attempt = session.get(Entity, case["current_attempt_id"])
+        old_decision = session.get(Entity, case["current_decision"]["id"])
+        stamp = (anchor + timedelta(seconds=1)).isoformat()
+        if change == "attempt":
+            doc = {**deepcopy(old_attempt.document), "id": new_id("attempt"), "revision": 1,
+                   "parent_attempt_id": old_attempt.id, "recognition_revision": 1, "created_at": stamp}
+            current = Entity(id=doc["id"], homework_id=flow.homework_id, kind="attempt", revision=1, document=doc)
+            session.add(current)
+        else:
+            current = old_attempt
+            current.document = {**current.document, "recognition_revision": 3}
+        doc = {**deepcopy(old_decision.document), "id": new_id("decision"), "revision": 1, "created_at": stamp,
+               "input_versions": {**old_decision.document["input_versions"], "attempt_id": current.id,
+                                  "attempt_recognition_revision": current.document["recognition_revision"]}}
+        session.add(Entity(id=doc["id"], homework_id=flow.homework_id, kind="decision", revision=1, document=doc))
+        saved.document = {**saved.document, "current_attempt_id": current.id, "current_decision": doc,
+                          "attempt_ids": list(dict.fromkeys([*saved.document["attempt_ids"], current.id]))}
+    queue(flow, client)
+    assert len(jobs(flow)) == 1
+    assert run_queued(flow, client)["count"] == 1 and len(client.calls) == 1
+    with Session(flow.database.engine) as session:
+        current = _current_links(session, case["question_id"])["kp-rational-add-sub"]
+        assert current.status == "confirmed" and len(current.observation_bindings) == 1
+        assert current.observation_bindings[0]["attempt_recognition_revision"] == (1 if change == "attempt" else 3)
+
+
+def test_queued_old_observation_does_not_bypass_legacy_budget_fence(flow):
+    case = ai_case(flow, labels=[])
+    client = BatchClient()
+    queue(flow, client)
+    legacy_unbound_mapping(flow, case, recognition_revision=1)
+    assert run_queued(flow, client)["status"] == "stale_or_linked"
+    assert client.calls == []
+
+
+@pytest.mark.parametrize("cycle", [False, True])
+def test_broken_legacy_downgrade_history_cannot_trigger_automatic_spend(flow, cycle):
+    case = ai_case(flow, labels=[])
+    legacy_unbound_mapping(flow, case)
+    with Session(flow.database.engine) as session, session.begin():
+        old = session.get(QuestionKnowledgeLink, "qkl-legacy-unbound")
+        old.rationale = "[system_migration:r1.4] 缺少可信的原始行。"
+        old.supersedes_id = old.id if cycle else None
+        old.created_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    client = BatchClient()
+    queue(flow, client)
+    assert jobs(flow) == [] and client.calls == []

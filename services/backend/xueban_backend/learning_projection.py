@@ -8,6 +8,7 @@ missed or repeated trigger only costs time, never correctness.
 from __future__ import annotations
 
 from collections import defaultdict
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import logging
@@ -150,6 +151,7 @@ def _records(session, student_id):
         select(CorrectionEvent).where(CorrectionEvent.homework_id.in_(homeworks), CorrectionEvent.kind == "evidence.invalidated"))}
     links = [{"id": l.id, "question_id": l.question_id, "question_revision": l.question_revision,
               "graph_version": l.graph_version, "knowledge_id": l.knowledge_id, "role": l.role, "status": l.status,
+              "source": l.source, "observation_bindings": deepcopy(l.observation_bindings),
               "created_at": l.created_at.isoformat()} for l in session.scalars(
         select(QuestionKnowledgeLink).where(QuestionKnowledgeLink.student_id == student_id))]
     conditions = {}

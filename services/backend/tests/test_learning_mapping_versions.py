@@ -11,10 +11,22 @@ from test_correction_flow import flow, teacher  # noqa: F401
 from test_learning import evidence_count, knowledge, learning, link, prepare_latest_math_curriculum, reviewed
 from test_multimodal_worker import assessment, enable_page_assessments
 from xueban_backend.correction_models import Entity
-from xueban_backend.learning_mapping import _current_links, _match_node, suggest_links
+from xueban_backend.learning_mapping import _current_links as scoped_links, _match_node, suggest_links
 from xueban_backend.learning_models import CurriculumGraph, KnowledgeNode, LearningEvidence, QuestionKnowledgeLink
 from xueban_backend.learning_projection import project_student, published_graph
 from xueban_backend.learning_rules import derive_evidence
+
+
+def _current_links(session, question_id):
+    """Tests explicitly select the unique current observation, as the API does."""
+    question = session.get(Entity, question_id)
+    cases = [row for row in session.scalars(select(Entity).where(Entity.homework_id == question.homework_id,
+             Entity.kind == "case")) if row.document["question_id"] == question_id
+             and row.document.get("lifecycle", "active") == "active"]
+    assert len(cases) == 1
+    case = cases[0].document
+    attempt = session.get(Entity, case["current_attempt_id"])
+    return scoped_links(session, question_id, attempt=attempt, decision=case.get("current_decision"))
 
 
 def ai_case(flow, labels=None, patch=None):
@@ -66,7 +78,7 @@ def test_evidence_rejects_stale_or_unversioned_knowledge_links(link_patch):
     )
     current = {"id": "link-1", "question_id": "question-1", "question_revision": 2,
                "graph_version": "current-graph", "knowledge_id": "kp-old", "status": "confirmed",
-               "role": "primary", "created_at": "2026-10-21T00:02:00Z"}
+               "source": "staff", "role": "primary", "created_at": "2026-10-21T00:02:00Z"}
     assert len(derive_evidence(**kwargs, links=[current])) == 1
     assert derive_evidence(**kwargs, links=[{**current, **link_patch}]) == []
 
@@ -227,7 +239,8 @@ def test_legacy_ambiguous_auto_link_returns_to_system_candidate_then_can_be_rema
     assert evidence_count(flow) == 0
     with Session(flow.database.engine) as session:
         assert len(session.scalars(select(QuestionKnowledgeLink)).all()) == 2
-        pending = _current_links(session, case["question_id"])["kp-rational-add-sub"]
+        assert _current_links(session, case["question_id"]) == {}  # unknown legacy scope never becomes current
+        pending = session.scalar(select(QuestionKnowledgeLink).where(QuestionKnowledgeLink.supersedes_id == old_id))
         assert (pending.source, pending.status, pending.supersedes_id) == ("model", "candidate", old_id)
         assert old_id in pending.rationale and "[system_migration:r1.4]" in pending.rationale
         assert pending.actor_id is None
@@ -240,7 +253,8 @@ def test_legacy_ambiguous_auto_link_returns_to_system_candidate_then_can_be_rema
         project_student(session, "tenant_a", "student_a")
         session.commit()
         current = _current_links(session, case["question_id"])["kp-rational-add-sub"]
-        assert (current.source, current.status, current.supersedes_id) == ("model", "confirmed", pending_id)
+        assert (current.source, current.status, current.supersedes_id) == ("model", "confirmed", None)
+        assert current.id != pending_id and current.observation_bindings[0]["decision_id"] == decision.id
     assert evidence_count(flow) == 1
 
 
@@ -262,8 +276,14 @@ def test_legacy_exact_model_link_and_teacher_link_are_not_rewritten(flow, source
     learning(flow).drain()
     with Session(flow.database.engine) as session:
         assert len(session.scalars(select(QuestionKnowledgeLink)).all()) == 1
-        assert _current_links(session, case["question_id"])["kp-rational-add-sub"].id == "qkl-legacy-safe"
-        assert len(session.scalars(select(LearningEvidence).where(LearningEvidence.validity == "valid")).all()) == 1
+        stored = session.get(QuestionKnowledgeLink, "qkl-legacy-safe")
+        assert stored.status == "confirmed" and stored.observation_bindings is None
+        current = _current_links(session, case["question_id"])
+        if source == "staff":
+            assert current["kp-rational-add-sub"].id == stored.id
+        else:
+            assert current == {}  # Unknown legacy observation stays historical.
+        assert len(session.scalars(select(LearningEvidence).where(LearningEvidence.validity == "valid")).all()) == (1 if source == "staff" else 0)
     assert evidence_count(flow, "invalidated") == 0
 
 

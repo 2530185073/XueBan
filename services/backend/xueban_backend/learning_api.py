@@ -104,8 +104,40 @@ def diagnosis_dict(row: KnowledgeDiagnosis) -> dict:
 
 
 def current_links(session, question_id) -> dict[str, QuestionKnowledgeLink]:
+    """Show machine attribution only for the unique current observation.
+
+    Staff links describe the question. Machine links describe one reading of
+    one answer; a historical link must never leak into a new attempt's editor.
+    Ambiguous or stale case pointers expose only staff links until resolved.
+    """
     from .learning_mapping import _current_links
-    return _current_links(session, question_id)
+    question = session.get(Entity, question_id)
+    if question is None or question.kind != "question":
+        return {}
+    cases = [case for case in session.scalars(select(Entity).where(
+        Entity.homework_id == question.homework_id, Entity.kind == "case"))
+        if case.document.get("question_id") == question_id
+        and case.document.get("lifecycle", "active") == "active"]
+    attempt = decision = None
+    if len(cases) == 1:
+        document = cases[0].document
+        pointer = document.get("current_decision") or {}
+        candidate_attempt = session.get(Entity, document.get("current_attempt_id")) if document.get("current_attempt_id") else None
+        candidate_decision = session.get(Entity, pointer.get("id")) if pointer.get("id") else None
+        versions = candidate_decision.document.get("input_versions", {}) if candidate_decision else {}
+        if (candidate_attempt is not None and candidate_attempt.kind == "attempt"
+                and candidate_decision is not None and candidate_decision.kind == "decision"
+                and candidate_attempt.homework_id == question.homework_id == candidate_decision.homework_id
+                and candidate_attempt.document.get("question_id") == question_id
+                and candidate_decision.document.get("case_id") == cases[0].id
+                and candidate_decision.document.get("origin") in {"model", "staff"}
+                and candidate_decision.document.get("validity") in {"candidate", "confirmed", "needs_review"}
+                and pointer.get("revision") == candidate_decision.revision
+                and versions.get("question_revision") == question.revision
+                and versions.get("attempt_id") == candidate_attempt.id
+                and versions.get("attempt_recognition_revision") == candidate_attempt.document.get("recognition_revision")):
+            attempt, decision = candidate_attempt, candidate_decision
+    return _current_links(session, question_id, attempt=attempt, decision=decision)
 
 
 def install_learning(app, engine, cfg, database_session, current_actor):
@@ -464,8 +496,11 @@ def install_learning(app, engine, cfg, database_session, current_actor):
     @app.put("/v1/questions/{question_id}/subject", operation_id="setUnrecognizedQuestionSubject")
     def set_question_subject(question_id: str, payload: QuestionSubjectInput, actor: ActorDep, session: SessionDep):
         question, homework, student = question_scope(session, actor, question_id)
-        # Use the same homework-first lock as correction mutations, then
-        # refresh the previously loaded question before checking its revision.
+        # All cross-domain writers serialize the learner before homework and
+        # question, including correction results, mapping and deletion.
+        session.scalar(select(Student).where(Student.id == student.id).with_for_update()
+                       .execution_options(populate_existing=True))
+        require_student(session, actor, student.id)
         homework = session.scalar(select(Homework).where(Homework.id == homework.id).with_for_update()
                                   .execution_options(populate_existing=True))
         if homework.processing_blocked:
@@ -521,6 +556,9 @@ def install_learning(app, engine, cfg, database_session, current_actor):
     def decide_link(question_id: str, payload: LinkInput, actor: ActorDep, session: SessionDep):
         _staff(actor)
         question, homework, student = question_scope(session, actor, question_id)
+        session.scalar(select(Student).where(Student.id == student.id).with_for_update()
+                       .execution_options(populate_existing=True))
+        require_student(session, actor, student.id)
         question = session.scalar(select(Entity).where(Entity.id == question_id).with_for_update()
                                   .execution_options(populate_existing=True))
         graph, nodes = graph_nodes(session, student.id)
@@ -575,6 +613,9 @@ def install_learning(app, engine, cfg, database_session, current_actor):
             raise Problem(404, "not_found", "not_found", "资源不存在或不可访问。")
         homework = session.get(Homework, attempt.homework_id)
         student = require_student(session, actor, homework.student_id)
+        session.scalar(select(Student).where(Student.id == student.id).with_for_update()
+                       .execution_options(populate_existing=True))
+        require_student(session, actor, student.id)
         session.scalar(select(Entity).where(Entity.id == attempt_id).with_for_update())
         current = current_condition(session, attempt_id)
         if (current.id if current else None) != payload.expected_condition_id:
