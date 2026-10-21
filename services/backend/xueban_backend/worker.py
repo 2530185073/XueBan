@@ -34,7 +34,8 @@ from .models import Homework, Student
 from .student_locks import lock_task_student, task_scope_current
 from .providers import ProviderError
 from .providers.host_call_journal import HostCallJournalSnapshot
-from . import recognition_recheck
+from . import recognition_recheck, recognition_checkpoint
+from .providers.read_checkpoint import ReadCheckpointSink
 from .providers import question_units
 from .providers.correction_pipeline import CorrectionPipeline, PipelineImage, normalize_field_for_comparison
 
@@ -108,6 +109,11 @@ class CorrectionWorker:
                 return task.kind, {"assets": assets, "replacements": task.inputs["replacements"]}
             images = tuple(PipelineImage(a.id, "data:" + a.document["mime_type"] + ";base64," + base64.b64encode(self.store.read(a.id, a.document)).decode(), a.document["width"], a.document["height"]) for a in assets)
             context = {"images": images}
+            if task.kind == "recognize_homework" and getattr(self.pipeline, "read_checkpoint_enabled", False) is True:
+                binding = recognition_checkpoint.capture(session, task, homework, images)
+                context["read_checkpoint"] = ReadCheckpointSink(
+                    lambda event: recognition_checkpoint.persist(self.engine, identifier, token, binding, event),
+                    lambda: recognition_checkpoint.persist(self.engine, identifier, token, binding, failed=True))
             if task.kind == "recognize_attempt" and getattr(self.pipeline, "supports_target_unit", False):
                 original = get_entity(session, task.inputs["question_id"], "question")
                 context["target_unit"] = question_units.stored_unit(original.annotations)

@@ -1,3 +1,4 @@
+import { isRecognitionProgress, type RecognitionProgress } from './recognitionProgress'
 import type { Account, AdminRequestOptions, AuthSession, Accepted, RecognitionRecoveryStatus, RecognitionRecheckAccepted, AssetAccess, AttemptRead, CaseDetail, CaseRecord, CheckRun, CorrectionCase, CreateCorrection, CreateHelp, DecisionRead, DraftSummary, DraftView, HelpRequest, Hint, HomeworkDetail, HomeworkPage, HomeworkSession, HomeworkSummary, IdentityContext, ImageAsset, InputVersions, Job, JournalEntry, NormalizedPhoto, QuestionRead, RequestHint, Review, StoredDraft, StoredPage, UploadTicket } from './types'
 import { StudentApi } from './api'
 import { StudentError, safeError } from './errors'
@@ -288,7 +289,7 @@ export class StudentClient {
   }
   private view(d: StoredDraft): DraftView {
     const pages = d.pages.map(p => ({ id: p.id, blob: p.photo.blob, width: p.photo.width, height: p.photo.height, size: p.photo.size, edited: !!p.original, assetId: p.assetId, uploaded: p.uploaded }))
-    return { id: d.id, title: d.title, stage: d.stage, createdAt: d.createdAt, updatedAt: d.updatedAt, homeworkId: d.homeworkId, error: d.error, pageCount: pages.length, uploadedCount: pages.filter(p => p.uploaded).length, photo: pages[0]?.blob ?? null, pages, editable: !d.locked, detail: d.detail, curriculum: d.curriculum ?? null, correction: d.correction ? { caseId: d.correction.caseId, parentAttemptId: d.correction.parentAttemptId } : undefined }
+    return { id: d.id, title: d.title, stage: d.stage, createdAt: d.createdAt, updatedAt: d.updatedAt, homeworkId: d.homeworkId, error: d.error, pageCount: pages.length, uploadedCount: pages.filter(p => p.uploaded).length, photo: pages[0]?.blob ?? null, pages, editable: !d.locked, detail: d.detail, recognitionJobId: d.recognitionJobId, curriculum: d.curriculum ?? null, correction: d.correction ? { caseId: d.correction.caseId, parentAttemptId: d.correction.parentAttemptId } : undefined }
   }
   async listDrafts(): Promise<DraftSummary[]> { const ctx = await this.authorize(); const drafts = await this.store.drafts(ctx.scope); this.check(ctx); return drafts.map(d => { const { photo: _p, detail: _d, pages: _pages, editable: _e, ...summary } = this.view(d); return summary }) }
   async getDraft(id: string) { const ctx = await this.authorize(); const d = await this.store.draft(ctx.scope, id); this.check(ctx); return this.view(d) }
@@ -579,6 +580,14 @@ export class StudentClient {
     await this.save(ctx, d); return this.view(d)
   }
   /** Poll a group as one unit so a slow job cannot prevent the other jobs from being observed. */
+  async recognitionProgress(jobId: string, homeworkId: string, assetIds: string[]): Promise<RecognitionProgress> {
+    const ctx = await this.authorize(), session = this.session
+    const value = await this.read<unknown>(ctx, `/v1/jobs/${encoded(jobId)}/recognition-progress`, 'RecognitionProgress')
+    if (!this.currentSession(ctx.epoch, session)) throw new StudentError('session_changed', 401)
+    if (!isRecognitionProgress(value) || value.job_id !== jobId || value.homework_id !== homeworkId || value.student_id !== ctx.student || value.pages.some(p => !assetIds.includes(p.asset_id))) throw new StudentError('invalid_response', 502)
+    return value
+  }
+
   private async pollJobs(ctx: Context, ids: string[]): Promise<Job[]> {
     const latest = new Map<string, Job>(), uniqueIds = unique(ids)
     for (let count = 0; count < JOB_POLL_ROUNDS; count++) {

@@ -21,6 +21,7 @@ export interface DraftSummary {
 }
 export interface DraftPageView { id: string; blob: Blob; width: number; height: number; size: number; edited: boolean; assetId?: string; uploaded: boolean }
 export interface DraftView extends DraftSummary {
+  recognitionJobId?: string
   /** First page, kept for single-photo callers. */
   photo: Blob | null; pages: DraftPageView[]
   /** Pages may still be added, removed, reordered, turned or cropped: nothing has been sent yet. */

@@ -1,0 +1,25 @@
+{
+  "protocol": "recognition-draft.v1",
+  "job_id": "job_one",
+  "homework_id": "hw_one",
+  "student_id": "student_a",
+  "state": "checking",
+  "pages": [
+    {
+      "asset_id": "asset_one",
+      "completed_reads": 2,
+      "draft": [
+        {
+          "label": "1",
+          "stem_text": null,
+          "answer_text": null
+        },
+        {
+          "label": "2",
+          "stem_text": "计算(-2)²。",
+          "answer_text": "4"
+        }
+      ]
+    }
+  ]
+}

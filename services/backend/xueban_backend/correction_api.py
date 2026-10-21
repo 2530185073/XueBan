@@ -173,6 +173,13 @@ def install_correction(app, engine, cfg, database_session, current_actor):
             return checked(schema, document)
         app.add_api_route(path, endpoint, methods=["GET"], operation_id=operation)
 
+    @app.get("/v1/jobs/{job_id}/recognition-progress")
+    def recognition_progress(job_id: str, actor: ActorDep, session: SessionDep):
+        from .recognition_checkpoint import public_progress
+        task, homework = locate(session, actor, job_id, "job")
+        # Independent, white-listed DTO: raw Task.audit is never public.
+        return public_progress(session, task, homework)
+
     def base_url():
         parts = urlsplit(cfg.public_base_url)
         if parts.scheme not in {"http", "https"} or not parts.netloc or parts.path.rstrip("/") or parts.query or parts.fragment or parts.username or parts.password or "\\" in cfg.public_base_url:

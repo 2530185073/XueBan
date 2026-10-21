@@ -17,6 +17,7 @@ import time
 from .ark import ArkSettings, Metadata, MODEL_ID, OutputDiagnostic, ProviderError
 from .bounded_chat import BoundedChatClient
 from .host_call_journal import HostCallJournal
+from .read_checkpoint import ReadCheckpointSink
 from .position_arithmetic import check_position_arithmetic
 from .matched_position_arithmetic import check_matched_positions
 from .correction_pipeline import (
@@ -256,7 +257,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
 
     def __init__(self, client, review_client, *, reconciliation_client=None, secondary_thinking=True,
                  visual_client=None, judgment_client=None, target_unit="answer_slot",
-                 structure_navigation_enabled=False, partial_output_enabled=False, host_call_journal_enabled=False):
+                 structure_navigation_enabled=False, partial_output_enabled=False, host_call_journal_enabled=False, read_checkpoint_enabled=False):
         self.target_unit = question_units.validate_unit(target_unit)
         # Validate replacement anchors before any provider request, including
         # when this instance normally handles only legacy saved cases.
@@ -265,7 +266,8 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             question_units.visual_prompt(visual_readback.PROMPT, target_unit)
             question_units.review_prompt(reconciliation.PROMPT, target_unit)
         if (type(secondary_thinking) is not bool or type(structure_navigation_enabled) is not bool
-                or type(partial_output_enabled) is not bool or type(host_call_journal_enabled) is not bool):
+                or type(partial_output_enabled) is not bool or type(host_call_journal_enabled) is not bool
+                or type(read_checkpoint_enabled) is not bool):
             raise ProviderError("invalid_configuration")
         super().__init__(client)
         self.review_client = review_client
@@ -276,6 +278,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         self.structure_navigation_enabled = structure_navigation_enabled
         self.partial_output_enabled = partial_output_enabled
         self.host_call_journal_enabled = host_call_journal_enabled
+        self.read_checkpoint_enabled = read_checkpoint_enabled
 
     @classmethod
     def from_env(cls, environ=None):
@@ -292,6 +295,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         navigation_enabled = env.get("STRUCTURE_NAVIGATION_ENABLED", "0")
         partial_enabled = env.get("PARTIAL_PAGE_OUTPUT_ENABLED", "0")
         journal_enabled = env.get("HOST_CALL_JOURNAL_ENABLED", "0")
+        checkpoint_enabled = env.get("READ_CHECKPOINT_ENABLED", "0")
         visual_model = env.get("VISUAL_REVIEW_MODEL", "gpt-6-astra")
         if (review_api not in ("chat", "responses") or review_thinking not in ("enabled", "disabled")
                 or reconciliation_provider not in ("primary", "secondary")
@@ -299,6 +303,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                 or navigation_enabled not in ("0", "1")
                 or partial_enabled not in ("0", "1")
                 or journal_enabled not in ("0", "1")
+                or checkpoint_enabled not in ("0", "1")
                 or not isinstance(visual_model, str) or not _SAFE_TOKEN.fullmatch(visual_model)):
             raise ProviderError("invalid_configuration")
         secondary_thinking = review_thinking == "enabled"
@@ -331,7 +336,8 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                        judgment_client=visual_client, target_unit=target_unit,
                        structure_navigation_enabled=navigation_enabled == "1",
                        partial_output_enabled=partial_enabled == "1",
-                       host_call_journal_enabled=journal_enabled == "1")
+                       host_call_journal_enabled=journal_enabled == "1",
+                       read_checkpoint_enabled=checkpoint_enabled == "1")
         except Exception:
             closed = set()
             for client in created:
@@ -505,6 +511,11 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                     item["answer_status"] = "unclear"
                     observation_normalizations.append({"label": label, "code": "navigation_locator_report_conflict"})
                 indexed[label] = item
+            sink = getattr(self, "_read_checkpoint", None)
+            if sink is not None and not (partition and partition.rejected):
+                # Runs on the actual completing initial-read future, before the
+                # other source finishes. Raw original strings are not normalized.
+                sink.completed(image, stage, result.data)
             return {"stage": stage, "asset_id": image.asset_id, "model": client.settings.model,
                     "code": "partial_output" if partition and partition.rejected else "ok",
                     "items": indexed, "max_output_tokens": OUTPUT_TOKENS,
@@ -980,24 +991,32 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         calls = [by_page[image.asset_id][stage] for image in pages for stage in ("primary", "secondary")]
         return calls, by_page
 
-    def recognize(self, *, images, target_unit=None, host_call_journal=None):
-        if host_call_journal is None:
+    def recognize(self, *, images, target_unit=None, host_call_journal=None, read_checkpoint=None):
+        if host_call_journal is None and read_checkpoint is None:
             return self._recognize(images=images, target_unit=target_unit)
-        if (not self.host_call_journal_enabled or type(host_call_journal) is not HostCallJournal
-                or getattr(self, "_original_recheck_target", None) is not None):
+        if (getattr(self, "_original_recheck_target", None) is not None
+                or host_call_journal is not None and (not self.host_call_journal_enabled
+                    or type(host_call_journal) is not HostCallJournal)
+                or read_checkpoint is not None and (not self.read_checkpoint_enabled
+                    or type(read_checkpoint) is not ReadCheckpointSink)):
             raise ProviderError("invalid_configuration")
-        # Thread pools receive this invocation's shallow copy explicitly. No
-        # collector is ever written to the shared pipeline or provider clients.
+        # Invocation-local copy explicitly reaches nested worker threads.
         local = copy(self)
-        local._host_call_journal = host_call_journal
-        host_call_journal.start()
+        if read_checkpoint is not None:
+            local._read_checkpoint = read_checkpoint
+        if host_call_journal is not None:
+            local._host_call_journal = host_call_journal
+            host_call_journal.start()
         try:
             result = local._recognize(images=images, target_unit=target_unit)
         except BaseException:
-            host_call_journal.close("failed")
+            if host_call_journal is not None:
+                host_call_journal.close("failed")
             raise
-        host_call_journal.close("returned")
-        return replace(result, host_call_journal=host_call_journal.snapshot())
+        if host_call_journal is not None:
+            host_call_journal.close("returned")
+            return replace(result, host_call_journal=host_call_journal.snapshot())
+        return result
 
     def _recognize(self, *, images, target_unit=None):
         if target_unit is not None and target_unit != self.target_unit:

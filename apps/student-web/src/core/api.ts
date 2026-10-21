@@ -44,7 +44,7 @@ export class StudentApi {
       if (!p || typeof p.username !== 'string' || !p.username || p.username.length > 64 || typeof p.must_change_password !== 'boolean' || !(p.student_id === null || typeof p.student_id === 'string' && !!p.student_id && p.student_id.length <= 200)) throw new StudentError('invalid_response', 502)
     } else if (shape === 'LoggedOut') {
       if (!value || (value as { logged_out?: unknown }).logged_out !== true) throw new StudentError('invalid_response', 502)
-    } else if (shape === 'AdminResponse' || shape === 'Learning') {
+    } else if (shape === 'AdminResponse' || shape === 'Learning' || shape === 'RecognitionProgress') {
       // Admin components and core/learning.ts validate their bounded, independently versioned DTOs.
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new StudentError('invalid_response', 502)
     } else if (!valid(shape, value)) throw new StudentError('invalid_response', 502)
