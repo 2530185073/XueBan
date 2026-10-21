@@ -17,6 +17,7 @@ import time
 from .ark import ArkSettings, Metadata, MODEL_ID, OutputDiagnostic, ProviderError
 from .bounded_chat import BoundedChatClient
 from .host_call_journal import HostCallJournal
+from .position_arithmetic import check_position_arithmetic
 from .correction_pipeline import (
     CorrectionPipeline, PipelineResult, QUESTION_OPTION, QUESTION_TYPES,
     _contains_credential, _object, _strip_field_label, _text, _validate,
@@ -870,6 +871,15 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         elif outcome.get("requires_visual_support"):
             outcome = {"resolved": False, "cause": "model_disagreement",
                        "rejection_code": "independent_readback_required", "uncertainties": []}
+        position_check = (check_position_arithmetic(outcome["source"], source_id=outcome["source_id"])
+                          if outcome["resolved"] and visual_call is not None
+                          and outcome.get("requires_visual_support") else None)
+        if position_check is not None:
+            # Keep the model review and selected observation immutable. This
+            # only corrects a proved arithmetic error after every existing gate.
+            position_check["audit"].update(previous_review_verdict=outcome["verdict"],
+                                           applied_verdict=position_check["verdict"])
+            outcome = {**outcome, **{key: value for key, value in position_check.items() if key != "audit"}}
         call.setdefault("applications", []).append({
             "label": label, "original_reason_codes": original_reasons,
             "resolved": outcome["resolved"],
@@ -878,6 +888,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             "resolved_source": outcome.get("resolved_source"),
             "visual_readback_required": visual_call is not None,
             **({"evidence_binding": outcome["audit"]} if outcome.get("audit") else {}),
+            **({"position_arithmetic": position_check["audit"]} if position_check is not None else {}),
             **({"observation_issue_review": outcome["observation_issue_review"]}
                if "observation_issue_review" in outcome else {}),
         })
@@ -912,6 +923,8 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             correct_answer=outcome["correct_answer"], correction_method=outcome["correction_method"],
             knowledge_points=knowledge if row["subject"] else [],
         )
+        if position_check is not None:
+            assessment["answer_checks"] = deepcopy(position_check["answer_checks"])
         return outcome
 
     def _read_pages(self, pages, *, navigation_enabled):
