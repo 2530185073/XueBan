@@ -10,6 +10,7 @@ import re
 import unicodedata
 
 from .correction_pipeline import _object, _text
+from .whole_page import canonical_label
 
 
 LEGACY_UNIT = "answer_slot"
@@ -34,6 +35,14 @@ CONTEXT_SCHEMA = _object({
     "column": _text(120, nullable=True),
     "anchor": _text(300),
 })
+LEGACY_POSITION_RULES = (
+    "target_context是可选的位置观察，无法独立看清时省略或null，不影响该题其他原文的保存。"
+    "对表格中独立一格，从本次原图独立记录section、实际印刷行名row、列名column及短原文anchor；"
+    "不存在或不确定的行列名填null，不能从label的#次序、候选答案、数学推算或别的来源补造位置。"
+    "anchor逐字摘自本项stem_text中的印刷题面，不能引用学生答案；可以选择不同长度的实际原文。"
+    "行列名必须保留原文字、数字及符号，不用推算值或自造第几行替代实际标题。"
+    "位置只帮助对应同一格，不证明笔迹识读或答案正确；非表格也不要虚构行列。"
+)
 UNIT_PROPERTIES = {
     "blank_count": {"type": "integer", "minimum": 0, "maximum": MAX_BLANKS},
     "unit_complete": {"type": "boolean"},
@@ -96,6 +105,11 @@ def schema_for(legacy_schema, target_unit):
     validate_unit(target_unit)
     result = deepcopy(legacy_schema)
     result["properties"]["items"]["items"]["properties"]["visible_locator"] = deepcopy(VISIBLE_LOCATOR_SCHEMA)
+    if target_unit == LEGACY_UNIT:
+        # A missing/unknown position is not a whole-page schema failure. Old
+        # observations without this optional field retain their source digest.
+        result["properties"]["items"]["items"]["properties"]["target_context"] = {
+            "anyOf": [deepcopy(CONTEXT_SCHEMA), {"type": "null"}]}
     if target_unit == QUESTION_UNIT:
         item = result["properties"]["items"]["items"]
         item["properties"].update(deepcopy(UNIT_PROPERTIES))
@@ -114,7 +128,7 @@ def _replace_once(prompt, old, new):
 def page_prompt(legacy_prompt, legacy_page_rules, target_unit):
     validate_unit(target_unit)
     if target_unit == LEGACY_UNIT:
-        return legacy_prompt + LOCATOR_RULES
+        return legacy_prompt + LOCATOR_RULES + LEGACY_POSITION_RULES
     prompt = _replace_once(legacy_prompt, legacy_page_rules, QUESTION_RULES)
     prompt = _replace_once(prompt,
         "每个填空或独立作答目标单独一项；共享条件放进各项stem_text，同一题多个空使用#1、#2。",
@@ -131,7 +145,7 @@ def page_prompt(legacy_prompt, legacy_page_rules, target_unit):
 def visual_prompt(legacy_prompt, target_unit):
     validate_unit(target_unit)
     if target_unit == LEGACY_UNIT:
-        return legacy_prompt + LOCATOR_RULES
+        return legacy_prompt + LOCATOR_RULES + LEGACY_POSITION_RULES
     prompt = _replace_once(legacy_prompt,
         "只识读原图中task_input.labels指定题号的印刷题干和学生实际笔迹，不解题、不计算、不判对错。",
         "只识读原图中task_input.labels指定原小题或连续单元的题干及学生实际笔迹；题干也可手写，不解题、不计算、不判对错。")
@@ -147,7 +161,12 @@ def visual_prompt(legacy_prompt, target_unit):
 def review_prompt(legacy_prompt, target_unit):
     validate_unit(target_unit)
     if target_unit == LEGACY_UNIT:
-        return legacy_prompt
+        return legacy_prompt + (
+            "旧单空#目标若新visual改读题面，父级printed_label与粗略page_zone不能独自证明同一格。"
+            "表格行列与anchor只能使用各个已归档独立原观察的target_context，不能由复核补造、"
+            "从另一来源抄填或从#编号推定；缺失位置保持未确认，不把它说成学生字迹不清。"
+            "同格依据与判题依据分开；anchor须引用各自题面，可长短不同，不要求两段引文完全相同。"
+        )
     prompt = _replace_once(legacy_prompt,
         "先看原图，再检查两个候选；只回答task_input中的题号，每题一项，不能合并相邻空。",
         "先看原图，再检查候选；每个输入原单元一项，不能跨输入目标合并或拆分；同一输入单元内部全部空必须按位置逐个核验。")
@@ -213,6 +232,77 @@ def context_key(item):
     if not isinstance(context, dict):
         return None
     return tuple(_text_key(context.get(key)) for key in ("section", "row", "column", "anchor"))
+
+
+def bound_legacy_position(item):
+    """Read a complete position declared by this source and bound to its text.
+
+    This is textual provenance, not proof of image truth or full grid coverage.
+    Missing/malformed context is unknown; no location is borrowed or inferred.
+    """
+    context = item.get("target_context")
+    if (not isinstance(context, dict)
+            or set(context) != {"section", "row", "column", "anchor"}
+            or any(context[key] is not None and not isinstance(context[key], str)
+                   for key in ("section", "row", "column"))
+            or not isinstance(context["anchor"], str)):
+        return None
+    key = context_key(item)
+    stem, anchor = item.get("stem_text"), context["anchor"]
+    if (not key[1] or not key[2] or not key[3] or not isinstance(stem, str)
+            or anchor not in stem or stem.count(anchor) != 1):
+        return None
+    printed = _text_key(stem)
+    if (key[1] not in printed or key[2] not in printed
+            or not any(header in key[3] for header in key[1:3])):
+        return None
+    return key
+
+
+# Lexical power headings only. No evaluation, Unicode compatibility folding,
+# free-form algebra, bare numbers, or arbitrary unequal names establish a column.
+_HEADER_NUMBER = r"[+-]?[0-9]{1,12}(?:\.[0-9]{1,12})?"
+_HEADER_BASE = rf"(?:{_HEADER_NUMBER}|\({_HEADER_NUMBER}(?:/{_HEADER_NUMBER})?\))"
+_HEADER_POWER = rf"{_HEADER_BASE}\^[+-]?[0-9]{{1,6}}"
+_HEADER_LIST = re.compile(
+    rf"(?<![A-Za-z0-9_.+\-/*^()]){_HEADER_POWER}"
+    rf"(?:\s*(?:、|,|，|与|和|及)\s*{_HEADER_POWER})+"
+    rf"(?![A-Za-z0-9_.+\-/*^()])")
+
+
+def _separate_power_columns(stem, first, second):
+    if (len(stem) > 12000 or not re.fullmatch(_HEADER_POWER, first)
+            or not re.fullmatch(_HEADER_POWER, second)):
+        return False
+    matching_lists = []
+    for match in _HEADER_LIST.finditer(stem):
+        headings = re.split(r"\s*(?:、|,|，|与|和|及)\s*", match[0])
+        if headings.count(first) == headings.count(second) == 1:
+            matching_lists.append(headings)
+    return len(matching_lists) == 1
+
+
+def legacy_slot_positions_conflict(first, second):
+    """A narrow negative gate for two independently declared legacy # cells.
+
+    Base/exponent roles are distinct, not arbitrary unequal row words. Distinct
+    numeric power columns must be complete, explicitly listed titles in BOTH
+    own stems, with the same other axis. Missing context, synonyms, substring
+    labels, different anchor lengths and non-supported shapes remain unknown.
+    This gate never establishes equality or correctness and never reads answers.
+    """
+    if any(source_unit(item) != LEGACY_UNIT
+           or re.search(r"#[1-9][0-9]*$", canonical_label(str(item.get("label", "")))) is None
+           for item in (first, second)):
+        return False
+    a, b = bound_legacy_position(first), bound_legacy_position(second)
+    if not a or not b or not sections_compatible(a[0], b[0]):
+        return False
+    if a[2] == b[2] and {a[1], b[1]} == {"底数", "指数"}:
+        return True
+    return (a[1] == b[1] and a[2] != b[2]
+            and all(_separate_power_columns(_text_key(item["stem_text"]), a[2], b[2])
+                    for item in (first, second)))
 
 
 def _section_parts(value):
@@ -401,7 +491,7 @@ def same_unit_identity(first, second, *, require_page=True):
     if source_unit(first) != source_unit(second) or visible_locators_conflict(first, second):
         return False
     if source_unit(first) == LEGACY_UNIT:
-        return True  # existing legacy full-stem/slot checks remain authoritative
+        return not legacy_slot_positions_conflict(first, second)
     return (not shape_issues(first, QUESTION_UNIT) and not shape_issues(second, QUESTION_UNIT)
             and first["blank_count"] == second["blank_count"]
             and sections_compatible(context_key(first)[0], context_key(second)[0])

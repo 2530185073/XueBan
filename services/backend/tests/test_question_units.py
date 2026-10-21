@@ -30,7 +30,7 @@ def test_new_prompt_replaces_both_inherited_and_local_per_blank_rules():
     assert units.QUESTION_RULES in prompt
     assert "逐一核算" in prompt and "负号" in prompt and "[未作答]" in prompt
     assert two_model.PAGE_PROMPT == original
-    assert units.page_prompt(original, whole_page.PAGE_RULES, "answer_slot") == original + units.LOCATOR_RULES
+    assert units.page_prompt(original, whole_page.PAGE_RULES, "answer_slot") == original + units.LOCATOR_RULES + units.LEGACY_POSITION_RULES
 
 
 def test_prompt_drift_is_a_setup_failure_not_silent_conflicting_instructions():

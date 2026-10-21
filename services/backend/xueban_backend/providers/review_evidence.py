@@ -13,7 +13,7 @@ import re
 from .correction_pipeline import _object, _text
 from . import question_units
 from .printed_identity import full_printed_presentation_rule
-from .whole_page import normalize_literal_math, normalize_page_stem
+from .whole_page import canonical_label, normalize_literal_math, normalize_page_stem
 
 
 ISSUE_KINDS = ("presentation", "answer_semantics", "missing_context",
@@ -192,6 +192,30 @@ def _locator_link(a, b):
     return max(a[0], b[0]) < min(a[2], b[2]) and max(a[1], b[1]) < min(a[3], b[3])
 
 
+
+def _legacy_slot(item):
+    # This only detects a logical subtarget requiring disambiguation. The #
+    # ordinal is never converted into a physical row, column or answer slot.
+    return (question_units.source_unit(item) == question_units.LEGACY_UNIT
+            and re.search(r"#[1-9][0-9]*$", canonical_label(item.get("label", ""))) is not None)
+
+
+def _slot_position_link(original, selected):
+    """Use independently archived literal row/column observations, not review claims.
+
+    Anchors can quote different lengths of each original printed stem. Their
+    job is source binding, not string-equality identity or answer correctness.
+    No inferred grid coordinates, algebraic equality or header synonyms here.
+    """
+    contexts = [item.get("target_context") for item in (original, selected)]
+    keys = [question_units.bound_legacy_position(item) for item in (original, selected)]
+    if (any(key is None for key in keys) or keys[0][1:3] != keys[1][1:3]
+            or not question_units.sections_compatible(keys[0][0], keys[1][0])):
+        return None
+    return {"position_rule": "legacy_table_row_column_anchor_v1",
+            "original_context": deepcopy(contexts[0]), "selected_context": deepcopy(contexts[1])}
+
+
 def target_link(review, primary, secondary, selected, source_id):
     """Return positive original-to-selected evidence or a local rejection.
 
@@ -201,6 +225,9 @@ def target_link(review, primary, secondary, selected, source_id):
     establish physical identity. Legacy sources without the new optional
     locator keep their hashes but cannot use this replacement shortcut.
     """
+    if any(question_units.legacy_slot_positions_conflict(a, b)
+           for a, b in ((primary, secondary), (primary, selected), (secondary, selected))):
+        return {"clear": False, "rejection_code": "target_identity_scope_conflict"}
     selected_id = source_id("visual", selected)
     for role, original in (("primary", primary), ("secondary", secondary)):
         if _whole_printed_match(original, selected):
@@ -243,4 +270,10 @@ def target_link(review, primary, secondary, selected, source_id):
         return fail("target_identity_scope_conflict")
     if not isinstance(identity.get("image_evidence"), str) or not identity["image_evidence"].strip():
         return fail("target_identity_evidence_missing")
+    if _legacy_slot(original) or _legacy_slot(selected):
+        position = _slot_position_link(original, selected)
+        if position is None:
+            return fail("target_identity_slot_position_unconfirmed")
+        return {"clear": True, "basis": "bound_visible_locator_and_slot_position_review",
+                **deepcopy(identity), **position}
     return {"clear": True, "basis": "bound_visible_locator_review", **deepcopy(identity)}
