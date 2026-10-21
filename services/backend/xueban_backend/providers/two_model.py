@@ -18,6 +18,7 @@ from .ark import ArkSettings, Metadata, MODEL_ID, OutputDiagnostic, ProviderErro
 from .bounded_chat import BoundedChatClient
 from .host_call_journal import HostCallJournal
 from .position_arithmetic import check_position_arithmetic
+from .matched_position_arithmetic import check_matched_positions
 from .correction_pipeline import (
     CorrectionPipeline, PipelineResult, QUESTION_OPTION, QUESTION_TYPES,
     _contains_credential, _object, _strip_field_label, _text, _validate,
@@ -1015,6 +1016,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             raise ProviderError("multimodel_unavailable", attempts=metadata.attempts,
                                 latency_ms=metadata.latency_ms)
         items, label_alignments, alignment_dispatches, scope_dispatches = [], [], [], []
+        matched_position_checks = []
         alignment_jobs = []
         with ThreadPoolExecutor(max_workers=4, thread_name_prefix="xueban-alignment") as pool:
             for image in pages:
@@ -1172,6 +1174,18 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                     "correction_method": a["correction_method"] if wrong else None,
                     "knowledge_points": knowledge if subject else [],
                 }
+                # A complete matched pair needs no additional model request.
+                # Only independently proved, position-identical errors may
+                # downgrade the two original correct judgments; never promote.
+                position_check = (check_matched_positions(a, b)
+                                  if matched and verdict == "correct"
+                                  and first["code"] == second["code"] == "ok" else None)
+                if position_check is not None:
+                    assessment.update({key: deepcopy(position_check[key]) for key in (
+                        "verdict", "basis_summary", "correct_answer", "correction_method", "answer_checks")})
+                    assessment["reason_code"] = position_check["judgment_reason_code"]
+                    matched_position_checks.append({"asset_id": image.asset_id, "label": raw["label"],
+                                                    **deepcopy(position_check["audit"])})
                 items.append({
                     "asset_id": image.asset_id, "label": raw["label"], "reading_order": len(items),
                     "subject": subject, "question_type": raw.get("question_type", "unknown"),
@@ -1341,6 +1355,8 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                                 "calls": audit, "label_alignments": label_alignments, "target_unit": self.target_unit,
                                 **({"alignment_dispatches": alignment_dispatches} if alignment_dispatches else {}),
                                 **({"scope_dispatches": scope_dispatches} if scope_dispatches else {}),
+                                **({"matched_position_arithmetic": matched_position_checks}
+                                   if matched_position_checks else {}),
                                 **({"structure_navigation": {"protocol": structure_navigation.PROTOCOL,
                                     "enabled": True, "structure_shared": structure_shared, "content_shared": False}}
                                    if navigation_enabled else {}),
