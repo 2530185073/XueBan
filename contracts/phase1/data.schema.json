@@ -1410,7 +1410,8 @@
             "check",
             "hint",
             "delete",
-            "repair_layout"
+            "repair_layout",
+            "recognition_recheck"
           ]
         },
         "status": {
@@ -2581,6 +2582,122 @@
       ],
       "additionalProperties": false,
       "description": "历史快照与当前有效性并列。历史曾确认的判断不可因此继续用于新检查。"
+    },
+    "RecognitionRecoveryStatus": {
+      "type": "object",
+      "properties": {
+        "case_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "attempt_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "limit": {
+          "type": "integer",
+          "const": 2
+        },
+        "used": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "remaining": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "active_job_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_job_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_outcome": {
+          "enum": [
+            null,
+            "applied",
+            "unchanged_pending",
+            "target_unconfirmed",
+            "scope_change_required",
+            "service_failed",
+            "stale_input",
+            "execution_unknown"
+          ]
+        },
+        "eligible": {
+          "type": "boolean"
+        },
+        "blocked_reason": {
+          "enum": [
+            null,
+            "active_recovery",
+            "budget_exhausted",
+            "already_resolved",
+            "staff_confirmed",
+            "inactive_case",
+            "initial_recognition_pending",
+            "multiple_source_pages"
+          ]
+        }
+      },
+      "required": [
+        "case_id",
+        "attempt_id",
+        "limit",
+        "used",
+        "remaining",
+        "active_job_id",
+        "last_job_id",
+        "last_outcome",
+        "eligible",
+        "blocked_reason"
+      ],
+      "additionalProperties": false
+    },
+    "RecognitionRecheckAccepted": {
+      "type": "object",
+      "properties": {
+        "job": {
+          "$ref": "data.schema.json#/$defs/Job"
+        },
+        "created_resource": {
+          "anyOf": [
+            {
+              "$ref": "data.schema.json#/$defs/ResultRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "recovery": {
+          "$ref": "data.schema.json#/$defs/RecognitionRecoveryStatus"
+        }
+      },
+      "required": [
+        "job",
+        "created_resource",
+        "recovery"
+      ],
+      "additionalProperties": false
     }
   }
 }

@@ -160,6 +160,10 @@ def normalize_page_stem(item):
     # One sentence stop is layout; an ellipsis may describe a mathematical
     # sequence and must never disappear from an exact binding comparison.
     value = value[:-1] if value.endswith(".") and not value.endswith("..") else value
+    # A terminal answer line after an existing equals sign is presentation:
+    # "57.2÷55=____" and "57.2÷55=" retain exactly the same printed condition.
+    # Keep the equals sign, internal operand blanks and single underscores.
+    value = re.sub(r"(?<==)_{2,}$", "", value)
     # Only a choice question's terminal empty answer slot is presentation.
     # Never erase populated parentheses, function calls or an empty slot in
     # another question type. Recheck callers must preserve this type/context.

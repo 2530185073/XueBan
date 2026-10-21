@@ -43,6 +43,25 @@ def review(*, source=None, comparison=None, **changes):
     }
 
 
+def identity_evidence(original, visual):
+    return {"original_source_id": source_id("primary", original),
+            "selected_source_id": source_id("visual", visual),
+            "original_quote": original["stem_text"], "selected_quote": visual["stem_text"],
+            "original_locator": deepcopy(original["visible_locator"]),
+            "selected_locator": deepcopy(visual["visible_locator"]),
+            "image_evidence": "原图中部同一可见题号及其印刷位置对应。"}
+
+
+def acknowledge_notes(target):
+    # Conservative synthetic protocol fixture: old unused doubts are preserved
+    # as unknown/unresolved, never silently relabeled clear or deleted.
+    return [{"source_id": source_id(role, target[role]), "note_index": i,
+             "note_quote": note, "kind": "unknown", "resolved": False,
+             "evidence": "该原始说明保留未解决，不用它证明所选观察。"}
+            for role in ("primary", "secondary", "visual", "critical_visual") if role in target
+            for i, note in enumerate(target[role].get("uncertainties", []))]
+
+
 def test_equivalent_stem_paraphrase_keeps_archived_student_text():
     a, b = correct(stem_text="根据x的值求值"), correct(stem_text="根据下列x的值，分别求值")
     original = deepcopy(a)
@@ -554,15 +573,17 @@ def test_expanded_printed_context_must_use_image_resolution_not_fake_literal_equ
 
 def test_archived_third_blind_observation_can_correct_two_shared_reading_errors():
     first = correct(stem_text="选择读音正确的一项。", answer_text="A",
-                    options=[{"label": "A", "text": "zhǐ"}])
+                    options=[{"label": "A", "text": "zhǐ"}],
+                    visible_locator={"printed_label": "1", "page_zone": "middle"})
     second = deepcopy(first)
     visual = {key: deepcopy(first[key]) for key in
-              ("label", "stem_text", "answer_text", "answer_status", "options", "uncertainties")}
+              ("label", "stem_text", "answer_text", "answer_status", "options", "uncertainties", "visible_locator")}
     visual["options"] = [{"label": "A", "text": "zhí"}]
     original = deepcopy((first, second, visual))
     updated = review(source=visual, selected_source="visual", resolution="visual_resolution",
                      verdict="incorrect", correct_answer="正确读音是zhǐ。",
                      correction_method="重新核对该字在本句中的声调。")
+    updated["target_identity"] = identity_evidence(first, visual)
     updated["judgment_basis"]["condition_quotes"].append(
         {"field": "option", "option_label": "A", "text": "zhí"})
     outcome = evaluate_review(updated, first, second, visual)
@@ -581,7 +602,7 @@ def test_uncertain_third_observation_cannot_be_cleared_by_informed_review():
     outcome = evaluate_review(review(source=visual, selected_source="visual",
                                     resolution="visual_resolution"), correct(), correct(), visual)
     assert outcome["resolved"] is False
-    assert outcome["rejection_code"] == "selected_visual_unclear"
+    assert outcome["rejection_code"] == "unreviewed_observation_note"
 
 
 def test_review_target_exposes_only_real_sources_and_preserves_inputs():

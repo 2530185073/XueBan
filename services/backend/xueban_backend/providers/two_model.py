@@ -5,8 +5,8 @@ provider is not a second vote; ambiguous observations never become learning
 evidence. Page regions identify the source photograph, not inferred boxes.
 """
 
-from concurrent.futures import ThreadPoolExecutor
-from copy import deepcopy
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from copy import copy, deepcopy
 from dataclasses import asdict, replace
 import json
 import os
@@ -14,7 +14,7 @@ import re
 from threading import BoundedSemaphore
 import time
 
-from .ark import ArkSettings, Metadata, MODEL_ID, ProviderError
+from .ark import ArkSettings, Metadata, MODEL_ID, OutputDiagnostic, ProviderError
 from .bounded_chat import BoundedChatClient
 from .correction_pipeline import (
     CorrectionPipeline, PipelineResult, QUESTION_OPTION, QUESTION_TYPES,
@@ -23,18 +23,26 @@ from .correction_pipeline import (
 )
 from .responses import ResponsesClient
 from .readback_views import ZONES, readback_views
-from . import reconciliation, semantic_alignment, visual_readback
+from . import reconciliation, semantic_alignment, visual_readback, question_units
 from .whole_page import (
-    JUDGE_ITEM, JUDGE_PROMPT, WholePageCorrectionPipeline, _answer_equal,
+    JUDGE_ITEM, JUDGE_PROMPT, PAGE_RULES, WholePageCorrectionPipeline, _answer_equal,
     _usable, canonical_label, normalize_literal_math, normalize_page_stem,
 )
 
 
-PROMPT_VERSION = "photo-correction.two-model.v4.8"
+PROMPT_VERSION = "photo-correction.two-model.v5.1"
 OUTPUT_TOKENS = 24576
 REVIEW_BATCH_ITEMS = 6
 REVIEW_BATCH_TEXT = 6000
 REVIEW_DISPATCH_SECONDS = 180
+
+
+def invalid_observation(result, rule, path):
+    """Retain billed-request metadata with fixed diagnostics, never raw values."""
+    raise ProviderError("invalid_output", latency_ms=result.metadata.latency_ms,
+                        attempts=tuple(replace(attempt, code="invalid_output",
+                            diagnostic=OutputDiagnostic("candidate_semantics", rule, path))
+                                       for attempt in result.metadata.attempts))
 
 
 def needs_judgment_review(target):
@@ -58,6 +66,11 @@ def review_batches(targets):
         route = needs_judgment_review(target)
         cost = 500 + max((len((target.get(role) or {}).get("answer_text") or "")
                           for role in ("primary", "secondary", "visual")), default=0)
+        # Typed note reviews echo an id, index, quote and evidence. Account for
+        # that output as well as answers; indivisible oversized targets still
+        # fail visibly under the existing provider token bound.
+        cost += sum(180 + len(note) for role in ("primary", "secondary", "visual", "critical_visual")
+                    for note in (target.get(role) or {}).get("uncertainties", []))
         if batch and (route != previous_route or len(batch) >= REVIEW_BATCH_ITEMS
                       or size + cost > REVIEW_BATCH_TEXT):
             batches.append(batch)
@@ -140,7 +153,8 @@ def _critical_print_review(item):
 
 
 def _same_observation(first, second):
-    return (normalize_page_stem(first) == normalize_page_stem(second)
+    return (question_units.same_unit_identity(first, second)
+            and normalize_page_stem(first) == normalize_page_stem(second)
             and _options_key(first) == _options_key(second) and _answer_equal(first, second))
 
 
@@ -217,6 +231,8 @@ def _align_secondary_labels(primary, secondary):
         if slots[0] != slots[1]:
             continue
         second = secondary[second_label]
+        if not question_units.same_unit_identity(first, second):
+            continue
         if first.get("subject") and second.get("subject") and first["subject"] != second["subject"]:
             continue
         aligned[first_label] = aligned.pop(second_label)
@@ -228,8 +244,17 @@ def _align_secondary_labels(primary, secondary):
 class TwoModelWholePagePipeline(CorrectionPipeline):
     """Two blind page calls, optional batch review and selective blind readback."""
 
+    supports_target_unit = True
+
     def __init__(self, client, review_client, *, reconciliation_client=None, secondary_thinking=True,
-                 visual_client=None, judgment_client=None):
+                 visual_client=None, judgment_client=None, target_unit="answer_slot"):
+        self.target_unit = question_units.validate_unit(target_unit)
+        # Validate replacement anchors before any provider request, including
+        # when this instance normally handles only legacy saved cases.
+        if target_unit == question_units.QUESTION_UNIT:
+            question_units.page_prompt(PAGE_PROMPT, PAGE_RULES, target_unit)
+            question_units.visual_prompt(visual_readback.PROMPT, target_unit)
+            question_units.review_prompt(reconciliation.PROMPT, target_unit)
         if type(secondary_thinking) is not bool:
             raise ProviderError("invalid_configuration")
         super().__init__(client)
@@ -244,6 +269,9 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         from .ark import _SAFE_TOKEN
 
         env = os.environ if environ is None else environ
+        target_unit = env.get("CORRECTION_TARGET_UNIT", "answer_slot")
+        if target_unit not in question_units.TARGET_UNITS:
+            raise ProviderError("invalid_configuration")
         review_api = env.get("REVIEW_API", "responses")
         review_thinking = env.get("REVIEW_THINKING", "enabled")
         reconciliation_provider = env.get("RECONCILIATION_PROVIDER", "primary")
@@ -281,7 +309,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             reconciliation_client = primary if reconciliation_provider == "primary" else secondary
             return cls(primary, secondary, reconciliation_client=reconciliation_client,
                        secondary_thinking=secondary_thinking, visual_client=visual_client,
-                       judgment_client=visual_client)
+                       judgment_client=visual_client, target_unit=target_unit)
         except Exception:
             closed = set()
             for client in created:
@@ -300,11 +328,15 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
 
     def _read_and_judge(self, client, image, stage):
         result = None
+        schema = question_units.schema_for(PAGE_SCHEMA, self.target_unit)
+        prompt = question_units.page_prompt(PAGE_PROMPT, PAGE_RULES, self.target_unit)
+        from .original_recheck import request_scope
+        schema, prompt, task_input = request_scope(schema, prompt, getattr(self, "_original_recheck_target", None))
         try:
             result = client.generate(
-                role="check", images=(image.data_url,), instructions=PAGE_PROMPT,
-                text=json.dumps({"asset_id": image.asset_id, "task_input": {}}, ensure_ascii=False),
-                output_schema=PAGE_SCHEMA, max_tokens=OUTPUT_TOKENS,
+                role="check", images=(image.data_url,), instructions=prompt,
+                text=json.dumps({"asset_id": image.asset_id, "task_input": task_input}, ensure_ascii=False),
+                output_schema=schema, max_tokens=OUTPUT_TOKENS,
                 thinking=self.secondary_thinking if stage != "primary" else False,
             )
             secrets = [provider.settings.api_key for provider in
@@ -316,13 +348,15 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                     attempts=tuple(replace(a, code="provider_credential_echo", request_id=None, model=None)
                                    for a in result.metadata.attempts),
                     latency_ms=result.metadata.latency_ms)
-            _validate(PAGE_SCHEMA, result.data, code="invalid_output")
-            indexed, category_normalizations = {}, []
-            for raw in result.data["items"]:
+            _validate(schema, result.data, code="invalid_output")
+            indexed, category_normalizations, observation_normalizations = {}, [], []
+            for index, raw in enumerate(result.data["items"]):
                 label = canonical_label(raw["label"])
-                if not label or label in indexed:
-                    raise ProviderError("invalid_output")
-                item = deepcopy(raw)
+                if not label:
+                    invalid_observation(result, "empty_target_label", ("items", index, "label"))
+                if label in indexed:
+                    invalid_observation(result, "duplicate_target_label", ("items", index, "label"))
+                item = question_units.bind_observation(raw, self.target_unit, image.asset_id)
                 if item.get("question_type", "unknown") not in QUESTION_TYPES["enum"]:
                     category_normalizations.append({"label": label, "field": "question_type",
                                                     "from": item["question_type"], "to": "unknown"})
@@ -333,16 +367,37 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                     item["reason_code"] = "other"
                 item["stem_text"] = _strip_field_label(item["stem_text"], "stem_text")
                 item["answer_text"] = _strip_field_label(item["answer_text"], "answer_text")
-                if ((item["answer_status"] == "present" and not normalize_field_for_comparison(item["answer_text"]))
-                        or (item["answer_status"] == "blank" and item["answer_text"] is not None)):
-                    raise ProviderError("invalid_output")
+                if item["answer_status"] == "blank" and item["answer_text"] is not None:
+                    if not normalize_field_for_comparison(item["answer_text"]):
+                        item["answer_text"] = None
+                        observation_normalizations.append({"label": label, "code": "empty_blank_to_null"})
+                    else:
+                        item["answer_status"] = "unclear"
+                        item["uncertainties"] = _bounded_uncertainties(
+                            item["uncertainties"], ["作答状态与识读文字尚未对应，需要独立原图核对。"])
+                        observation_normalizations.append({"label": label, "code": "answer_status_mismatch"})
+                elif item["answer_status"] == "present" and not normalize_field_for_comparison(item["answer_text"]):
+                    # A malformed row must not discard every other observation
+                    # on the page. Keep the original in the private raw audit;
+                    # only this row remains uncertain until independent reading.
+                    item["answer_status"] = "unclear"
+                    item["uncertainties"] = _bounded_uncertainties(
+                        item["uncertainties"], ["识读标记有作答，但没有取得对应笔迹文字。"])
+                    observation_normalizations.append({"label": label, "code": "answer_status_mismatch"})
                 if reconciliation.has_unreadable_observation(item):
                     note = "题干、选项或作答原文含明确无法辨认的占位标记，不能视为已读清。"
                     if note not in item["uncertainties"] and len(item["uncertainties"]) < 20:
                         item["uncertainties"].append(note)
+                unit_issues = question_units.unit_issues(item, self.target_unit)
+                if unit_issues:
+                    item["uncertainties"] = _bounded_uncertainties(item["uncertainties"], unit_issues)
+                    item["answer_status"] = "unclear"
                 indexed[label] = item
             return {"stage": stage, "asset_id": image.asset_id, "model": client.settings.model,
                     "code": "ok", "items": indexed, "max_output_tokens": OUTPUT_TOKENS,
+                    **({"raw_items": deepcopy(result.data["items"])}
+                       if self.target_unit == question_units.QUESTION_UNIT or observation_normalizations else {}),
+                    "observation_normalizations": observation_normalizations,
                     "category_normalizations": category_normalizations,
                     "metadata": result.metadata}
         except ProviderError as error:
@@ -354,17 +409,19 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                     "code": error.code, "items": {}, "max_output_tokens": OUTPUT_TOKENS,
                     "metadata": Metadata(client.settings.model, None, None, None, None, latency, attempts)}
 
-    def _review_provider(self, targets):
-        if self.judgment_client is not None and any(needs_judgment_review(row) for row in targets):
+    def _review_provider(self, targets, stage="reconciliation"):
+        if self.judgment_client is not None and (stage == "visual_adjudication"
+                or any(needs_judgment_review(row) for row in targets)):
             return self.judgment_client
         return self.reconciliation_client
 
     def _review_conflicts(self, image, targets, stage="reconciliation"):
         """One bounded, non-blind request; callers keep every batch separate."""
-        client = self._review_provider(targets)
+        client = self._review_provider(targets, stage)
         result = None
         try:
-            schema, prompt = reconciliation.SCHEMA, reconciliation.PROMPT
+            schema = reconciliation.SCHEMA
+            prompt = question_units.review_prompt(reconciliation.PROMPT, self.target_unit)
             if stage == "visual_reconciliation":
                 schema = deepcopy(schema)
                 schema["properties"]["items"]["items"]["properties"]["selected_source"] = {"enum": ["visual", None]}
@@ -373,6 +430,15 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                     "能判定时只能选择visual并逐字回显其完整answer_text，用visual_resolution。"
                     "不要退回只含终答的旧源，以免再次丢失本轮已读出的过程或选项；"
                     "若visual和目标题仍不能可靠对应，明确unresolved，不硬选。"
+                )
+            elif stage == "visual_adjudication":
+                prompt += (
+                    "本轮已经完成独立盲读visual，这是本题唯一一次视觉裁决。"
+                    "对照原图与完整primary/secondary/visual候选，选择一份实际提供且完整可靠的来源；"
+                    "逐字回显其作答并绑定对应source_id，不拼接候选，不省略独立盲读已发现的必要过程。"
+                    "选择旧来源仍须与独立观察的完整条件、选项、作答一致；无法对应或判定就unresolved。"
+                    "开放式个人介绍或自由作答可以没有唯一事实答案，但仍须逐空核验所在句的语法、"
+                    "语义类别和上下文关系；不能因为内容由学生自定就把任意类别的填答判为正确。"
                 )
             result = client.generate(
                 role="check", images=(image.data_url,), instructions=prompt,
@@ -418,7 +484,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         acquired = limiter.acquire(timeout=remaining) if remaining else False
         try:
             if not acquired or time.monotonic() >= dispatch_deadline:
-                client = self._review_provider(targets)
+                client = self._review_provider(targets, stage)
                 call = {"stage": stage, "asset_id": image.asset_id,
                         "model": client.settings.model,
                         "code": "review_dispatch_budget_exhausted", "items": {},
@@ -454,13 +520,15 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         result = None
         images, views = readback_views(image, zones)
         task_input = {"labels": labels}
+        schema = question_units.schema_for(visual_readback.SCHEMA, self.target_unit)
+        prompt = question_units.visual_prompt(visual_readback.PROMPT, self.target_unit)
         if views:
             task_input["image_views"] = views
         try:
             result = client.generate(
-                role="recognition", images=images, instructions=visual_readback.PROMPT,
+                role="recognition", images=images, instructions=prompt,
                 text=json.dumps({"asset_id": image.asset_id, "task_input": task_input}, ensure_ascii=False),
-                output_schema=visual_readback.SCHEMA, max_tokens=visual_readback.OUTPUT_TOKENS, thinking=True,
+                output_schema=schema, max_tokens=visual_readback.OUTPUT_TOKENS, thinking=True,
             )
             secrets = [provider.settings.api_key for provider in
                        (self.client, self.review_client, self.reconciliation_client, client,
@@ -470,14 +538,21 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                 raise ProviderError("provider_credential_echo",
                     attempts=tuple(replace(a, code="provider_credential_echo", request_id=None, model=None)
                                    for a in result.metadata.attempts), latency_ms=result.metadata.latency_ms)
-            _validate(visual_readback.SCHEMA, result.data, code="invalid_output")
+            _validate(schema, result.data, code="invalid_output")
             indexed = {}
             for raw in result.data["items"]:
                 label = canonical_label(raw["label"])
                 if label not in labels or label in indexed:
                     raise ProviderError("invalid_output")
-                indexed[label] = deepcopy(raw)
+                item = question_units.bind_observation(raw, self.target_unit, image.asset_id)
+                issues = question_units.unit_issues(item, self.target_unit)
+                if issues:
+                    item["uncertainties"] = _bounded_uncertainties(item["uncertainties"], issues)
+                    item["answer_status"] = "unclear"
+                indexed[label] = item
             return {"stage": stage, "asset_id": image.asset_id, "model": client.settings.model,
+                    **({"raw_items": deepcopy(result.data["items"])}
+                       if self.target_unit == question_units.QUESTION_UNIT else {}),
                     "code": "ok", "items": indexed, "max_output_tokens": visual_readback.OUTPUT_TOKENS,
                     "image_views": views, "metadata": result.metadata}
         except ProviderError as error:
@@ -494,9 +569,10 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         client, result = self.reconciliation_client, None
         try:
             result = client.generate(
-                role="recognition", images=(image.data_url,), instructions=semantic_alignment.PROMPT,
+                role="recognition", images=(image.data_url,),
+                instructions=question_units.alignment_prompt(semantic_alignment.PROMPT, self.target_unit),
                 text=json.dumps({"asset_id": image.asset_id,
-                                 "task_input": semantic_alignment.build_alignment_input(primary, secondary)},
+                                 "task_input": semantic_alignment.build_alignment_input(primary, secondary, target_unit=self.target_unit)},
                                 ensure_ascii=False),
                 output_schema=semantic_alignment.SCHEMA,
                 max_tokens=semantic_alignment.OUTPUT_TOKENS, thinking=False,
@@ -513,7 +589,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             return {"stage": "semantic_alignment", "asset_id": image.asset_id,
                     "model": client.settings.model, "code": "ok", "items": {},
                     "max_output_tokens": semantic_alignment.OUTPUT_TOKENS,
-                    "alignment": semantic_alignment.evaluate_alignment(result.data, primary, secondary),
+                    "alignment": semantic_alignment.evaluate_alignment(result.data, primary, secondary, target_unit=self.target_unit),
                     "metadata": result.metadata}
         except ProviderError as error:
             attempts = error.attempts
@@ -526,10 +602,12 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                     "alignment": {"pairs": [], "rejected": [], "unmatched_source_ids": []},
                     "metadata": Metadata(client.settings.model, None, None, None, None, latency, attempts)}
 
-    def _visual_gate(self, call, label, outcome, *, options_required=False):
+    def _visual_gate(self, call, label, outcome, *, options_required=False, preflight=False):
         def reject(code, cause, uncertainties=()):
             return {"resolved": False, "cause": cause, "rejection_code": code,
-                    "uncertainties": _bounded_uncertainties(outcome.get("uncertainties", []), uncertainties)}
+                    "uncertainties": _bounded_uncertainties(outcome.get("uncertainties", []), uncertainties),
+                    **({"observation_issue_review": outcome["observation_issue_review"]}
+                       if "observation_issue_review" in outcome else {})}
         if call["code"] != "ok":
             return reject("visual_service_unavailable", "reconciliation_unavailable")
         observed = call["items"].get(label)
@@ -537,11 +615,26 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             return reject("visual_target_missing", "model_disagreement")
         if not normalize_field_for_comparison(observed.get("stem_text"), "stem_text"):
             return reject("visual_question_missing", "model_disagreement", observed["uncertainties"])
-        if (observed["uncertainties"] or observed["answer_status"] == "unclear"
-                or reconciliation.has_unreadable_observation(observed)):
-            return reject("visual_reading_unclear", "visual_unreadable", observed["uncertainties"])
-        if not _usable(observed):
-            return reject("visual_reading_invalid", "model_disagreement")
+        def reading_error(item):
+            structural = [code for code in question_units.unit_issues(item, question_units.source_unit(item))
+                          if code != "unclear_question_unit"]
+            if structural:
+                return "visual_observation_incomplete", "model_disagreement"
+            if item["answer_status"] == "unclear" or reconciliation.has_unreadable_observation(item):
+                return "visual_reading_unclear", "visual_unreadable"
+            if (not normalize_field_for_comparison(item.get("stem_text"), "stem_text")
+                    or item["answer_status"] != "blank" and not normalize_field_for_comparison(item.get("answer_text"))):
+                return "visual_reading_invalid", "model_disagreement"
+            return None
+        error = reading_error(observed)
+        if error:
+            return reject(*error, observed["uncertainties"])
+        # Free-form notes are preserved and classified in the one strong
+        # adjudication. Their mere presence is not evidence of blurry writing.
+        notes = outcome.get("observation_issue_review")
+        if not preflight and observed.get("uncertainties") and (not notes or not notes["clear"]):
+            return reject((notes or {}).get("rejection_code", "unreviewed_observation_note"),
+                          (notes or {}).get("cause", "model_disagreement"), observed["uncertainties"])
         if options_required and not observed.get("options"):
             return reject("visual_options_missing", "model_disagreement",
                           ["独立识读尚未包含选择题的印刷选项，继续保留原图核对。"])
@@ -552,8 +645,12 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             other = corroboration.get("items", {}).get(label)
             if not other:
                 return reject("critical_readback_missing", "model_disagreement")
-            if not _usable(other) or reconciliation.has_unreadable_observation(other):
-                return reject("critical_readback_unclear", "visual_unreadable", other.get("uncertainties", []))
+            error = reading_error(other)
+            if error:
+                return reject("critical_readback_unclear", error[1], other.get("uncertainties", []))
+            if not preflight and other.get("uncertainties") and (not notes or not notes["clear"]):
+                return reject((notes or {}).get("rejection_code", "unreviewed_observation_note"),
+                              (notes or {}).get("cause", "model_disagreement"), other["uncertainties"])
             if normalize_page_stem(observed) != normalize_page_stem(other):
                 return reject("critical_condition_disagreement", "model_disagreement",
                               ["两次放大核读的题目条件或问法尚未一致，继续由AI核对。"])
@@ -576,6 +673,61 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                               ["独立原图核读的题干或选项尚未与本次判定绑定，继续由AI复核。"])
         return outcome
 
+    def _apply_pending(self, row, outcome, primary, secondary, visual_call, application):
+        """Reuse the existing pending-text guard without inventing a paid review."""
+        assessment = row["assessment"]
+        verification = assessment["verification"]
+        original_reasons = list(verification["reason_codes"])
+        label = canonical_label(row["label"])
+        cause = outcome["cause"]
+        verification["reason_codes"] = list(dict.fromkeys([*original_reasons, cause]))
+        summary = {
+            "visual_unreadable": "原图中影响判定的笔迹仍看不清，本题保留待核。",
+            "model_disagreement": "AI复核尚未解决本题的条件或判定差异，暂不形成学习结论。",
+            "reconciliation_unavailable": "AI复核服务暂未完成，原图及已有结果已保留，本题暂待核对。",
+        }[cause]
+        if outcome.get("rejection_code") == "missing_context":
+            summary = "本题缺少判定所需的阅读材料或其他上下文，已有原文已保留，暂不形成学习结论。"
+        elif outcome.get("rejection_code") in {"visual_observation_incomplete", "incomplete_question_unit"}:
+            summary = "本题的部分作答位置尚未完整记录，原图和已有笔迹已保留，待AI继续核对。"
+        row["uncertainties"] = _bounded_uncertainties(
+            [summary], outcome["uncertainties"], row["uncertainties"])
+        assessment["uncertainties"] = list(row["uncertainties"])
+        assessment["basis_summary"] = summary
+        observed = (visual_call or {}).get("items", {}).get(label)
+        if (row["recognition_status"] != "ready"
+                and assessment["verdict"] == "unable_to_judge"
+                and observed and observed.get("answer_status") == "unclear"):
+            printed_question_bound = (
+                bool(normalize_field_for_comparison(observed.get("answer_text")))
+                and bool(normalize_page_stem(observed))
+                and not reconciliation.has_unreadable_marker(observed.get("stem_text"))
+                and not any(reconciliation.has_unreadable_marker(option.get("text"))
+                            for option in observed.get("options", []))
+                and any(question_units.same_unit_identity(observed, original)
+                        and normalize_page_stem(observed) == normalize_page_stem(original)
+                        and _options_key(observed) == _options_key(original)
+                        for original in (primary, secondary)))
+            # Pending text must not keep a judge's completed calculation
+            # when a separately archived reader saw an unreadable step.
+            # Bind the full printed question first; a matching answer or
+            # label alone is not enough to replace the visible transcript.
+            if printed_question_bound:
+                row.update(stem_text=observed["stem_text"], options=deepcopy(observed.get("options", [])),
+                           answer_text=observed["answer_text"], answer_status="unclear")
+                application.update(
+                    pending_display_action="use_bound_unclear_readback",
+                    pending_display_source_id=reconciliation.source_id("visual", observed))
+            else:
+                # The reader may include another subquestion's shared
+                # context. Do not claim its text belongs to this target,
+                # and do not keep an unverified judge completion visible.
+                # All candidate transcriptions remain in the private audit.
+                row.update(answer_text=None, answer_status="unclear")
+                application["pending_display_action"] = "withhold_unbound_transcription"
+            assessment["knowledge_points"] = []
+        return outcome
+
     def _apply_review(self, row, call, primary, secondary, visual_call=None):
         assessment = row["assessment"]
         verification = assessment["verification"]
@@ -590,7 +742,9 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                        "rejection_code": "missing_review_item", "uncertainties": []}
         else:
             observed = (visual_call or {}).get("items", {}).get(label)
-            outcome = reconciliation.evaluate_review(review, primary, secondary, visual=observed)
+            critical = ((visual_call or {}).get("corroboration") or {}).get("items", {}).get(label)
+            outcome = reconciliation.evaluate_review(review, primary, secondary, visual=observed,
+                                                     critical_visual=critical)
         if outcome["resolved"] and "critical_print_verification" in original_reasons:
             outcome["requires_visual_support"] = True
         if visual_call is not None:
@@ -608,52 +762,13 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             "resolved_source": outcome.get("resolved_source"),
             "visual_readback_required": visual_call is not None,
             **({"evidence_binding": outcome["audit"]} if outcome.get("audit") else {}),
+            **({"observation_issue_review": outcome["observation_issue_review"]}
+               if "observation_issue_review" in outcome else {}),
         })
         verification["reconciliation_model"] = call["model"]
         if not outcome["resolved"]:
-            cause = outcome["cause"]
-            verification["reason_codes"] = list(dict.fromkeys([*original_reasons, cause]))
-            summary = {
-                "visual_unreadable": "原图中影响判定的笔迹仍看不清，本题保留待核。",
-                "model_disagreement": "AI复核尚未解决本题的条件或判定差异，暂不形成学习结论。",
-                "reconciliation_unavailable": "AI复核服务暂未完成，原图及已有结果已保留，本题暂待核对。",
-            }[cause]
-            row["uncertainties"] = _bounded_uncertainties(
-                [summary], outcome["uncertainties"], row["uncertainties"])
-            assessment["uncertainties"] = list(row["uncertainties"])
-            assessment["basis_summary"] = summary
-            observed = (visual_call or {}).get("items", {}).get(label)
-            if (row["recognition_status"] != "ready"
-                    and assessment["verdict"] == "unable_to_judge"
-                    and observed and observed.get("answer_status") == "unclear"):
-                printed_question_bound = (
-                    bool(normalize_field_for_comparison(observed.get("answer_text")))
-                    and bool(normalize_page_stem(observed))
-                    and not reconciliation.has_unreadable_marker(observed.get("stem_text"))
-                    and not any(reconciliation.has_unreadable_marker(option.get("text"))
-                                for option in observed.get("options", []))
-                    and any(normalize_page_stem(observed) == normalize_page_stem(original)
-                            and _options_key(observed) == _options_key(original)
-                            for original in (primary, secondary)))
-                # Pending text must not keep a judge's completed calculation
-                # when a separately archived reader saw an unreadable step.
-                # Bind the full printed question first; a matching answer or
-                # label alone is not enough to replace the visible transcript.
-                if printed_question_bound:
-                    row.update(stem_text=observed["stem_text"], options=deepcopy(observed.get("options", [])),
-                               answer_text=observed["answer_text"], answer_status="unclear")
-                    call["applications"][-1].update(
-                        pending_display_action="use_bound_unclear_readback",
-                        pending_display_source_id=reconciliation.source_id("visual", observed))
-                else:
-                    # The reader may include another subquestion's shared
-                    # context. Do not claim its text belongs to this target,
-                    # and do not keep an unverified judge completion visible.
-                    # All candidate transcriptions remain in the private audit.
-                    row.update(answer_text=None, answer_status="unclear")
-                    call["applications"][-1]["pending_display_action"] = "withhold_unbound_transcription"
-                assessment["knowledge_points"] = []
-            return outcome
+            return self._apply_pending(row, outcome, primary, secondary, visual_call,
+                                       call["applications"][-1])
         source = outcome["source"]
         # Archive originals in multimodel_audit; only the selected archived
         # transcription becomes the visible current observation.
@@ -663,6 +778,7 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             question_type=source.get("question_type", row["question_type"]),
             uncertainties=[], recognition_status="ready",
         )
+        row.update(question_units.public_fields(source, self.target_unit))
         verification.update(status="reviewed", reason_codes=[],
                             original_reason_codes=original_reasons)
         conditions_unchanged = all(
@@ -682,7 +798,13 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         )
         return outcome
 
-    def recognize(self, *, images):
+    def recognize(self, *, images, target_unit=None):
+        if target_unit is not None and target_unit != self.target_unit:
+            # Keep all current routing clients (including judgment_client),
+            # without mutating a shared worker instance or closing clients.
+            local = copy(self)
+            local.target_unit = question_units.validate_unit(target_unit)
+            return local.recognize(images=images)
         pages = list(self._images(images).values())
         started = time.monotonic()
         calls, by_page = [], {}
@@ -731,10 +853,24 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                 by_page[image.asset_id]["secondary"] = {**second, "items": aligned}
         for image in pages:
             first, second = by_page[image.asset_id]["primary"], by_page[image.asset_id]["secondary"]
+            # Same labels can refer to different titled blocks/table cells.
+            # Keep both sources pending; no ordinary review may merge them.
+            identity_conflicts = set()
+            second_items = dict(second["items"])
+            for label in first["items"].keys() & second["items"].keys():
+                if not question_units.same_unit_identity(first["items"][label], second["items"][label]):
+                    identity_conflicts.add(label)
+                    private_key = "__unit_conflict__" + label
+                    while private_key in first["items"] or private_key in second_items:
+                        private_key += "_"
+                    second_items[private_key] = second_items.pop(label)
+            second = {**second, "items": second_items}
+            by_page[image.asset_id]["secondary"] = second
             for label in dict.fromkeys([*first["items"], *second["items"]]):
                 a, b = first["items"].get(label), second["items"].get(label)
                 raw = a or b
-                reasons = []
+                reasons = (["target_identity_conflict"]
+                           if canonical_label(raw["label"]) in identity_conflicts else [])
                 uncertainties = _bounded_uncertainties((a or {}).get("uncertainties", []),
                                                         (b or {}).get("uncertainties", []))
                 if first["code"] != "ok" or second["code"] != "ok":
@@ -806,16 +942,43 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                 items.append({
                     "asset_id": image.asset_id, "label": raw["label"], "reading_order": len(items),
                     "subject": subject, "question_type": raw.get("question_type", "unknown"),
-                    "options": deepcopy(raw.get("options", [])), "blank_count": 1 if "#" in label else 0,
+                    "options": deepcopy(raw.get("options", [])),
+                    **question_units.public_fields(raw, self.target_unit),
                     "stem_text": raw["stem_text"], "answer_text": raw["answer_text"],
                     "answer_status": raw["answer_status"], "uncertainties": uncertainties,
                     "regions": [self.page_region(image)], "answer_regions": [],
                     "recognition_status": "ready" if matched else "needs_revision", "assessment": assessment,
                 })
         if self.reconciliation_client is not None:
-            jobs = []
+            # Archive each request once; budget-skipped calls retain zero attempts.
+            # Consume futures by readiness so slow visual work cannot block format batches.
+            jobs = {}
             page_review_limits = {}
             with ThreadPoolExecutor(max_workers=8, thread_name_prefix="xueban-reconciliation") as pool:
+                def queue_reviews(image, targets, rows, first, second, visual_call=None):
+                    limiter, deadline = page_review_limits[image.asset_id]
+                    batches = review_batches(targets)
+                    stage = "visual_adjudication" if visual_call is not None else "reconciliation"
+                    for index, batch in enumerate(batches):
+                        labels = {target["label"] for target in batch}
+                        batch_rows = [row for row in rows if canonical_label(row["label"]) in labels]
+                        future = pool.submit(self._bounded_review, image, batch, limiter, deadline,
+                                             stage, index, len(batches))
+                        jobs[future] = ("review", image, batch_rows, first, second, visual_call)
+
+                def queue_read(image, rows, first, second, original_call=None):
+                    labels = [canonical_label(row["label"]) for row in rows]
+                    zones = [item.get("page_zone") for label in labels
+                             for item in (first["items"][label], second["items"][label])]
+                    critical = [canonical_label(row["label"]) for row in rows
+                                if "critical_print_verification" in
+                                row["assessment"]["verification"]["reason_codes"]]
+                    critical_zones = [item.get("page_zone") for label in critical
+                                      for item in (first["items"][label], second["items"][label])]
+                    future = pool.submit(self._read_visual_targets, image, labels, zones,
+                                         critical, critical_zones)
+                    jobs[future] = ("read", image, rows, first, second, original_call)
+
                 for image in pages:
                     first, second = by_page[image.asset_id]["primary"], by_page[image.asset_id]["secondary"]
                     if first["code"] != "ok" or second["code"] != "ok":
@@ -827,118 +990,93 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                         label = canonical_label(row["label"])
                         a, b = first["items"].get(label), second["items"].get(label)
                         reasons = row["assessment"]["verification"]["reason_codes"]
-                        if not a or not b or "independent_model_required" in reasons:
+                        if (not a or not b or "independent_model_required" in reasons
+                                or "target_identity_conflict" in reasons):
                             continue
                         targets.append(reconciliation.review_target(label, a, b, reasons))
                         selected_rows.append(row)
-                    if targets:
-                        # Both calls start before waiting. The blind reader sees
-                        # labels only and never receives reconciliation output.
-                        visual_labels = [target["label"] for target in targets
-                                         if set(target["reason_codes"]) & {
-                                             "answer_disagreement", "uncertain_observation",
-                                             "options_disagreement", "critical_print_verification"}
-                                         or _needs_condition_readback(target["primary"], target["secondary"])]
-                        zones = [item.get("page_zone") for label in visual_labels
-                                 for item in (first["items"][label], second["items"][label])]
-                        critical = [target["label"] for target in targets
-                                    if "critical_print_verification" in target["reason_codes"]]
-                        critical_zones = [item.get("page_zone") for label in critical
-                                          for item in (first["items"][label], second["items"][label])]
-                        visual_future = (pool.submit(self._read_visual_targets, image, visual_labels, zones,
-                                                     critical, critical_zones)
-                                         if self.visual_client is not None and visual_labels else None)
-                        limiter = BoundedSemaphore(2)
-                        deadline = time.monotonic() + REVIEW_DISPATCH_SECONDS
-                        page_review_limits[image.asset_id] = (limiter, deadline)
-                        batches = review_batches(targets)
-                        for index, batch in enumerate(batches):
-                            labels = {target["label"] for target in batch}
-                            batch_rows = [row for row in selected_rows if canonical_label(row["label"]) in labels]
-                            jobs.append((pool.submit(self._bounded_review, image, batch, limiter, deadline,
-                                                     "reconciliation", index, len(batches)),
-                                         image, batch_rows, first, second, visual_future, set(visual_labels)))
-                followups = []
-                archived_visual_calls = set()
-                for future, image, rows, first, second, visual_future, visual_labels in jobs:
-                    call = future.result()
-                    calls.append(call)
-                    visual_call = visual_future.result() if visual_future is not None else None
-                    if visual_call is not None and id(visual_call) not in archived_visual_calls:
-                        calls.append(visual_call)
-                        archived_visual_calls.add(id(visual_call))
-                        if "corroboration" in visual_call:
-                            calls.append(visual_call["corroboration"])
-                    waiting, retry_rows = [], []
-                    for row in rows:
-                        label = canonical_label(row["label"])
-                        outcome = self._apply_review(row, call, first["items"][label], second["items"][label],
-                                                     visual_call if label in visual_labels else None)
-                        if (label not in visual_labels and not outcome["resolved"]
-                                and outcome.get("cause") == "model_disagreement"):
-                            # A misleading "non-material" review can still
-                            # contain a real condition change. Give it the
-                            # same one bounded blind-read opportunity instead
-                            # of leaving a permanently unresolved model tag.
-                            waiting.append(label)
-                        if (not outcome["resolved"]
-                                and not (outcome.get("rejection_code") or "").startswith("critical_")):
-                            retry_rows.append(row)
-                    if self.visual_client is not None and retry_rows and call["code"] == "ok":
-                        # Only one independent read and one additional review
-                        # batch per target. No recursive model retry loops.
-                        zones = [item.get("page_zone") for label in waiting
-                                 for item in (first["items"][label], second["items"][label])]
-                        late_read = pool.submit(self._read_visual_targets, image, waiting, zones) if waiting else None
-                        followups.append((image, retry_rows, first, second, visual_call, late_read, call, set(waiting)))
-                final_reviews = []
-                for image, rows, first, second, visual_call, late_read, original_call, waiting in followups:
-                    visual_items = dict((visual_call or {}).get("items", {}))
-                    if late_read is not None:
-                        late_call = late_read.result()
-                        calls.append(late_call)
-                        visual_items.update(late_call["items"])
-                    targets, selected_rows = [], []
-                    for row in rows:
-                        label = canonical_label(row["label"])
-                        observed = visual_items.get(label)
-                        if not observed or not _usable(observed) or reconciliation.has_unreadable_observation(observed):
+                    if not targets:
+                        continue
+                    page_review_limits[image.asset_id] = (
+                        BoundedSemaphore(2), time.monotonic() + REVIEW_DISPATCH_SECONDS)
+                    visual_labels = {target["label"] for target in targets
+                                     if set(target["reason_codes"]) & {
+                                         "answer_disagreement", "uncertain_observation",
+                                         "options_disagreement", "critical_print_verification"}
+                                     or _needs_condition_readback(target["primary"], target["secondary"])
+                                     or getattr(self, "_original_recheck_target", None)}
+                    if self.visual_client is None:
+                        visual_labels = set()  # Existing disabled-reader behavior stays bounded.
+                    visual_rows = [row for row in selected_rows
+                                   if canonical_label(row["label"]) in visual_labels]
+                    if visual_rows:
+                        # No candidate answer or judgment is sent to this reader.
+                        queue_read(image, visual_rows, first, second)
+                    direct_targets = [target for target in targets if target["label"] not in visual_labels]
+                    queue_reviews(image, direct_targets, selected_rows, first, second)
+
+                while jobs:
+                    completed, _ = wait(tuple(jobs), return_when=FIRST_COMPLETED)
+                    for future in completed:
+                        kind, image, rows, first, second, dependency = jobs.pop(future)
+                        call = future.result()
+                        calls.append(call)
+                        if kind == "read":
+                            if "corroboration" in call:
+                                calls.append(call["corroboration"])
+                            targets, ready_rows = [], []
+                            for row in rows:
+                                label = canonical_label(row["label"])
+                                a, b = first["items"][label], second["items"][label]
+                                gate = self._visual_gate(call, label,
+                                    {"resolved": False, "cause": "model_disagreement", "uncertainties": []},
+                                    options_required=bool(a.get("options") or b.get("options")), preflight=True)
+                                if gate.get("rejection_code"):
+                                    # This is a readback-gate application attached
+                                    # to the actual read call, not a fake review.
+                                    application = {
+                                        "label": label, "application_kind": "readback_gate",
+                                        "original_reason_codes": list(row["assessment"]["verification"]["reason_codes"]),
+                                        "resolved": False, "rejection_code": gate["rejection_code"],
+                                        "visual_readback_required": True,
+                                    }
+                                    call.setdefault("applications", []).append(application)
+                                    row["assessment"]["verification"]["visual_readback_model"] = call["model"]
+                                    self._apply_pending(row, gate, a, b, call, application)
+                                    continue
+                                if dependency is not None:
+                                    outcome = self._apply_review(row, dependency, a, b, call)
+                                    if outcome["resolved"]:
+                                        continue
+                                observed = call["items"][label]
+                                targets.append(reconciliation.review_target(
+                                    label, a, b, row["assessment"]["verification"]["reason_codes"], visual=observed,
+                                    critical_visual=(call.get("corroboration") or {}).get("items", {}).get(label)))
+                                ready_rows.append(row)
+                            queue_reviews(image, targets, ready_rows, first, second, call)
                             continue
-                        if label in waiting:
-                            outcome = self._apply_review(
-                                row, original_call, first["items"][label], second["items"][label], late_call)
-                            if outcome["resolved"]:
-                                continue
-                        targets.append(reconciliation.review_target(
-                            label, first["items"][label], second["items"][label],
-                            row["assessment"]["verification"]["reason_codes"], visual=observed))
-                        selected_rows.append(row)
-                    if targets:
-                        # This stage may select the separately archived blind
-                        # source when both original models misread the print.
-                        merged = {"code": "ok", "model": self.visual_client.settings.model, "items": visual_items}
-                        if visual_call and "corroboration" in visual_call:
-                            merged.update(critical_labels=visual_call["critical_labels"],
-                                          corroboration=visual_call["corroboration"])
-                        limiter, deadline = page_review_limits[image.asset_id]
-                        batches = review_batches(targets)
-                        for index, batch in enumerate(batches):
-                            labels = {target["label"] for target in batch}
-                            batch_rows = [row for row in selected_rows if canonical_label(row["label"]) in labels]
-                            final_reviews.append((pool.submit(self._bounded_review, image, batch, limiter, deadline,
-                                                              "visual_reconciliation", index, len(batches)),
-                                                  batch_rows, first, second, merged))
-                for future, rows, first, second, visual_call in final_reviews:
-                    call = future.result()
-                    calls.append(call)
-                    for row in rows:
-                        label = canonical_label(row["label"])
-                        self._apply_review(row, call, first["items"][label], second["items"][label], visual_call)
+                        waiting = []
+                        for row in rows:
+                            label = canonical_label(row["label"])
+                            outcome = self._apply_review(row, call, first["items"][label],
+                                                         second["items"][label], dependency)
+                            if (dependency is None and call["code"] == "ok"
+                                    and not outcome["resolved"] and outcome.get("cause") == "model_disagreement"
+                                    and not (outcome.get("rejection_code") or "").startswith("critical_")):
+                                waiting.append(row)
+                        if waiting and self.visual_client is not None:
+                            # Only the initially nonvisual route may discover a
+                            # need for one late read. A visual adjudication never
+                            # retries itself or requests another blind source.
+                            queue_read(image, waiting, first, second, call)
         metadata = replace(WholePageCorrectionPipeline._metadata(calls, started), requested_model="two_model")
         audit = [{key: call[key] for key in ("stage", "asset_id", "model", "code", "max_output_tokens")}
                  | {"items": list(call["items"].values())}
+                 | ({"raw_items": call["raw_items"]} if "raw_items" in call else {})
                  | ({"category_normalizations": call["category_normalizations"]}
                     if call.get("category_normalizations") else {})
+                 | ({"observation_normalizations": call["observation_normalizations"]}
+                    if call.get("observation_normalizations") else {})
                  | ({"alignment": call["alignment"]} if "alignment" in call else {})
                  | ({"image_views": call["image_views"]} if call.get("image_views") else {})
                  | ({key: call[key] for key in ("batch_index", "batch_count", "target_labels")}
@@ -949,8 +1087,13 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
             "coverage": {"collection_scope": "partial" if items else "unknown", "unrecognized_regions": [],
                          "note": "整页独立核读仍可能漏项，不能据此宣称全部作业无错。"},
             "multimodel_audit": {"mode": "two_model", "independent_before_comparison": True, "calls": audit,
-                                "label_alignments": label_alignments},
-        }, metadata, prompt_version=PROMPT_VERSION)
+                                "label_alignments": label_alignments, "target_unit": self.target_unit},
+        }, metadata, prompt_version=(PROMPT_VERSION if self.target_unit == question_units.LEGACY_UNIT
+                                        else PROMPT_VERSION + ".question-experimental"))
+
+    def rerecognize_original(self, *, images, question, attempt, input_versions):
+        from .original_recheck import run
+        return run(self, images=images, question=question, attempt=attempt, input_versions=input_versions)
 
     def _check(self, role, images, question, attempt, input_versions, student_grade=None,
                knowledge_point_candidates=None, curriculum_context=None):
@@ -958,9 +1101,12 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
         # assessments directly and never enqueue a check call for each atom.
         indexed, observation, question_regions, answer_regions = self._context(
             images, question, attempt, input_versions)
-        result = self.recognize(images=tuple(indexed[asset] for asset in attempt["asset_ids"]))
+        original_unit = question_units.stored_unit(question)
+        result = self.recognize(images=tuple(indexed[asset] for asset in attempt["asset_ids"]),
+                                target_unit=original_unit)
         target = normalize_page_stem(question)
-        matches = [item for item in result.data["items"] if target and normalize_page_stem(item) == target]
+        matches = [item for item in result.data["items"] if target and normalize_page_stem(item) == target
+                   and question_units.compatible_saved_target(question, question, item, canonical_label)]
         label = canonical_label(question.get("label") or "")
         if label and (len(matches) > 1 or "#" in label):
             matches = [item for item in matches if canonical_label(item["label"]) == label]
@@ -998,4 +1144,4 @@ class TwoModelWholePagePipeline(CorrectionPipeline):
                     first_error_region=None, confirmation_source=None, confirmed_by=None, confirmed_at=None,
                     readback=deepcopy(observation), evidence_verified=usable and data["verdict"] != "unable_to_judge",
                     multimodel_audit=result.data["multimodel_audit"])
-        return PipelineResult(data, result.metadata, prompt_version=PROMPT_VERSION)
+        return PipelineResult(data, result.metadata, prompt_version=result.prompt_version)

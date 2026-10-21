@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from test_reconciliation import review
+from test_reconciliation import review, acknowledge_notes
 from test_two_model_pipeline import correct
 from test_whole_page_pipeline import FakeClient, item, picture
 from xueban_backend.providers.two_model import TwoModelWholePagePipeline, _align_secondary_labels
@@ -96,7 +96,8 @@ def test_alignment_preserves_audit_labels_and_routes_visual_review_to_primary_an
     flow = TwoModelWholePagePipeline(
         FakeClient("deepseek", {"items": [first]}), FakeClient("glm", {"items": [second]}),
         reconciliation_client=FakeClient("reconciler", {"items": [
-            review(source=first, label="5#1", resolution="visual_resolution")]}),
+            review(source=first, label="5#1", resolution="visual_resolution",
+                   observation_issue_reviews=acknowledge_notes({"primary": first, "secondary": second}))]}),
         visual_client=FakeClient("astra", {"items": [item("5#1", stem_text=first["stem_text"], answer_text="4", options=[])]}))
     result = flow.recognize(images=(picture(),))
     assert len(result.data["items"]) == 1
@@ -166,7 +167,8 @@ def test_semantic_pairing_cannot_release_chinese_condition_conflict_without_read
     assert row["recognition_status"] == "needs_revision"
     assert "stem_disagreement" in row["assessment"]["verification"]["reason_codes"]
     assert [call["stage"] for call in result.data["multimodel_audit"]["calls"]] == [
-        "primary", "secondary", "semantic_alignment", "reconciliation", "visual_readback"]
+        "primary", "secondary", "semantic_alignment", "visual_readback"]
+    assert len(flow.reconciliation_client.calls) == 1  # pairing only; unreadable has no adjudication
 
 
 def test_semantic_pairing_failure_preserves_both_unmatched_observations():

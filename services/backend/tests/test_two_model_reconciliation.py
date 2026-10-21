@@ -1,18 +1,42 @@
 """Batch integration: blind observations stay immutable and review is scoped."""
 
 import json
+from copy import deepcopy
 from threading import Barrier
 
 import pytest
 
-from test_reconciliation import review
+from test_reconciliation import review, acknowledge_notes
 from test_two_model_pipeline import correct
 from test_whole_page_pipeline import FakeClient, picture
 from xueban_backend.providers.ark import Attempt, ProviderError
 from xueban_backend.providers.two_model import TwoModelWholePagePipeline
 
 
+def stage_call(result, stage):
+    matched = [call for call in result.data["multimodel_audit"]["calls"] if call["stage"] == stage]
+    assert len(matched) == 1
+    return matched[0]
+
+
+def target_application(result, stage, label="1"):
+    matched = [application for application in stage_call(result, stage).get("applications", [])
+               if application["label"] == label]
+    assert len(matched) == 1
+    return matched[0]
+
+
 def pipeline(primary, secondary, output):
+    if isinstance(output, dict) or callable(output):
+        original_output = output
+        def reviewed(request):
+            result = original_output(request) if callable(original_output) else deepcopy(original_output)
+            targets = {target["label"]: target for target in json.loads(request["text"])["task_input"]["items"]}
+            for item in result.get("items", []):
+                if item.get("label") in targets:
+                    item.setdefault("observation_issue_reviews", acknowledge_notes(targets[item["label"]]))
+            return result
+        output = reviewed
     return TwoModelWholePagePipeline(
         FakeClient("deepseek", {"items": primary}),
         FakeClient("astra", {"items": secondary}),
@@ -47,8 +71,8 @@ def test_one_batch_review_only_for_conflicts_keeps_both_blind_reads_and_private_
         assert json.loads(independent.calls[0]["text"])["task_input"] == {}
     audit = result.data["multimodel_audit"]["calls"]
     assert audit[0]["items"] == first and audit[1]["items"] == second
-    assert audit[2]["applications"][0]["original_reason_codes"] == ["stem_disagreement"]
-    resolved = [application for application in audit[2]["applications"] if application["resolved"]]
+    assert target_application(result, "visual_adjudication", "1")["original_reason_codes"] == ["stem_disagreement"]
+    resolved = [application for application in stage_call(result, "visual_adjudication")["applications"] if application["resolved"]]
     assert len(resolved) == 2
     assert all(application["resolved_reason_codes"] == ["semantic_review_equivalent"] for application in resolved)
     assert len(result.metadata.attempts) == 4
@@ -87,8 +111,9 @@ def test_review_timeout_is_audited_not_retried_and_not_called_image_blur():
     assert row["assessment"]["verification"]["reason_codes"] == ["stem_disagreement", "reconciliation_unavailable"]
     assert "服务暂未完成" in row["assessment"]["basis_summary"]
     assert len(flow.reconciliation_client.calls) == 1
-    assert [a.code for a in result.metadata.attempts] == ["ok", "ok", "deadline_exceeded", "ok"]
-    assert len(flow.visual_client.calls) == 1  # Began alongside review; no paid retry.
+    assert sorted(a.code for a in result.metadata.attempts) == ["deadline_exceeded", "ok", "ok", "ok"]
+    assert stage_call(result, "visual_adjudication")["code"] == "deadline_exceeded"
+    assert len(flow.visual_client.calls) == 1  # Finished before review; no paid retry.
     assert result.metadata.usage is None
 
 
@@ -100,7 +125,8 @@ def test_review_timeout_is_audited_not_retried_and_not_called_image_blur():
 def test_invalid_review_cannot_release_conflict_and_keeps_paid_attempt(output):
     result = pipeline([correct()], [different_stem()], output).recognize(images=(picture(),))
     assert result.data["items"][0]["assessment"]["verdict"] == "unable_to_judge"
-    assert result.metadata.attempts[2].code == "invalid_output"
+    assert sum(a.code == "invalid_output" for a in result.metadata.attempts) == 1
+    assert stage_call(result, "visual_adjudication")["code"] == "invalid_output"
 
 
 def test_review_missing_one_item_leaves_only_that_item_pending():
@@ -117,7 +143,8 @@ def test_review_cannot_echo_another_clients_secret_into_audit():
     flow.reconciliation_client.output = {"items": [review(visual_evidence=flow.client.settings.api_key)]}
     result = flow.recognize(images=(picture(),))
     assert flow.client.settings.api_key not in str(result.data)
-    assert result.metadata.attempts[2].code == "provider_credential_echo"
+    assert sum(a.code == "provider_credential_echo" for a in result.metadata.attempts) == 1
+    assert stage_call(result, "visual_adjudication")["code"] == "provider_credential_echo"
 
 
 def test_visual_resolution_keeps_selected_original_student_answer_and_changes_judgment():
@@ -195,7 +222,7 @@ def test_inferred_overwritten_step_is_not_released_by_original_candidate_selecti
     assert row["assessment"]["verdict"] == "unable_to_judge"
     assert row["assessment"]["knowledge_points"] == []
     assert row["recognition_status"] == "needs_revision"
-    application = result.data["multimodel_audit"]["calls"][2]["applications"][0]
+    application = target_application(result, "visual_adjudication")
     assert application["rejection_code"] == "inferred_student_transcription"
 
 
@@ -223,7 +250,7 @@ def test_missing_stems_stay_pending_even_if_visual_reviewer_claims_correct():
     assert row["assessment"]["verdict"] == "unable_to_judge"
     assert row["recognition_status"] == "needs_revision"
     assert row["assessment"]["knowledge_points"] == []
-    assert result.data["multimodel_audit"]["calls"][2]["applications"][0]["rejection_code"] == "visual_question_missing"
+    assert target_application(result, "visual_readback")["rejection_code"] == "visual_question_missing"
 
 
 @pytest.mark.parametrize("label,text", [("3(2)", "1/2ah"), ("3(8)", "0.8a")])
@@ -245,19 +272,27 @@ def test_many_source_uncertainties_are_bounded_publicly_without_losing_private_a
     second = [correct("1", uncertainties=[f"复读疑点{i}" for i in range(19)]), correct("2")]
     unresolved = review(resolution="unresolved", answer_clear=False, unresolved_cause="visual_unreadable",
                         remaining_uncertainties=["复核仍无法读清"])
-    result = pipeline(first, second, {"items": [unresolved]}).recognize(images=(picture(),))
+    flow = pipeline(first, second, {"items": [unresolved]})
+    flow.visual_client.output = {"items": [{key: value for key, value in first[0].items()
+        if key in {"label", "stem_text", "answer_text", "answer_status", "options"}}
+        | {"uncertainties": ["盲读仍无法读清"]}]}
+    result = flow.recognize(images=(picture(),))
     a, b = result.data["items"]
     assert len(a["uncertainties"]) == 20
     assert len(a["assessment"]["uncertainties"]) == 20
     assert len(set(a["uncertainties"])) == 20
     assert a["uncertainties"][0] == a["assessment"]["basis_summary"]
-    assert "复核仍无法读清" in a["uncertainties"]
+    assert "盲读仍无法读清" in a["uncertainties"]
+    assert len(flow.reconciliation_client.calls) == 1  # classify present-status free-form notes once
     assert b["assessment"]["verdict"] == "correct" and b["uncertainties"] == []
     calls = result.data["multimodel_audit"]["calls"]
     assert calls[0]["items"][0]["uncertainties"] == first[0]["uncertainties"]
     assert calls[1]["items"][0]["uncertainties"] == second[0]["uncertainties"]
-    assert calls[2]["items"][0]["remaining_uncertainties"] == ["复核仍无法读清"]
-    assert calls[2]["applications"][0]["original_reason_codes"] == ["uncertain_observation"]
+    assert stage_call(result, "visual_readback")["items"][0]["uncertainties"] == ["盲读仍无法读清"]
+    application = target_application(result, "visual_adjudication")
+    assert application["original_reason_codes"] == ["uncertain_observation"]
+    assert len(application["observation_issue_review"]["entries"]) == 39
+    assert not application["resolved"]
     # The same cap must hold before any optional review, not only afterwards.
     direct = TwoModelWholePagePipeline(FakeClient("deepseek", {"items": first}),
                                       FakeClient("astra", {"items": second}))

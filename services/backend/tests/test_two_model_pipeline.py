@@ -272,3 +272,57 @@ def test_factory_selects_two_model_without_breaking_existing_modes():
         assert pipeline.review_client.settings.timeout_seconds == 118
         assert pipeline.review_client.settings.total_timeout_seconds == 118
         assert pipeline.client.settings.max_attempts == pipeline.review_client.settings.max_attempts == 1
+
+
+def test_duplicate_target_failure_keeps_a_fixed_private_diagnostic_and_usage():
+    from test_whole_page_pipeline import FakeClient, picture
+    client = FakeClient("synthetic-reader", {"items": [correct("1"), correct("1")]})
+    pipeline = TwoModelWholePagePipeline(client, client)
+    call = pipeline._read_and_judge(client, picture(), "primary")
+    assert call["code"] == "invalid_output"
+    assert call["items"] == {}
+    attempt = call["metadata"].attempts[0]
+    assert attempt.usage.total_tokens == 30
+    assert attempt.diagnostic.rule == "duplicate_target_label"
+    assert attempt.diagnostic.path == ("items", 1, "label")
+
+
+def test_one_inconsistent_answer_status_does_not_discard_other_page_results():
+    from test_whole_page_pipeline import FakeClient, picture
+    first = FakeClient("first-reader", {"items": [
+        correct("1", answer_text=None, answer_status="present"), correct("2")]})
+    second = FakeClient("second-reader", {"items": [correct("1"), correct("2")]})
+    pipeline = TwoModelWholePagePipeline(first, second)
+    result = pipeline.recognize(images=(picture(),))
+    rows = {row["label"]: row for row in result.data["items"]}
+    assert rows["1"]["assessment"]["verdict"] == "unable_to_judge"
+    assert rows["2"]["assessment"]["verdict"] == "correct"
+    call = result.data["multimodel_audit"]["calls"][0]
+    assert call["code"] == "ok"
+    assert call["raw_items"][0]["answer_status"] == "present"
+    assert call["items"][0]["answer_status"] == "unclear"
+    assert call["observation_normalizations"] == [{"label": "1", "code": "answer_status_mismatch"}]
+
+
+def test_blank_empty_string_is_only_a_representation_change_and_raw_is_retained():
+    from test_whole_page_pipeline import FakeClient, picture
+    client = FakeClient("synthetic-reader", {"items": [correct(
+        answer_text=" \n", answer_status="blank", verdict="unanswered")]})
+    pipeline = TwoModelWholePagePipeline(client, client)
+    call = pipeline._read_and_judge(client, picture(), "primary")
+    assert call["code"] == "ok"
+    assert call["items"]["1"]["answer_text"] is None
+    assert call["items"]["1"]["answer_status"] == "blank"
+    assert call["raw_items"][0]["answer_text"] == " \n"
+    assert call["observation_normalizations"] == [{"label": "1", "code": "empty_blank_to_null"}]
+
+
+def test_blank_label_with_real_text_never_erases_the_text_or_becomes_unanswered():
+    from test_whole_page_pipeline import FakeClient, picture
+    client = FakeClient("synthetic-reader", {"items": [correct(
+        answer_text="-4", answer_status="blank", verdict="unanswered")]})
+    pipeline = TwoModelWholePagePipeline(client, client)
+    call = pipeline._read_and_judge(client, picture(), "primary")
+    assert call["items"]["1"]["answer_text"] == "-4"
+    assert call["items"]["1"]["answer_status"] == "unclear"
+    assert call["items"]["1"]["uncertainties"]

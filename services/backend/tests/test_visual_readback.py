@@ -1,11 +1,11 @@
 """Selective blind vision gate for material handwriting disagreements."""
 
 import json
-from threading import Barrier
+from threading import Event
 
 import pytest
 
-from test_reconciliation import review
+from test_reconciliation import review, identity_evidence, acknowledge_notes
 from test_two_model_pipeline import correct
 from test_whole_page_pipeline import FakeClient, item as base_item, picture
 
@@ -29,10 +29,31 @@ def setup(*, observation=None, review_output=None):
     )
 
 
-def test_blind_visual_read_runs_with_reconciliation_and_can_confirm_only_an_archived_answer():
+def stage_call(calls, stage):
+    matched = [call for call in calls if call["stage"] == stage]
+    assert len(matched) == 1
+    return matched[0]
+
+
+def target_application(calls, label):
+    matched = [application for call in calls for application in call.get("applications", [])
+               if application["label"] == label]
+    assert len(matched) == 1
+    return matched[0]
+
+
+def test_blind_visual_read_precedes_one_review_and_can_confirm_only_an_archived_answer():
     flow = setup()
-    barrier = Barrier(2)
-    flow.reconciliation_client.barrier = flow.visual_client.barrier = barrier
+    read_finished = Event()
+    observed, proposal = flow.visual_client.output, flow.reconciliation_client.output
+    def read(request):
+        read_finished.set()
+        return observed
+    def adjudicate(request):
+        assert read_finished.is_set()
+        assert "visual" in json.loads(request["text"])["task_input"]["items"][0]
+        return proposal
+    flow.visual_client.output, flow.reconciliation_client.output = read, adjudicate
     result = flow.recognize(images=(picture(),))
     row = result.data["items"][0]
     assert row["assessment"]["verdict"] == "incorrect"
@@ -47,12 +68,12 @@ def test_blind_visual_read_runs_with_reconciliation_and_can_confirm_only_an_arch
     assert "12x" not in request["text"] and "2a+10" not in request["text"]
     assert len(flow.reconciliation_client.calls) == len(flow.visual_client.calls) == 1
     calls = result.data["multimodel_audit"]["calls"]
-    assert [call["stage"] for call in calls] == ["primary", "secondary", "reconciliation", "visual_readback"]
-    application = calls[2]["applications"][0]
+    assert [call["stage"] for call in calls] == ["primary", "secondary", "visual_readback", "visual_adjudication"]
+    application = target_application(calls, "1")
     assert application["resolved_source"] == "secondary"
     assert application["visual_readback_required"] is True
-    assert calls[2]["items"][0]["selected_source"] == "secondary"  # exact source pointer is kept
-    assert "verdict" not in calls[3]["items"][0]
+    assert stage_call(calls, "visual_adjudication")["items"][0]["selected_source"] == "secondary"  # exact source pointer is kept
+    assert "verdict" not in stage_call(calls, "visual_readback")["items"][0]
     assert len(result.metadata.attempts) == 4
 
 
@@ -69,7 +90,7 @@ def test_reviewer_clear_claim_cannot_override_blind_readback(observation, reason
     assert row["recognition_status"] == "needs_revision"
     assert row["assessment"]["verdict"] == "unable_to_judge"
     assert row["assessment"]["knowledge_points"] == []
-    application = result.data["multimodel_audit"]["calls"][2]["applications"][0]
+    application = target_application(result.data["multimodel_audit"]["calls"], row["label"])
     assert application["rejection_code"] == reason
     if reason == "visual_reading_unclear":
         assert "visual_unreadable" in row["assessment"]["verification"]["reason_codes"]
@@ -91,7 +112,11 @@ def test_typographic_judgment_conflict_does_not_request_visual_and_failure_is_lo
     flow = setup(observation=ProviderError("deadline_exceeded"))
     flow.client.output["items"].append(correct("2"))
     flow.review_client.output["items"].append(correct("2", stem_text="计算(-2)^2", verdict="incorrect"))
-    flow.reconciliation_client.output["items"].append(review(label="2"))
+    proposals = [*flow.reconciliation_client.output["items"], review(label="2")]
+    def respond(request):
+        labels = {target["label"] for target in json.loads(request["text"])["task_input"]["items"]}
+        return {"items": [proposal for proposal in proposals if proposal["label"] in labels]}
+    flow.reconciliation_client.output = respond
     rows = flow.recognize(images=(picture(),)).data["items"]
     assert json.loads(flow.visual_client.calls[0]["text"])["task_input"]["labels"] == ["1"]
     assert rows[0]["assessment"]["verdict"] == "unable_to_judge"
@@ -127,7 +152,12 @@ def test_visual_model_cannot_echo_other_provider_secret():
 
 
 def test_clear_visual_stem_can_be_paraphrased_and_math_typography_is_not_arithmetic():
-    flow = setup(observation={"items": [item(stem_text="该题要求写本月收入", answer_text="12x")]})
+    flow = setup(observation={"items": [item(
+        stem_text="本月收入比上月a元的两倍多10元，写出本月收入。", answer_text="12x",
+        visible_locator={"printed_label": "1", "page_zone": "middle"})]})
+    for client in (flow.client, flow.review_client):
+        client.output["items"][0].update(stem_text="上月收入a元，本月比上月的2倍多10元，写本月收入。",
+                                          visible_locator={"printed_label": "1", "page_zone": "middle"})
     source = flow.visual_client.output["items"][0]
     first = flow.reconciliation_client.output
     def adjudicate(request):
@@ -135,10 +165,11 @@ def test_clear_visual_stem_can_be_paraphrased_and_math_typography_is_not_arithme
         if "visual" not in target:
             return first
         return {"items": [review(source=source, selected_source="visual", resolution="visual_resolution",
-                                verdict="incorrect", correct_answer="2a+10", correction_method="列式。")]}
+                                verdict="incorrect", correct_answer="2a+10", correction_method="列式。",
+                                target_identity=identity_evidence(target["primary"], source))]}
     flow.reconciliation_client.output = adjudicate
     assert flow.recognize(images=(picture(),)).data["items"][0]["assessment"]["verdict"] == "incorrect"
-    assert len(flow.reconciliation_client.calls) == 2
+    assert len(flow.reconciliation_client.calls) == 1
     flow = setup(observation={"items": [item(answer_text="6x+6x")]})
     assert flow.recognize(images=(picture(),)).data["items"][0]["assessment"]["verdict"] == "unable_to_judge"
 
@@ -169,6 +200,7 @@ def test_independent_unicode_half_matches_written_fraction_coefficient_without_a
         FakeClient("deepseek", {"items": [primary]}), FakeClient("glm", {"items": [secondary]}),
         reconciliation_client=FakeClient("reconciler", {"items": [review(
             resolution="visual_resolution", answer_text="1/2ah",
+            observation_issue_reviews=acknowledge_notes({"primary": primary, "secondary": secondary}),
             visual_evidence="当前可见分数二分之一，右侧依次是a、h，字迹可读。")]}),
         visual_client=FakeClient("astra", {"items": [item(answer_text="½ah")]}))
     row = flow.recognize(images=(picture(),)).data["items"][0]
@@ -182,10 +214,12 @@ def test_same_wrong_pinyin_read_is_rechecked_and_can_use_archived_blind_options(
     first = correct(subject="语文", question_type="single_choice",
                     stem_text="下列加点字注音有误的一项是", answer_text="C",
                     options=[{"label": "C", "text": "翘首(qiào)"},
-                             {"label": "D", "text": "深恶痛疾(wù)"}])
+                             {"label": "D", "text": "深恶痛疾(wù)"}],
+                    visible_locator={"printed_label": "1", "page_zone": "middle"})
     blind = item(stem_text=first["stem_text"], answer_text="C",
                  options=[{"label": "C", "text": "翘首(qiáo)"},
-                          {"label": "D", "text": "深恶痛疾(wū)"}])
+                          {"label": "D", "text": "深恶痛疾(wū)"}],
+                 visible_locator={"printed_label": "1", "page_zone": "middle"})
     def adjudicate(request):
         target = json.loads(request["text"])["task_input"]["items"][0]
         if "visual" not in target:
@@ -193,6 +227,7 @@ def test_same_wrong_pinyin_read_is_rechecked_and_can_use_archived_blind_options(
         assert target["visual"] == blind
         return {"items": [review(source=blind, selected_source="visual",
             resolution="visual_resolution", verdict="incorrect",
+            target_identity=identity_evidence(target["primary"], blind),
             correct_answer="D", correction_method="深恶痛疾的恶读wù，图上D印的是wū。",
             visual_evidence="C的翘为二声，D的恶上方是平直的一声横线。")]}
     flow = TwoModelWholePagePipeline(
@@ -207,17 +242,27 @@ def test_same_wrong_pinyin_read_is_rechecked_and_can_use_archived_blind_options(
     assert row["answer_text"] == "C" and row["options"] == blind["options"]
     calls = result.data["multimodel_audit"]["calls"]
     assert [call["stage"] for call in calls] == [
-        "primary", "secondary", "reconciliation", "visual_readback", "critical_readback", "visual_reconciliation"]
-    assert calls[0]["items"][0]["options"] == first["options"]
-    assert calls[2]["applications"][0]["rejection_code"] == "independent_condition_disagreement"
-    assert calls[-1]["applications"][0]["resolved_source"] == "visual"
-    assert len(flow.visual_client.calls) == 1 and len(flow.reconciliation_client.calls) == 2
+        "primary", "secondary", "visual_readback", "critical_readback", "visual_adjudication"]
+    assert stage_call(calls, "primary")["items"][0]["options"] == first["options"]
+    assert stage_call(calls, "visual_readback")["items"][0]["options"] == blind["options"]
+    assert stage_call(calls, "critical_readback")["items"][0]["options"] == blind["options"]
+    assert target_application(calls, "1")["resolved_source"] == "visual"
+    assert len(flow.visual_client.calls) == 1 and len(flow.reconciliation_client.calls) == 1
     assert "C" not in json.loads(flow.visual_client.calls[0]["text"])["task_input"]
     assert len(flow.review_client.calls) == 2
     critical_request = flow.review_client.calls[1]
     assert critical_request["role"] == "recognition"
     assert json.loads(critical_request["text"])["task_input"]["labels"] == ["1"]
     assert "qiáo" not in critical_request["text"] and "wū" not in critical_request["text"]
+
+    # Even after both readers finish, a reviewer selecting the old printed
+    # tones still cannot pass. Keep the old mismatch safety assertion without
+    # making that knowingly unusable candidate an extra production request.
+    flow.reconciliation_client.output = {"items": [review(source=first)]}
+    blocked = flow.recognize(images=(picture(),))
+    assert blocked.data["items"][0]["recognition_status"] == "needs_revision"
+    assert blocked.data["items"][0]["assessment"]["knowledge_points"] == []
+    assert target_application(blocked.data["multimodel_audit"]["calls"], "1")["rejection_code"] == "independent_condition_disagreement"
 
 
 @pytest.mark.parametrize("other_change,code", [
@@ -281,8 +326,9 @@ def test_pending_display_uses_archived_unclear_reading_not_completed_judge_arith
     assert row["assessment"]["knowledge_points"] == []
     calls = result.data["multimodel_audit"]["calls"]
     assert calls[0]["items"][0]["answer_text"] == "36+36+9=81"
-    assert calls[3]["items"][0] == blind
-    assert calls[2]["applications"][0]["pending_display_source_id"].startswith("visual:")
+    assert stage_call(calls, "visual_readback")["items"][0] == blind
+    assert target_application(calls, "5#1")["pending_display_source_id"].startswith("visual:")
+    assert not flow.reconciliation_client.calls
 
 
 def test_unclear_reader_of_a_different_question_withholds_unreliable_pending_transcript():
@@ -294,7 +340,7 @@ def test_unclear_reader_of_a_different_question_withholds_unreliable_pending_tra
     assert row["stem_text"] == "计算(-2)²。"
     assert row["recognition_status"] == "needs_revision"
     assert row["assessment"]["knowledge_points"] == []
-    application = result.data["multimodel_audit"]["calls"][2]["applications"][0]
+    application = target_application(result.data["multimodel_audit"]["calls"], row["label"])
     assert application["pending_display_action"] == "withhold_unbound_transcription"
     assert "pending_display_source_id" not in application
 
@@ -322,21 +368,24 @@ def test_shared_two_target_context_does_not_keep_invented_middle_value_public():
     assert row["assessment"]["knowledge_points"] == []
     calls = result.data["multimodel_audit"]["calls"]
     assert calls[0]["items"][0] == first
-    assert calls[3]["items"][0] == blind
-    assert len(calls) == 4  # unclear reading does not start another paid review
+    assert stage_call(calls, "visual_readback")["items"][0] == blind
+    assert len(calls) == 3  # unclear reading starts no paid adjudication
+    assert not flow.reconciliation_client.calls
 
 
 def test_visual_condition_change_drops_old_judges_knowledge_tags():
-    first = correct(stem_text="计算2^3", answer_text="5", verdict="incorrect", correct_answer="8")
+    first = correct(stem_text="计算2^3", answer_text="5", verdict="incorrect", correct_answer="8",
+                    visible_locator={"printed_label": "1", "page_zone": "middle"})
     second = {**first, "stem_text": "计算2^2", "correct_answer": "4"}
-    blind = item(stem_text="计算2×3", answer_text="5")
+    blind = item(stem_text="计算2×3", answer_text="5", visible_locator={"printed_label": "1", "page_zone": "middle"})
     def respond(request):
         target = json.loads(request["text"])["task_input"]["items"][0]
         if "visual" not in target:
             return {"items": [review(source=first, resolution="visual_resolution",
                                     verdict="incorrect", correct_answer="8", correction_method="算乘方。")]}
         return {"items": [review(source=blind, selected_source="visual", resolution="visual_resolution",
-                                verdict="incorrect", correct_answer="6", correction_method="计算两个数的乘积。")]}
+                                verdict="incorrect", correct_answer="6", correction_method="计算两个数的乘积。",
+                                target_identity=identity_evidence(target["primary"], blind))]}
     flow = TwoModelWholePagePipeline(
         FakeClient("a", {"items": [first]}), FakeClient("b", {"items": [second]}),
         reconciliation_client=FakeClient("reviewer", respond),

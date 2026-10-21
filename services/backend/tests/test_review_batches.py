@@ -33,7 +33,8 @@ def test_large_page_reviews_are_bounded_and_one_failed_batch_does_not_poison_the
     assert all(rows[str(n)]["assessment"]["verdict"] == "correct" for n in [*range(1, 7), 13, 14, 15])
     assert all(rows[str(n)]["assessment"]["verdict"] == "unable_to_judge" for n in range(7, 13))
     calls = result.data["multimodel_audit"]["calls"]
-    batches = [call for call in calls if call["stage"] == "reconciliation"]
+    batches = sorted((call for call in calls if call["stage"] == "visual_adjudication"),
+                     key=lambda call: call["batch_index"])
     assert [call["target_labels"] for call in batches] == [
         [str(n) for n in range(1, 7)], [str(n) for n in range(7, 13)], ["13", "14", "15"]]
     assert [call["code"] for call in batches] == ["ok", "incomplete_output", "ok"]

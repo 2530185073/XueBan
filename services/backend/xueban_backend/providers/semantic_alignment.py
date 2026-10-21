@@ -11,6 +11,7 @@ from collections.abc import Mapping
 import re
 
 from .correction_pipeline import _object, _text
+from . import question_units
 from .reconciliation import _critical_literals, has_unreadable_marker, source_id
 from .whole_page import normalize_literal_math, normalize_page_stem
 
@@ -96,14 +97,17 @@ def _index(primary, secondary):
     return indexed
 
 
-def build_alignment_input(primary, secondary):
+def build_alignment_input(primary, secondary, *, target_unit="answer_slot"):
     """Return minimal task_input. Pass the original photo separately as image.
 
     The id hashes the complete archived observation, but no answer-bearing
     field, correction, knowledge tag or provider rationale is sent here.
     """
     indexed = _index(primary, secondary)
+    question_units.validate_unit(target_unit)
     result = {"primary": [], "secondary": []}
+    if target_unit == question_units.QUESTION_UNIT:
+        result["target_unit"] = target_unit
     for identity, entry in indexed.items():
         source = entry["source"]
         result[entry["role"]].append({
@@ -112,7 +116,11 @@ def build_alignment_input(primary, secondary):
             "stem_text": source.get("stem_text"),
             "options": deepcopy(source.get("options") or []),
             "slot_hint": _slot_hint(source),
-            "visible_blank_count": _blank_count(source),
+            "visible_blank_count": (source.get("blank_count") if target_unit == question_units.QUESTION_UNIT
+                                    else _blank_count(source)),
+            **({key: deepcopy(source.get(key)) for key in
+                ("target_unit", "unit_complete", "target_context", "source_asset_id")}
+               if target_unit == question_units.QUESTION_UNIT else {}),
         })
     return result
 
@@ -139,7 +147,9 @@ def _options(source):
                   for option in (source.get("options") or []))
 
 
-def _needs_split(source):
+def _needs_split(source, target_unit="answer_slot"):
+    if target_unit == question_units.QUESTION_UNIT:
+        return False  # multiple blanks are not multiple independent questions
     return _blank_count(source) > 1 and _slot_hint(source) is None
 
 
@@ -151,13 +161,14 @@ def _printed_literals(source):
     return _critical_literals(text)
 
 
-def evaluate_alignment(result, primary, secondary):
+def evaluate_alignment(result, primary, secondary, *, target_unit="answer_slot"):
     """Validate each proposal locally; original labels and records never change.
 
     Structural checks can reject unsafe proposals, not prove a model's semantic
     claim. The caller must send every accepted pair through normal observation
     comparison and reconciliation before producing a learning conclusion.
     """
+    question_units.validate_unit(target_unit)
     indexed = _index(primary, secondary)
     pairs = result.get("pairs", [])
     endpoints = Counter(identity for pair in pairs for identity in (
@@ -181,7 +192,7 @@ def evaluate_alignment(result, primary, secondary):
         split_ids.add(identity)
         splits.append(deepcopy(proposal))
     for identity, entry in indexed.items():
-        if _needs_split(entry["source"]) and identity not in split_ids:
+        if _needs_split(entry["source"], target_unit) and identity not in split_ids:
             split_ids.add(identity)
             splits.append({
                 "source_id": identity, "target_count": _blank_count(entry["source"]),
@@ -221,6 +232,12 @@ def evaluate_alignment(result, primary, secondary):
             reject("split_required")
             continue
         a, b = indexed[a_id]["source"], indexed[b_id]["source"]
+        if target_unit == question_units.QUESTION_UNIT and (
+                question_units.source_unit(a) != target_unit
+                or question_units.source_unit(b) != target_unit
+                or not question_units.same_unit_identity(a, b)):
+            reject("target_unit_mismatch")
+            continue
         if (any(value is not None and type(value) is not int
                 for value in (pair.get("primary_slot"), pair.get("secondary_slot")))
                 or pair.get("primary_slot") != _slot_hint(a) or pair.get("secondary_slot") != _slot_hint(b)):
@@ -284,5 +301,5 @@ def evaluate_alignment(result, primary, secondary):
         "split_required": splits,
         "unmatched_source_ids": [identity for identity in indexed if identity not in used | split_ids],
         "audit": {"protocol_version": 1, "input_source_ids": list(indexed),
-                  "pairing_only": True, "independent_judgments_added": 0},
+                  "pairing_only": True, "independent_judgments_added": 0, "target_unit": target_unit},
     }

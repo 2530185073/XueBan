@@ -32,6 +32,8 @@ from .curriculum_catalog import (canonical_subject, graph_is_usable, node_matche
 from .layout_repair import apply_repair, recognize_replacements
 from .models import Homework, Student
 from .providers import ProviderError
+from . import recognition_recheck
+from .providers import question_units
 from .providers.correction_pipeline import CorrectionPipeline, PipelineImage, normalize_field_for_comparison
 
 
@@ -62,6 +64,13 @@ class CorrectionWorker:
             task = session.scalar(select(Task).where(eligible).order_by(Task.available_at, Task.id).with_for_update(skip_locked=True).limit(1))
             if task is None:
                 return None
+            if task.kind == recognition_recheck.KIND and (task.audit or {}).get("recheck_dispatched"):
+                set_task(session, self.contracts, task, "failed", failure={"code": "worker_failure", "message": "上次原图核对执行已中断，调用结果未知；不会自动再次调用。", "retryable": False})
+                recognition_recheck.record_outcome(task, "execution_unknown")
+                task.lease_token = None
+                task.lease_expires_at = None
+                session.commit()
+                return None
             if task.tries >= 3:
                 set_task(session, self.contracts, task, "failed", failure={"code": "worker_failure", "message": "任务中断次数已达到上限，请老师核实后重新提交。", "retryable": False})
                 task.lease_token = None
@@ -78,7 +87,7 @@ class CorrectionWorker:
             task.tries += 1
             set_task(session, self.contracts, task, "running")
             ledger = deepcopy(task.audit or {"executions": []})
-            ledger["executions"].append({"number": task.tries, "started_at": iso(timestamp), "charge_status": "unknown", "outcome": "started"})
+            ledger["executions"].append({"number": task.tries, "started_at": iso(timestamp), "charge_status": "unknown", "outcome": "started", **({"lease_digest": recognition_recheck.lease_digest(token)} if task.kind == recognition_recheck.KIND else {})})
             task.audit = ledger
             session.commit()
             return task.id, token
@@ -97,6 +106,17 @@ class CorrectionWorker:
                 return task.kind, {"assets": assets, "replacements": task.inputs["replacements"]}
             images = tuple(PipelineImage(a.id, "data:" + a.document["mime_type"] + ";base64," + base64.b64encode(self.store.read(a.id, a.document)).decode(), a.document["width"], a.document["height"]) for a in assets)
             context = {"images": images}
+            if task.kind == "recognize_attempt" and getattr(self.pipeline, "supports_target_unit", False):
+                original = get_entity(session, task.inputs["question_id"], "question")
+                context["target_unit"] = question_units.stored_unit(original.annotations)
+            if task.kind == recognition_recheck.KIND:
+                case = get_entity(session, task.inputs["case_id"], "case")
+                question = get_entity(session, task.inputs["question_id"], "question")
+                attempt = get_entity(session, task.inputs["attempt_id"], "attempt")
+                if not recognition_recheck.current(session, task, case, question, attempt):
+                    raise Problem(409, "conflict", "stale_input", "输入版本已失效。")
+                context.update(question=recognition_recheck.target_document(question),
+                               attempt=deepcopy(attempt.document), input_versions=deepcopy(task.inputs["input_versions"]))
             if task.kind in {"check", "hint"}:
                 case = get_entity(session, task.inputs["case_id"], "case")
                 versions = task.inputs["input_versions"]
@@ -111,6 +131,12 @@ class CorrectionWorker:
                         and attempt.annotations.get("slots_question_revision") == question.revision):
                     attempt_input["answer_slots"] = deepcopy(attempt.annotations.get("answer_slots", []))
                 question_input = deepcopy(question.document)
+                if getattr(self.pipeline, "supports_target_unit", False):
+                    annotations = question.annotations or {}
+                    question_input["target_unit"] = question_units.stored_unit(annotations)
+                    for key in ("target_context", "unit_complete"):
+                        if key in annotations:
+                            question_input[key] = deepcopy(annotations[key])
                 if question.annotations and question.annotations.get("subject_override"):
                     question_input["subject"] = question.annotations["subject_override"]
                 if question.annotations and question.annotations.get("label"):
@@ -171,6 +197,8 @@ class CorrectionWorker:
 
     def _current(self, session, task, case, question, attempt):
         versions = task.inputs["input_versions"]
+        if task.inputs.get("recovery_epoch", 0) != recognition_recheck.epoch(case):
+            return False
         if case.document["lifecycle"] != "active" or case.document["current_attempt_id"] != attempt.id or question.revision != versions["question_revision"] or attempt.document["recognition_revision"] != versions["attempt_recognition_revision"]:
             return False
         assets = assets_for(session, task.homework_id, task.inputs["asset_ids"])
@@ -231,6 +259,13 @@ class CorrectionWorker:
             with self._keep_lease(identifier, token):
                 if kind in {"recognize_homework", "recognize_attempt"}:
                     result = self.pipeline.recognize(**context)
+                elif kind == recognition_recheck.KIND:
+                    method = getattr(self.pipeline, "rerecognize_original", None)
+                    if method is None:
+                        raise ProviderError("unsupported_original_recheck")
+                    if not self._dispatch_original_recheck(identifier, token):
+                        raise Problem(409, "conflict", "stale_input", "原图核对已派发或输入失效。")
+                    result = method(**context)
                 elif kind == "check":
                     method = self.pipeline.recheck if context["attempt"]["parent_attempt_id"] is not None else self.pipeline.check
                     result = method(**context)
@@ -252,15 +287,73 @@ class CorrectionWorker:
             self.finish(identifier, token, error=ProviderError("worker_failure"), result=result)
         return True
 
+    def _dispatch_original_recheck(self, identifier, token):
+        """Reserve the one external execution durably before making any call."""
+        with Session(self.engine) as session:
+            task = session.scalar(select(Task).where(Task.id == identifier).with_for_update())
+            if task is None or task.kind != recognition_recheck.KIND or task.status != "running" or task.lease_token != token:
+                return False
+            homework = session.scalar(select(Homework).where(Homework.id == task.homework_id).with_for_update())
+            student = session.get(Student, homework.student_id)
+            if homework.processing_blocked or student is None or not student.active:
+                return False
+            case = get_entity(session, task.inputs["case_id"], "case")
+            question = get_entity(session, task.inputs["question_id"], "question")
+            attempt = get_entity(session, task.inputs["attempt_id"], "attempt")
+            if (task.audit or {}).get("recheck_dispatched") or not recognition_recheck.current(session, task, case, question, attempt):
+                return False
+            ledger = deepcopy(task.audit or {})
+            ledger["recheck_dispatched"] = True
+            ledger["dispatched_at"] = iso()
+            ledger["executions"][-1]["dispatched"] = True
+            # Conditional update fences SQLite, whose FOR UPDATE is a no-op.
+            changed = session.execute(update(Task).where(Task.id == task.id, Task.revision == task.revision,
+                Task.lease_token == token, Task.status == "running", Task.lease_expires_at > now())
+                .values(audit=ledger, revision=task.revision + 1,
+                        document={**task.document, "revision": task.revision + 1, "updated_at": iso()})
+                .execution_options(synchronize_session=False))
+            if changed.rowcount != 1:
+                return False
+            session.commit()
+            return True
+
+    def _late_original_recheck(self, session, task, token, result, error):
+        """A timed-out owner may report billing evidence, never business records."""
+        if task is None or task.kind != recognition_recheck.KIND:
+            return False
+        ledger = deepcopy(task.audit or {})
+        execution = next((row for row in ledger.get("executions", [])
+                          if row.get("lease_digest") == recognition_recheck.lease_digest(token)), None)
+        if (execution is None or "late_return" in execution or not execution.get("dispatched")
+                or task.status in {"succeeded", "superseded", "cancelled"}
+                or task.status == "failed" and ledger.get("recovery_outcome") != "execution_unknown"):
+            return False
+        evidence = {"recorded_at": iso(), "applied": False}
+        if result is not None:
+            evidence.update(metadata=asdict(result.metadata), prompt_version=result.prompt_version,
+                            candidate=deepcopy(result.data))
+        elif isinstance(error, ProviderError):
+            evidence["attempts"] = [asdict(row) for row in error.attempts]
+        execution["late_return"] = evidence
+        ledger["recovery_outcome"] = "execution_unknown"
+        task.audit = ledger
+        if task.status == "running":
+            set_task(session, self.contracts, task, "failed", failure={"code": "worker_failure",
+                "message": "原图核对已超过执行租期，迟到结果仅保留审计，不覆盖当前记录。", "retryable": False})
+            task.lease_token = None
+            task.lease_expires_at = None
+        session.commit()
+        return False
+
     def finish(self, identifier, token, *, result=None, error=None):
         with Session(self.engine) as session:
             task = session.scalar(select(Task).where(Task.id == identifier).with_for_update())
             if task is None or task.status != "running" or task.lease_token != token:
-                return False
+                return self._late_original_recheck(session, task, token, result, error)
             # Expired executions cannot commit even if another worker has not yet claimed.
             from datetime import timezone
             if task.lease_expires_at.replace(tzinfo=task.lease_expires_at.tzinfo or timezone.utc) <= now():
-                return False
+                return self._late_original_recheck(session, task, token, result, error)
             homework = session.scalar(select(Homework).where(Homework.id == task.homework_id).with_for_update())
             student = session.get(Student, homework.student_id)
             if homework.processing_blocked or student is None or not student.active:
@@ -298,7 +391,7 @@ class CorrectionWorker:
                     failure_code = "provider_unavailable"
                 # Inference timeouts can already have been billed. They are surfaced
                 # for an explicit retry, not automatically retried indefinitely.
-                retryable = code in {"upstream_rate_limited", "upstream_unavailable", "concurrency_limit", "storage_error"} and task.tries < 3
+                retryable = task.kind != recognition_recheck.KIND and code in {"upstream_rate_limited", "upstream_unavailable", "concurrency_limit", "storage_error"} and task.tries < 3
                 set_task(session, self.contracts, task, "retryable_failed" if retryable else "failed", failure={"code": failure_code, "message": "处理未完成，未产生有效判断；请重试或请坐班老师核实。", "retryable": retryable})
                 task.available_at = now() + timedelta(seconds=2 * task.tries)
                 execution.update(outcome="failed", finished_at=iso(), failure_code=failure_code)
@@ -314,6 +407,12 @@ class CorrectionWorker:
                     if case.document["check_ids"][-1] == task.inputs["check_id"] and case.document["progress"] == "rechecking":
                         previous = case.document["current_decision"]
                         update_case(session, self.contracts, case, progress="needs_correction" if previous and previous["verdict"] != "correct" else "pending")
+            if task.kind == recognition_recheck.KIND:
+                ledger.update({key: value for key, value in (task.audit or {}).items() if key != "executions"})
+                if task.status == "failed":
+                    ledger["recovery_outcome"] = "service_failed"
+                elif task.status == "superseded":
+                    ledger["recovery_outcome"] = "stale_input"
             task.audit = ledger
             task.lease_token = None
             task.lease_expires_at = None
@@ -321,6 +420,8 @@ class CorrectionWorker:
             return True
 
     def _apply(self, session, task, homework, result):
+        if task.kind == recognition_recheck.KIND:
+            return recognition_recheck.apply_result(self, session, task, homework, result)
         if task.kind == "repair_layout":
             return apply_repair(session, self.contracts, task, homework, result)
         if task.kind == "recognize_homework":
@@ -382,6 +483,9 @@ class CorrectionWorker:
             # subquestion label. Neither array position nor a label alone is proof.
             matching = []
             for item in items:
+                if not question_units.compatible_saved_target(
+                        question.document, question.annotations, item, normalized_label):
+                    continue
                 if isinstance(item.get("assessment"), dict):
                     # Multimodel readers can include the printed item label in
                     # the stem. Strip only that label's decoration, then require
@@ -501,7 +605,8 @@ class CorrectionWorker:
         question_row = save_entity(session, self.contracts, homework.id, "question", question)
         question_row.annotations = {"label": item["label"], "diagram": item.get("diagram"), "diagram_revision": 1,
                                     "has_diagram": item.get("has_diagram", bool(item.get("diagram"))),
-                                    "reading_order": item.get("reading_order")}
+                                    "reading_order": item.get("reading_order"),
+                                    **question_units.annotation_fields(item)}
         ids = list(dict.fromkeys([r["asset_id"] for r in item["regions"]] + [r["asset_id"] for r in item["answer_regions"]]))
         attempt = {"id": attempt_id, "revision": 1, "case_id": case_id, "question_id": question_id, "captured_question_revision": 1, "parent_attempt_id": None, "root_attempt_id": attempt_id, "asset_ids": ids, "recognition_revision": 1, "answer_text": item["answer_text"], "answer_regions": item["answer_regions"], "answer_status": item["answer_status"], "recognition_uncertainties": list(item.get("uncertainties", [])), "recognition_status": item.get("recognition_status", "needs_revision"), "help_condition": "unknown", "occurred_at": iso(homework.occurred_at), "created_at": timestamp}
         attempt_row = save_entity(session, self.contracts, homework.id, "attempt", attempt)
