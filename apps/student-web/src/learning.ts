@@ -1,4 +1,4 @@
-import { MAX_PRACTICE_ITEMS, type AgentContext, type AgentTip, type ChapterRollup, type EvidenceResult, type ExitReason, type KnowledgeGraphEdge, type KnowledgeGraphNode, type KnowledgeMap, type KnowledgeState, type LearningStatus, type Memory, type OptionalActivities, type PracticeResult, type PracticeSession, type PracticeStatus, type PreviewOffer, type VariantOffer } from './core/learning'
+import { MAX_PRACTICE_ITEMS, type EvidenceSources, type AgentContext, type AgentTip, type ChapterRollup, type EvidenceResult, type ExitReason, type KnowledgeGraphEdge, type KnowledgeGraphNode, type KnowledgeMap, type KnowledgeState, type LearningStatus, type Memory, type OptionalActivities, type PracticeResult, type PracticeSession, type PracticeStatus, type PreviewOffer, type VariantOffer } from './core/learning'
 import { StudentError } from './core/errors'
 import type { Tone } from './presentation'
 
@@ -209,3 +209,5 @@ export function practiceMessage(error: unknown, fallback: string): string {
 }
 export const RESUME_NOTICE = '你还有一个没结束的活动，可以接着做，也可以直接结束。'
 export const isActiveConflict = (error: unknown) => error instanceof StudentError && error.status === 409 && error.code === 'practice_active'
+
+export const sourceLabel = (source: EvidenceSources['assessment_source']) => source === 'model' ? 'AI 初判' : source === 'staff' ? '老师核实' : source === 'mixed' ? 'AI + 老师' : source === 'none' ? '待积累记录' : '来源待核实'

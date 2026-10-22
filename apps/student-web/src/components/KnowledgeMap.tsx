@@ -1,14 +1,14 @@
+import { StarMap } from './StarMap'
 import { evidenceTarget, type EvidenceTarget } from '../core/evidenceTrace'
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, ArrowUpRight, BookOpen, ChevronRight, CircleDot, Clock3, Compass, Leaf, List, LoaderCircle, Map as MapIcon, RefreshCw, X } from 'lucide-react'
 import { safeError } from '../core'
 import { CurriculumBookPicker } from './CurriculumBookPicker'
-import type { EvidenceSources, KnowledgeDetail, KnowledgeGraphEdge, KnowledgeGraphNode, KnowledgeMap, MappingCoverage } from '../core/learning'
+import type { EvidenceSources, KnowledgeDetail, KnowledgeMap, MappingCoverage } from '../core/learning'
 import type { Workspace } from '../useStudentWorkspace'
-import { assistanceLabel, dayLabel, eventLabel, GRAPH_NODE_HEIGHT, GRAPH_NODE_WIDTH, knowledgeChapters, knowledgeNodes, layoutKnowledgeGraph, nodeNameLines, PENDING_NOTICE, reasonText, resultLabels, statusLabels } from '../learning'
+import { sourceLabel, assistanceLabel, dayLabel, eventLabel, knowledgeChapters, knowledgeNodes, PENDING_NOTICE, reasonText, resultLabels, statusLabels } from '../learning'
 
 type OpenHomework = (homeworkId: string, caseId: string, evidence?: EvidenceTarget) => void
-const sourceLabel = (source: EvidenceSources['assessment_source']) => source === 'model' ? 'AI 初判' : source === 'staff' ? '老师核实' : source === 'mixed' ? 'AI + 老师' : source === 'none' ? '待积累记录' : '来源待核实'
 
 const mappingStateText = { no_direct_match: '暂未找到直接对应的教材知识点', mapping_pending: '知识点归类尚未完成', not_linked: '尚未形成有效的知识点关联' }
 
@@ -83,38 +83,6 @@ export function KnowledgeDetailView({ detail, onBack, pending = false, onOpenNod
   </section>
 }
 
-function KnowledgeGraph({ nodes, edges, pending, selectedId, onOpen }: {
-  nodes: KnowledgeGraphNode[]; edges: KnowledgeGraphEdge[]; pending: boolean; selectedId?: string | null; onOpen: (id: string) => void
-}) {
-  const markerId = useId().replace(/:/g, '')
-  const layout = useMemo(() => layoutKnowledgeGraph(nodes, edges), [nodes, edges])
-  const buttons = useRef(new Map<string, SVGGElement>())
-  return <div className="knowledge-canvas" aria-label="可滑动查看的知识地图">
-    <svg className="knowledge-graph" viewBox={`0 0 ${layout.width} ${layout.height}`} role="group" aria-label={`${nodes.length} 个知识点，按 Tab 浏览并按回车查看证据`}>
-      <defs><marker id={markerId} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 1 1 L 7 4 L 1 7" /></marker></defs>
-      <g className="knowledge-edges" aria-hidden="true">{layout.paths.map(({ edge, path }) => <path key={edge.id} d={path} markerEnd={`url(#${markerId})`} />)}</g>
-      {layout.positions.map(({ node, x, y }, index) => {
-        const status = statusLabels[node.learning_status], lines = nodeNameLines(node.name)
-        return <g key={node.id} ref={element => { if (element) buttons.current.set(node.id, element); else buttons.current.delete(node.id) }}
-          transform={`translate(${x} ${y})`} role="button" tabIndex={0} aria-pressed={selectedId === node.id}
-          aria-label={`${node.name}，${pending ? '正在更新' : `${status.label}，${sourceLabel(node.assessment_source)}`}，查看作答证据`}
-          className={`knowledge-graph-node ${pending ? 'pending' : node.learning_status} ${selectedId === node.id ? 'selected' : ''}`}
-          onClick={() => onOpen(node.id)} onKeyDown={event => {
-            if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpen(node.id) }
-            const offset = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
-            if (offset) { event.preventDefault(); const next = layout.positions[(index + offset + layout.positions.length) % layout.positions.length]; buttons.current.get(next.node.id)?.focus() }
-          }}>
-          <title>{node.name}</title><rect className="knowledge-node-card" width={GRAPH_NODE_WIDTH} height={GRAPH_NODE_HEIGHT} rx="13" />
-          <circle className="knowledge-node-dot" cx="20" cy="22" r="4" /><text className="knowledge-node-status" x="31" y="26">{pending ? '正在更新' : status.label}</text>
-          {lines.map((line, lineIndex) => <text key={lineIndex} className="knowledge-node-title" x="18" y={lines.length === 1 ? 57 : 49 + lineIndex * 21}>{line}</text>)}
-          <text className="knowledge-node-source" x="18" y="88">{pending ? '等待新记录整理' : sourceLabel(node.assessment_source)}</text>
-          <path className="knowledge-node-arrow" d="M 166 82 L 172 82 M 169 79 L 172 82 L 169 85" />
-        </g>
-      })}
-    </svg>
-  </div>
-}
-
 function MapEmpty({ pending, hasScope }: { pending: boolean; hasScope: boolean }) {
   return <div className="knowledge-empty"><div className="knowledge-empty-symbol"><BookOpen size={35} strokeWidth={1.3} /><span><Leaf size={17} /></span></div><span className="eyebrow">每个人，都有自己的节奏</span>
     <h2>{pending ? '正在整理你的学习足迹' : hasScope ? '这张地图，还在慢慢准备' : '从自己的学校作业开始'}</h2>
@@ -141,10 +109,10 @@ export function KnowledgeMapView({ map, onOpen, selectedId, onOpenHomework }: { 
         <button className={!activeChapter ? 'active' : ''} aria-current={!activeChapter ? 'true' : undefined} onClick={() => setChapterId('all')}><span className="chapter-index"><Compass size={17} /></span><span>全部知识点</span><small>{scoped.length}</small></button>
         {chapters.map((chapter, index) => <button key={chapter.id} className={activeChapter?.id === chapter.id ? 'active' : ''} aria-current={activeChapter?.id === chapter.id ? 'true' : undefined} onClick={() => setChapterId(chapter.id)}><span className="chapter-index">{String(index + 1).padStart(2, '0')}</span><span>{chapter.name}</span><small>{chapter.nodes.length}</small></button>)}
         <p className="knowledge-index-note">一条连线，表示学习时会用到的基础。<br />它不会替你下判断。</p></nav>
-        <section className="knowledge-map-sheet" aria-label={activeChapter?.name || '全部知识点'}><div className="knowledge-sheet-toolbar"><div><h3>{activeChapter?.name || (activeSubject === 'all' ? '我的知识地图' : activeSubject)}</h3><span>{visible.length} 个知识点 · 点开看证据</span></div><div className="knowledge-view-switch" aria-label="展示方式"><button aria-label="地图视图" aria-pressed={view === 'map'} onClick={() => setView('map')}><MapIcon size={17} /></button><button aria-label="列表视图" aria-pressed={view === 'list'} onClick={() => setView('list')}><List size={18} /></button></div></div>
-          {view === 'map' ? <KnowledgeGraph nodes={visible} edges={map.edges ?? []} pending={pending} selectedId={selectedId} onOpen={onOpen} />
+        <section className={`knowledge-map-sheet ${view === 'map' ? 'star' : ''}`} aria-label={activeChapter?.name || '全部知识点'}><div className="knowledge-sheet-toolbar"><div><h3>{activeChapter?.name || (activeSubject === 'all' ? '我的知识地图' : activeSubject)}</h3><span>{visible.length} 个知识点 · 点开看证据</span></div><div className="knowledge-view-switch" aria-label="展示方式"><button aria-label="地图视图" aria-pressed={view === 'map'} onClick={() => setView('map')}><MapIcon size={17} /></button><button aria-label="列表视图" aria-pressed={view === 'list'} onClick={() => setView('list')}><List size={18} /></button></div></div>
+          {view === 'map' ? <StarMap nodes={visible} edges={map.edges ?? []} pending={pending} selectedId={selectedId} onOpen={onOpen} />
             : <div className="knowledge-node-list">{visible.map(node => <button className={selectedId === node.id ? 'selected' : ''} key={node.id} onClick={() => onOpen(node.id)}><span className={`knowledge-list-dot ${pending ? 'pending' : node.learning_status}`} /><span><strong>{node.name}</strong><small>{pending ? '记录正在更新' : sourceLabel(node.assessment_source)}</small></span><span className={`status-pill ${pending ? 'neutral' : statusLabels[node.learning_status].tone}`}>{pending ? '正在更新' : statusLabels[node.learning_status].label}</span><ChevronRight size={16} /></button>)}</div>}
-          <div className="knowledge-legend" aria-label="知识点状态说明">{pending ? <span><span className="legend-dot" />状态更新中，暂不显示旧结论</span> : <><span><span className="legend-dot stable_for_now" />阶段性较稳</span><span><span className="legend-dot consolidating" />正在巩固</span><span><span className="legend-dot needs_help_now" />需要再看看</span><span><span className="legend-dot" />还不判断</span></>}</div>
+          {view === 'map' ? <div className="star-legend" aria-label="知识点状态说明">{pending ? <span><i className="none" />状态更新中，暂不显示旧结论</span> : <><span><i className="stable_for_now" />阶段性较稳</span><span><i className="consolidating" />正在巩固</span><span><i className="needs_help_now" />需要再看看</span><span><i className="none" />还不判断</span></>}<small>亮度表示记录的多少与来源，不是分数</small></div> : <div className="knowledge-legend" aria-label="知识点状态说明">{pending ? <span><span className="legend-dot" />状态更新中，暂不显示旧结论</span> : <><span><span className="legend-dot stable_for_now" />阶段性较稳</span><span><span className="legend-dot consolidating" />正在巩固</span><span><span className="legend-dot needs_help_now" />需要再看看</span><span><span className="legend-dot" />还不判断</span></>}</div>}
         </section></div>
     </>}
     {(map.source_note || map.graph_review_status === 'source_verified_ai_reviewed') && <p className="knowledge-graph-origin"><BookOpen size={15} /><span>{map.book_identity?.review_label || (map.graph_review_status === 'source_verified_ai_reviewed' ? '目录来源已核对，知识点关系由 AI 整理' : '知识点目录来源')}{map.source_note ? `：${map.source_note}` : '；尚未经老师逐点核实。'}</span></p>}
