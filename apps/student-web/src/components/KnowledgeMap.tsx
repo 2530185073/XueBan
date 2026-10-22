@@ -1,3 +1,4 @@
+import { evidenceTarget, type EvidenceTarget } from '../core/evidenceTrace'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, ArrowUpRight, BookOpen, ChevronRight, CircleDot, Clock3, Compass, Leaf, List, LoaderCircle, Map as MapIcon, RefreshCw, X } from 'lucide-react'
 import { safeError } from '../core'
@@ -6,7 +7,7 @@ import type { EvidenceSources, KnowledgeDetail, KnowledgeGraphEdge, KnowledgeGra
 import type { Workspace } from '../useStudentWorkspace'
 import { assistanceLabel, dayLabel, eventLabel, GRAPH_NODE_HEIGHT, GRAPH_NODE_WIDTH, knowledgeChapters, knowledgeNodes, layoutKnowledgeGraph, nodeNameLines, PENDING_NOTICE, reasonText, resultLabels, statusLabels } from '../learning'
 
-type OpenHomework = (homeworkId: string, caseId: string) => void
+type OpenHomework = (homeworkId: string, caseId: string, evidence?: EvidenceTarget) => void
 const sourceLabel = (source: EvidenceSources['assessment_source']) => source === 'model' ? 'AI 初判' : source === 'staff' ? '老师核实' : source === 'mixed' ? 'AI + 老师' : source === 'none' ? '待积累记录' : '来源待核实'
 
 const mappingStateText = { no_direct_match: '暂未找到直接对应的教材知识点', mapping_pending: '知识点归类尚未完成', not_linked: '尚未形成有效的知识点关联' }
@@ -69,7 +70,7 @@ export function KnowledgeDetailView({ detail, onBack, pending = false, onOpenNod
           {e.homework_title && <p className="evidence-homework">{e.homework_title}</p>}
           <p className="evidence-question">{e.question_text || '这条记录暂未附题目文字。'}</p>
           <div className="evidence-tags"><span className="status-pill neutral">{resultLabels[e.result]}</span><span className="muted small">{assistanceLabel(e.assistance_level)}</span></div>
-          {e.homework_id && e.case_id && onOpenHomework && <button className="text-button evidence-open" disabled={busy} onClick={() => onOpenHomework(e.homework_id!, e.case_id!)}>查看原题与订正 <ArrowUpRight size={15} /></button>}
+          {e.homework_id && e.case_id && onOpenHomework && <button className="text-button evidence-open" disabled={busy} onClick={() => onOpenHomework(e.homework_id!, e.case_id!, evidenceTarget(detail, e))}>查看原题与订正 <ArrowUpRight size={15} /></button>}
         </li>)}</ol>
         : <div className="knowledge-detail-empty"><Leaf size={25} strokeWidth={1.4} /><p>这里还没有可用的作答记录</p><small>以后遇到相关学校作业，再慢慢补全。</small></div>}
     </div>

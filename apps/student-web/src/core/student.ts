@@ -61,6 +61,8 @@ export class StudentClient {
   private currentIdentity: IdentityContext | null = null
   private student: string | null = null
   private epoch = 0
+  private evidenceSessions = new WeakMap<Session, number>()
+  private nextEvidenceSession = 0
   private identityFlight: { epoch: number; session: Session | null; promise: Promise<IdentityContext> } | null = null
   private caseFlights = new Map<string, { epoch: number; session: Session | null; scope: string; promise: Promise<CorrectionCase> }>()
   private listeners = new Set<() => void>()
@@ -95,6 +97,14 @@ export class StudentClient {
   get selectedStudentId() { return this.student }
   /** Non-secret scope fence for concurrent read-only views, including same-account re-login. */
   get historyScope() { return this.session && this.student && this.currentIdentity ? JSON.stringify([this.epoch, this.currentIdentity.actor_id, this.student]) : null }
+  /** Opaque read-only trace scope; even same-token restore changes session identity. */
+  get evidenceScope() {
+    const scope = this.historyScope, session = this.session
+    if (!scope || !session) return null
+    let id = this.evidenceSessions.get(session)
+    if (id === undefined) { id = ++this.nextEvidenceSession; this.evidenceSessions.set(session, id) }
+    return JSON.stringify([scope, id])
+  }
   subscribe(listener: () => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
   private changed() { for (const listener of this.listeners) listener() }
   private storageKey(name: string) { return `xueban:${this.origin}:${name}` }
@@ -533,6 +543,17 @@ export class StudentClient {
     if (homework.scope.student_id !== ctx.student) throw new StudentError('access_denied', 403)
     const records = await this.caseRecords(ctx, homework), active = orderCasesByCreation(homework.case_ids, records).map(id => records.get(id)!)
     return { homeworkId: homework.id, revision: homework.revision, counts: countBuckets(active.map(bucketOfCase)), firstUnresolvedCaseId: firstUnresolved(active, bucketOfCase)?.id ?? null, retired: records.size - active.length }
+  }
+  /** Exact captured question snapshot, including noncurrent historical revisions. */
+  async questionRevision(homeworkId: string, questionId: string, revision: number): Promise<QuestionRead> {
+    if (!Number.isSafeInteger(revision) || revision < 1) throw new StudentError('invalid_response', 502)
+    const authorized = await this.authorize(), ctx = { ...authorized, detailSession: this.session! }
+    const homework = await this.read<HomeworkSession>(ctx, `/v1/homeworks/${encoded(homeworkId)}`, 'HomeworkSession')
+    if (homework.id !== homeworkId || homework.scope.student_id !== ctx.student || !homework.question_ids.includes(questionId)) throw new StudentError('access_denied', 403)
+    const question = await this.read<QuestionRead>(ctx, `/v1/questions/${encoded(questionId)}?revision=${revision}`, 'QuestionRead')
+    if (question.record.question_id !== questionId || question.record.homework_id !== homeworkId || question.record.revision !== revision || question.current_revision < revision) throw new StudentError('stale_detail', 409)
+    this.check(ctx)
+    return question
   }
   /** Every attempt, check decision, shown hint, help request and review of one case. */
   async caseRecord(caseId: string): Promise<CaseRecord> {
