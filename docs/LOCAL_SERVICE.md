@@ -51,3 +51,10 @@ launchctl kickstart -k gui/$(id -u)/local.xueban.api && launchctl kickstart -k g
 - 备份与数据库在同一块磁盘上，防不了磁盘损坏或丢失；请定期把 `scheduled-backups/` 与 `governance/`（删除清单，须与备份分开保存）复制到另一块磁盘。
 - 03:17 的计划备份在 Mac 睡眠时不会执行，唤醒后补跑一次。
 - 这些只解决“能稳定运行”。真实手写整页识别质量、平板真机、现场使用仍未验收。
+
+## 2026-10-22 切换记录
+
+- PR #5（整页纠错与学习层，72 个提交）、#6（launchd 守护）、#7（定时备份与本文）已合并进 main；PR #3、#4 在此之前已合并，PR #1 是 10-16 的静态平板 UI 原型（`prototype/student-tablet-ui/`，4 个文件，main 里没有），保留未关闭，由你决定是否合入。
+- 切换前备份：`scheduled-backups/20261022t035555z_…`；切换后 15 张业务表摘要与切换前完全一致；学生包仍是 `index-Czg2tERQ.js`。
+- 切换时第一次备份曾失败（`subprocess_failed_2`）：当时 `mac_local.py stop` 已把 PostgreSQL 也停掉，备份工具连不上库。处理是先只启动 PostgreSQL 再备份；随后在 `install` 里不再强制要求“停止”命令成功（它在服务已停时会返回非零）。这个顺序问题写在这里，避免以后重复。
+- 当时 Mac 在电池供电（35%）。电量耗尽或睡眠时服务会停止，这是代码无法解决的；长时间使用请接电源。
