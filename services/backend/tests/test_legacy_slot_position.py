@@ -216,7 +216,7 @@ def test_real_worker_keeps_unconfirmed_cell_as_ai_pending_without_learning_or_te
 # V2: original sources may share the complete table text yet name different
 # cells. This is a synthetic reachable identity risk, not a production incident.
 def shared_table_sources(*, stem='填表：乘方2^2、2^3的底数、指数分别填空。'):
-    p = correct(label='3#1', stem_text=stem, answer_text='2', question_type='fill_blank',
+    p = correct(label='3#1', stem_text=stem, answer_text='2', correct_answer='2', question_type='fill_blank',
                 visible_locator={'printed_label': '3', 'page_zone': 'middle_left'},
                 target_context={'section': '3', 'row': '底数', 'column': '2^2', 'anchor': '乘方2^2'})
     return p, deepcopy(p)

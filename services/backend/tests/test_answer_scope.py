@@ -149,7 +149,7 @@ def test_scope_gap_is_ai_pending_without_learning_or_mandatory_staff_task():
 
 
 def test_unaffected_single_slot_and_complete_multi_answer_rows_keep_existing_release():
-    sources = [incomplete(), correct('2', stem_text='(-24)÷6=____', answer_text='-4'),
+    sources = [incomplete(), correct('2', stem_text='(-24)÷6=____', answer_text='-4', correct_answer='-4'),
                correct('3#1', stem_text=STEM, answer_text='-'),
                correct('4', stem_text=STEM, answer_text='-；-4'),
                correct('5', stem_text=STEM, answer_text='第1空：-；第2空：-4')]

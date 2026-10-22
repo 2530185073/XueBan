@@ -285,7 +285,9 @@ def test_question_unit_keeps_complete_multiblank_identity_and_order():
 @pytest.mark.parametrize("difference", ["answer", "options"])
 def test_any_visual_adjudication_uses_strong_model_without_an_original_grading_dispute(difference):
     p = correct()
-    s = correct(answer_text="-4") if difference == "answer" else correct(
+    # This fixture tests observation-only disagreement. Do not accidentally
+    # retain correct()'s default reference "4" for its different readout "-4".
+    s = correct(answer_text="-4", correct_answer=None) if difference == "answer" else correct(
         options=[{"label": "A", "text": "(-2)^2"}])
     strong = FakeClient("strong", lambda request: {"items": [proposal(t) for t in targets(request)]})
     flow = make_flow([p], [s], judgment=strong)
