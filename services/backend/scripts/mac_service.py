@@ -85,6 +85,26 @@ def render_plist(runtime, name, log_dir, python=None):
     return plistlib.dumps(payload)
 
 
+BACKUP_HOUR, BACKUP_MINUTE = 3, 17  # off the hour on purpose; the house is asleep
+
+
+def render_backup_plist(runtime, log_dir, python=None):
+    """A calendar job. Never KeepAlive: a failed backup must not loop and keep stopping the writers."""
+    log = Path(log_dir) / "backup.service.log"
+    payload = {
+        "Label": label("backup"),
+        "ProgramArguments": [str(python or sys.executable), str(Path(__file__).resolve()), "--runtime", str(runtime), "backup"],
+        "WorkingDirectory": str(REPO),
+        "EnvironmentVariables": {"PATH": BASE_PATH, **LOCALE},
+        "StartCalendarInterval": {"Hour": BACKUP_HOUR, "Minute": BACKUP_MINUTE},
+        "ProcessType": "Background",
+        "StandardOutPath": str(log),
+        "StandardErrorPath": str(log),
+        "Umask": 0o077,
+    }
+    return plistlib.dumps(payload)
+
+
 def write_plists(runtime, agent_dir=AGENT_DIR):
     runtime = Path(runtime)
     agent_dir = Path(agent_dir)
@@ -97,6 +117,12 @@ def write_plists(runtime, agent_dir=AGENT_DIR):
             file.write(render_plist(runtime, name, runtime / "logs"))
         os.replace(temporary, target)
         written.append(str(target))
+    target = plist_path("backup", agent_dir)
+    temporary = target.with_suffix(".tmp")
+    with os.fdopen(os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600), "wb") as file:
+        file.write(render_backup_plist(runtime, runtime / "logs"))
+    os.replace(temporary, target)
+    written.append(str(target))
     return written
 
 
@@ -127,10 +153,12 @@ def domain():
 
 def install(runtime):
     runtime = Path(runtime)
+    # Hand-started processes must stop so launchd owns them. A non-zero exit only means there was
+    # nothing left to stop (e.g. PostgreSQL already down), which is the state we want.
     subprocess.run([sys.executable, str(BACKEND / "scripts/mac_local.py"), "--runtime", str(runtime), "stop"],
-                   check=True, env=without_model_environment(os.environ))
+                   check=False, capture_output=True, env=without_model_environment(os.environ))
     written = write_plists(runtime)
-    for name in AGENTS:
+    for name in (*AGENTS, "backup"):
         launchctl("bootout", f"{domain()}/{label(name)}", check=False)
         launchctl("bootstrap", domain(), str(plist_path(name)))
         launchctl("enable", f"{domain()}/{label(name)}")
@@ -138,7 +166,7 @@ def install(runtime):
 
 
 def uninstall(runtime):
-    for name in reversed(AGENTS):
+    for name in ("backup", *reversed(AGENTS)):
         launchctl("bootout", f"{domain()}/{label(name)}", check=False)
         plist_path(name).unlink(missing_ok=True)
     for pid in WRITER_PIDS:
