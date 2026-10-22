@@ -13,6 +13,24 @@ from scripts.mac_local import configure_models, write_private
 SECRETS = ("synthetic-ark-secret", "synthetic-gateway-secret")
 
 
+REAL_AGENTS = Path.home() / "Library/LaunchAgents"
+
+
+@pytest.fixture(autouse=True)
+def never_touch_real_launch_agents(tmp_path, monkeypatch):
+    """A test once wrote pytest paths into the real LaunchAgents plists and took the live service down.
+
+    Every test gets a private agent directory, and any write under the real one fails the test.
+    """
+    monkeypatch.setattr(mac_service, "AGENT_DIR", tmp_path / "agents")
+    before = sorted(p.name for p in REAL_AGENTS.glob("local.xueban.*")) if REAL_AGENTS.exists() else []
+    stamps = {p: p.stat().st_mtime_ns for p in REAL_AGENTS.glob("local.xueban.*")} if REAL_AGENTS.exists() else {}
+    yield
+    after = sorted(p.name for p in REAL_AGENTS.glob("local.xueban.*")) if REAL_AGENTS.exists() else []
+    assert after == before, "test created or removed real LaunchAgents plists"
+    assert {p: p.stat().st_mtime_ns for p in REAL_AGENTS.glob("local.xueban.*")} == stamps, "test modified a real LaunchAgents plist"
+
+
 @pytest.fixture
 def runtime(tmp_path, monkeypatch):
     for key in ("ARK_API_KEY", "ARK_BASE_URL", "ZYAI_API_KEY", "ZYAI_BASE_URL", "CORRECTION_MODE"):
@@ -232,9 +250,10 @@ def test_install_survives_nothing_left_to_stop(runtime, tmp_path, monkeypatch):
     class AlreadyStopped:
         returncode, stdout, stderr = 1, "", "pg_ctl: no server running"
 
-    monkeypatch.setattr(mac_service, "AGENT_DIR", tmp_path / "agents")
-    monkeypatch.setattr(mac_service, "plist_path", lambda name, agent_dir=tmp_path / "agents": agent_dir / f"{mac_service.label(name)}.plist")
+    agents = tmp_path / "agents"
     monkeypatch.setattr(mac_service, "launchctl", lambda *a, **k: seen.append(a[0]) or Done())
     monkeypatch.setattr(mac_service.subprocess, "run", lambda *a, **k: AlreadyStopped())
-    written = mac_service.install(runtime)
-    assert len(written) == 4 and seen.count("bootstrap") == 4 and seen.count("enable") == 4
+    written = mac_service.install(runtime, agents)
+    assert len(written) == 4 and all(Path(p).parent == agents for p in written)
+    assert seen.count("bootstrap") == 4 and seen.count("enable") == 4
+    assert not list(REAL_AGENTS.glob("local.xueban.*")) or True  # the autouse guard asserts nothing real changed

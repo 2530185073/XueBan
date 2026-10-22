@@ -58,3 +58,20 @@ launchctl kickstart -k gui/$(id -u)/local.xueban.api && launchctl kickstart -k g
 - 切换前备份：`scheduled-backups/20261022t035555z_…`；切换后 15 张业务表摘要与切换前完全一致；学生包仍是 `index-Czg2tERQ.js`。
 - 切换时第一次备份曾失败（`subprocess_failed_2`）：当时 `mac_local.py stop` 已把 PostgreSQL 也停掉，备份工具连不上库。处理是先只启动 PostgreSQL 再备份；随后在 `install` 里不再强制要求“停止”命令成功（它在服务已停时会返回非零）。这个顺序问题写在这里，避免以后重复。
 - 当时 Mac 在电池供电（35%）。电量耗尽或睡眠时服务会停止，这是代码无法解决的；长时间使用请接电源。
+
+## 2026-10-22 事故记录：测试覆盖了真实的 LaunchAgent
+
+一次新增测试（`test_install_survives_nothing_left_to_stop`）在写入 plist 时没有隔离目录，把 pytest 的临时路径和假数据库连接串
+（用户 `u`）写进了**真实**的 `~/Library/LaunchAgents/local.xueban.*.plist`。随后一次计划外的备份让 launchd 重新加载了这些被污染的
+plist，API 与 Worker 改用假配置启动，`/readyz` 报 `database: unavailable`，PostgreSQL 日志里出现 22 次 `Role "u" does not exist`。
+线上数据没有受损（备份与数据库内容未变），但服务中断了数分钟。
+
+处理：卸载被污染的代理，用 `mac_service.py install` 从正式目录重新生成并加载，`/readyz` 恢复。
+
+根因与修复：
+- `AGENT_DIR` 在函数定义时就被取值，测试里 monkeypatch 它不会生效。现在目录在调用时才解析，`install/write_plists/plist_path` 也可显式传入目录。
+- 测试加了自动生效的保护夹具：每个测试默认使用私有目录，并且如果有任何测试创建、删除或修改真实的 `local.xueban.*` plist，测试会失败。
+  已用一个故意触碰真实目录的临时测试验证该保护会报错。
+- 同期修复备份流程：卸载后等待代理真正退出、数据库连接清空再备份，重启时重试并校验，任一服务起不来就明确报错（此前 `bootstrap` 紧跟 `bootout` 会被静默忽略，曾导致 API 在备份后没有回来）。
+
+教训：对真实系统目录的写入路径，测试必须默认指向临时目录，并用断言保证不会改动真实文件。

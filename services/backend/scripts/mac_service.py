@@ -39,8 +39,8 @@ def label(name):
     return f"{LABEL_PREFIX}.{name}"
 
 
-def plist_path(name, agent_dir=AGENT_DIR):
-    return Path(agent_dir) / f"{label(name)}.plist"
+def plist_path(name, agent_dir=None):
+    return Path(agent_dir or AGENT_DIR) / f"{label(name)}.plist"
 
 
 def build_programs(runtime, config):
@@ -105,9 +105,9 @@ def render_backup_plist(runtime, log_dir, python=None):
     return plistlib.dumps(payload)
 
 
-def write_plists(runtime, agent_dir=AGENT_DIR):
+def write_plists(runtime, agent_dir=None):
     runtime = Path(runtime)
-    agent_dir = Path(agent_dir)
+    agent_dir = Path(agent_dir or AGENT_DIR)
     agent_dir.mkdir(parents=True, exist_ok=True)
     written = []
     for name in AGENTS:
@@ -151,16 +151,16 @@ def domain():
     return f"gui/{os.getuid()}"
 
 
-def install(runtime):
-    runtime = Path(runtime)
+def install(runtime, agent_dir=None):
+    runtime, agent_dir = Path(runtime), Path(agent_dir or AGENT_DIR)
     # Hand-started processes must stop so launchd owns them. A non-zero exit only means there was
     # nothing left to stop (e.g. PostgreSQL already down), which is the state we want.
     subprocess.run([sys.executable, str(BACKEND / "scripts/mac_local.py"), "--runtime", str(runtime), "stop"],
                    check=False, capture_output=True, env=without_model_environment(os.environ))
-    written = write_plists(runtime)
+    written = write_plists(runtime, agent_dir)
     for name in (*AGENTS, "backup"):
         launchctl("bootout", f"{domain()}/{label(name)}", check=False)
-        launchctl("bootstrap", domain(), str(plist_path(name)))
+        launchctl("bootstrap", domain(), str(plist_path(name, agent_dir)))
         launchctl("enable", f"{domain()}/{label(name)}")
     return written
 
