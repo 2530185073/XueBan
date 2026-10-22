@@ -2411,7 +2411,8 @@
             "login_rate_limited",
             "deletion_ledger_unconfigured",
             "storage_error",
-            "storage_unconfigured"
+            "storage_unconfigured",
+            "detail_bundle_limit"
           ]
         },
         "detail": {
@@ -2698,6 +2699,63 @@
         "recovery"
       ],
       "additionalProperties": false
+    },
+    "HomeworkDetailRead": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocol": {
+          "const": "homework-detail.v1"
+        },
+        "homework": {
+          "$ref": "data.schema.json#/$defs/HomeworkSession"
+        },
+        "case_records": {
+          "type": "array",
+          "items": {
+            "$ref": "data.schema.json#/$defs/CorrectionCase"
+          },
+          "maxItems": 300
+        },
+        "questions": {
+          "type": "array",
+          "items": {
+            "$ref": "data.schema.json#/$defs/QuestionRead"
+          },
+          "maxItems": 300
+        },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "$ref": "data.schema.json#/$defs/AttemptRead"
+          },
+          "maxItems": 300
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "data.schema.json#/$defs/CheckRun"
+          },
+          "maxItems": 2000
+        },
+        "jobs": {
+          "type": "array",
+          "items": {
+            "$ref": "data.schema.json#/$defs/Job"
+          },
+          "maxItems": 2000
+        }
+      },
+      "required": [
+        "protocol",
+        "homework",
+        "case_records",
+        "questions",
+        "attempts",
+        "checks",
+        "jobs"
+      ],
+      "description": "同一只读数据库快照中的完整作业详情；仅活动题目当前题干/作答，保留原版本wrapper与全部历史check。仅detail_bundle_limit可回退逐项读取。"
     }
   }
 }

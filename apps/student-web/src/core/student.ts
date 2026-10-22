@@ -1,3 +1,4 @@
+import { detailFromSnapshot, type HomeworkDetailRead } from './homeworkDetail'
 import { isRecognitionProgress, type RecognitionProgress } from './recognitionProgress'
 import type { Account, AdminRequestOptions, AuthSession, Accepted, RecognitionRecoveryStatus, RecognitionRecheckAccepted, AssetAccess, AttemptRead, CaseDetail, CaseRecord, CheckRun, CorrectionCase, CreateCorrection, CreateHelp, DecisionRead, DraftSummary, DraftView, HelpRequest, Hint, HomeworkDetail, HomeworkPage, HomeworkSession, HomeworkSummary, IdentityContext, ImageAsset, InputVersions, Job, JournalEntry, NormalizedPhoto, QuestionRead, RequestHint, Review, StoredDraft, StoredPage, UploadTicket } from './types'
 import { StudentApi } from './api'
@@ -48,10 +49,10 @@ export function decisionLabel(row: CaseDetail): string {
   const text = { correct: '正确', incorrect: '需要订正', partially_correct: '部分需要订正', unanswered: '尚未作答' }[d.verdict]
   return `${d.validity === 'confirmed' && d.origin === 'staff' ? '老师确认' : 'AI 初判'} · ${text}`
 }
-interface Context { scope: string; student: string; epoch: number }
+interface Context { scope: string; student: string; epoch: number; detailSession?: Session }
 interface Session { access_token: string; expires_at: string; kind: 'account' }
 interface PendingAuth { body: string; key: string }
-export interface ClientOptions { origin?: string; transport?: typeof fetch; storage?: Storage; store?: DraftStore; normalize?: (file: Blob, maxBytes?: number) => Promise<NormalizedPhoto>; edit?: (source: NormalizedPhoto, edit: PageEdit, maxBytes?: number) => Promise<NormalizedPhoto>; sleep?: (ms: number) => Promise<void> }
+export interface ClientOptions { detailSnapshotEnabled?: boolean; origin?: string; transport?: typeof fetch; storage?: Storage; store?: DraftStore; normalize?: (file: Blob, maxBytes?: number) => Promise<NormalizedPhoto>; edit?: (source: NormalizedPhoto, edit: PageEdit, maxBytes?: number) => Promise<NormalizedPhoto>; sleep?: (ms: number) => Promise<void> }
 export class StudentClient {
   private session: Session | null = null
   private currentAccount: Account | null = null
@@ -64,6 +65,7 @@ export class StudentClient {
   private caseFlights = new Map<string, { epoch: number; session: Session | null; scope: string; promise: Promise<CorrectionCase> }>()
   private listeners = new Set<() => void>()
   private api: StudentApi
+  private detailSnapshotEnabled: boolean
   private store: DraftStore
   private storage: Storage
   private origin: string
@@ -75,6 +77,7 @@ export class StudentClient {
   private urls = new ObjectUrls()
   private housekeeping: Promise<PurgeReport | null>
   constructor(options: ClientOptions = {}) {
+    this.detailSnapshotEnabled = options.detailSnapshotEnabled ?? (import.meta.env.VITE_HOMEWORK_DETAIL_SNAPSHOT_ENABLED === '1')
     this.origin = options.origin ?? location.origin
     const url = new URL(this.origin)
     if (url.origin !== this.origin || !['http:', 'https:'].includes(url.protocol)) throw new StudentError('invalid_origin', 422)
@@ -139,7 +142,7 @@ export class StudentClient {
     }
   }
   selectStudent(id: string) { if (!this.currentAccount || this.currentAccount.student_id !== id || !this.currentIdentity?.authorized_students.some(s => s.student_id === id)) throw new StudentError('access_denied', 403); if (id !== this.student) { this.epoch++; this.student = id; this.dropMedia(); this.changed() } }
-  private check(ctx: Context) { if (this.epoch !== ctx.epoch || !this.session || this.student !== ctx.student) throw new StudentError('session_changed', 401) }
+  private check(ctx: Context) { if (this.epoch !== ctx.epoch || !this.session || this.student !== ctx.student || ctx.detailSession !== undefined && this.session !== ctx.detailSession) throw new StudentError('session_changed', 401) }
   private async read<T>(ctx: Context, path: string, shape: string) { this.check(ctx); const value = await this.api.request<T>(path, shape); this.check(ctx); return value }
   private verifyIdentity(): Promise<IdentityContext> {
     const epoch = this.epoch, session = this.session, existing = this.identityFlight
@@ -462,9 +465,31 @@ export class StudentClient {
       const c = await this.caseRecordRead(ctx, queue[index], homework.id); records.set(c.id, c)
       if (c.lifecycle === 'superseded') for (const next of c.replacement_case_ids) if (!queue.includes(next)) queue.push(next)
     }
+    // A capacity fallback must never turn a truncated traversal into a
+    // successful smaller homework, including replacements discovered late.
+    if (queue.some(id => !records.has(id))) throw new StudentError('detail_bundle_limit', 409, '题目记录较多，本次未能完整加载；已保留原有记录。')
     return records
   }
   private async detail(ctx: Context, id: string): Promise<HomeworkDetail> {
+    if (!this.detailSnapshotEnabled) return this.legacyDetail(ctx, id)
+    this.check(ctx)
+    // A same-token restore still creates a different authenticated session.
+    // Carry this fence through the caller's later storage awaits and save.
+    ctx.detailSession ??= this.session!
+    try {
+      const snapshot = await this.read<HomeworkDetailRead>(ctx, `/v1/homeworks/${encoded(id)}/detail`, 'HomeworkDetailRead')
+      const detail = detailFromSnapshot(snapshot, id, ctx.student)
+      this.check(ctx)
+      return detail
+    } catch (error) {
+      // Explicit deployment opt-in, never infer old-server support from a 404.
+      // Only the server's bounded-bundle rejection may use the original reads.
+      this.check(ctx)
+      if (!(error instanceof StudentError) || error.status !== 409 || error.code !== 'detail_bundle_limit') throw error
+      return this.legacyDetail(ctx, id)
+    }
+  }
+  private async legacyDetail(ctx: Context, id: string): Promise<HomeworkDetail> {
     const homework = await this.read<HomeworkSession>(ctx, `/v1/homeworks/${encoded(id)}`, 'HomeworkSession')
     if (homework.scope.student_id !== ctx.student) throw new StudentError('access_denied', 403)
     const records = await this.caseRecords(ctx, homework), jobs: Job[] = []

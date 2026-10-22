@@ -34,6 +34,7 @@ export declare const data_AttemptRead: (value: unknown) => boolean
 export declare const data_DecisionRead: (value: unknown) => boolean
 export declare const data_RecognitionRecoveryStatus: (value: unknown) => boolean
 export declare const data_RecognitionRecheckAccepted: (value: unknown) => boolean
+export declare const data_HomeworkDetailRead: (value: unknown) => boolean
 export declare const requests_CreateHomework: (value: unknown) => boolean
 export declare const requests_CreateUpload: (value: unknown) => boolean
 export declare const requests_CompleteUpload: (value: unknown) => boolean

@@ -1257,6 +1257,48 @@
           "resource_id": "attempt_correction"
         }
       }
+    },
+    {
+      "name": "empty_homework_detail",
+      "schema": "data.schema.json#/$defs/HomeworkDetailRead",
+      "value": {
+        "protocol": "homework-detail.v1",
+        "homework": {
+          "id": "homework_synthetic",
+          "revision": 3,
+          "scope": {
+            "tenant_id": "tenant_synthetic",
+            "campus_id": "campus_synthetic",
+            "student_id": "student_synthetic"
+          },
+          "curriculum": {
+            "stage": "junior_middle",
+            "publisher_code": "PEP",
+            "grade": null,
+            "subject": null,
+            "volume": null,
+            "edition": null
+          },
+          "title": "合成作业样例",
+          "created_at": "2026-10-16T08:00:00Z",
+          "occurred_at": "2026-10-16T08:00:00Z",
+          "coverage": {
+            "collection_scope": "partial",
+            "unrecognized_regions": [],
+            "note": "仅采集一个题区，不能计算整页正确率。"
+          },
+          "asset_ids": [],
+          "question_ids": [],
+          "case_ids": [],
+          "job_ids": [],
+          "processing_blocked": false
+        },
+        "case_records": [],
+        "questions": [],
+        "attempts": [],
+        "checks": [],
+        "jobs": []
+      }
     }
   ]
 }

@@ -46,11 +46,14 @@ def parse_time(value: str) -> datetime:
         raise Problem(422, "validation", "invalid_request", "时间必须是带时区的 RFC3339 日期时间。") from None
 
 
-def homework_json(row: Homework) -> dict:
+def homework_json(row: Homework, *, entities=None, assets=None, job_ids=None) -> dict:
     from .correction_models import Asset, Entity, Task
     session = object_session(row)
-    entities = session.scalars(select(Entity).where(Entity.homework_id == row.id).order_by(Entity.id)).all() if session else []
-    assets = session.scalars(select(Asset).where(Asset.homework_id == row.id)).all() if session else []
+    if entities is None:
+        entities = session.scalars(select(Entity).where(Entity.homework_id == row.id).order_by(Entity.id)).all() if session else []
+    if assets is None:
+        assets = session.scalars(select(Asset).where(Asset.homework_id == row.id)).all() if session else []
+    assets = list(assets)
     assets.sort(key=lambda asset: (
         asset.document.get("page_index", 0),
         asset.document.get("created_at", ""),
@@ -83,7 +86,7 @@ def homework_json(row: Homework) -> dict:
         "asset_ids": [asset.id for asset in assets],
         "question_ids": [entity.id for entity in ordered_questions],
         "case_ids": [entity.id for entity in cases],
-        "job_ids": list(session.scalars(select(Task.id).where(Task.homework_id == row.id).order_by(Task.id))) if session else [],
+        "job_ids": job_ids if job_ids is not None else list(session.scalars(select(Task.id).where(Task.homework_id == row.id).order_by(Task.id))) if session else [],
         "processing_blocked": row.processing_blocked,
     }
 
@@ -170,6 +173,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     ActorDep = Annotated[Actor, Depends(current_actor)]
     SessionDep = Annotated[Session, Depends(database_session)]
+
+    # Unlike ordinary READ COMMITTED reads, this aggregate must authenticate
+    # and load every resource in one snapshot. Configure BEFORE the first SQL.
+    def detail_session():
+        from .homework_detail import readonly_session
+        with readonly_session(engine) as session:
+            yield session
+
+    def detail_actor(
+        credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
+        session: Annotated[Session, Depends(detail_session)],
+    ) -> Actor:
+        return verifier.actor(credentials.credentials if credentials else None, session)
+
+    DetailActorDep = Annotated[Actor, Depends(detail_actor)]
+    DetailSessionDep = Annotated[Session, Depends(detail_session)]
 
     def checked(name: str, value: dict) -> dict:
         contracts.validate(name, value)
@@ -289,6 +308,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise Problem(404, "not_found", "not_found", "资源不存在或不可访问。")
         require_student(session, actor, homework.student_id)
         return checked("HomeworkSession", homework_json(homework))
+
+    @app.get("/v1/homeworks/{homework_id}/detail", operation_id="getHomeworkDetail")
+    def get_homework_detail(homework_id: ResourceId, actor: DetailActorDep, session: DetailSessionDep):
+        from .homework_detail import detail_response
+        homework = session.scalar(select(Homework).where(Homework.id == homework_id, Homework.tenant_id == actor.tenant_id))
+        if homework is None:
+            raise Problem(404, "not_found", "not_found", "资源不存在或不可访问。")
+        require_student(session, actor, homework.student_id)
+        if homework.processing_blocked:
+            raise Problem(409, "conflict", "processing_blocked", "该作业已停止处理。")
+        return detail_response(session, contracts, homework)
 
     @app.get("/v1/students/{student_id}/homeworks", operation_id="listHomeworks")
     def list_homeworks(

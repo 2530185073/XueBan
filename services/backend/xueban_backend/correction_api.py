@@ -23,6 +23,25 @@ from .models import Homework, Principal, PrincipalRole, Student
 from . import recognition_recheck
 
 
+def public_entity_read(row, resource, *, document=None, case=None, current=True):
+    """The existing public version wrapper, shared by single and bundle reads."""
+    document = row.document if document is None else document
+    if resource == "question" and current and row.annotations and row.annotations.get("subject_override"):
+        document = {**document, "subject": row.annotations["subject_override"]}
+    effective = (document.get("revision") == row.revision
+                 and row.document.get("lifecycle", "active") == "active"
+                 and row.document.get("validity") not in {"stale", "retracted"})
+    if resource in {"attempt", "decision"}:
+        if case is None:
+            raise ValueError("Versioned observation reads require their case")
+        effective = effective and case.document["lifecycle"] == "active"
+        if resource == "attempt":
+            effective = effective and case.document["current_attempt_id"] == row.id
+        else:
+            effective = effective and (case.document["current_decision"] or {}).get("id") == row.id
+    return {"record": document, "current_revision": row.revision, "currently_effective": effective}
+
+
 def enqueue_check_task(session, contracts, homework, case, question, attempt, *, assets=None):
     """Create or reuse one current check inside the caller's transaction."""
     recognition_recheck.assert_no_active(session, case)
@@ -158,18 +177,9 @@ def install_correction(app, engine, cfg, database_session, current_actor):
                 if snapshot is None:
                     raise Problem(404, "not_found", "not_found", "该历史版本不存在。")
                 document = snapshot.document
-            if resource == "question" and revision is None and row.annotations and row.annotations.get("subject_override"):
-                document = {**document, "subject": row.annotations["subject_override"]}
             if wrapper:
-                effective = document.get("revision") == row.revision and row.document.get("lifecycle", "active") == "active" and row.document.get("validity") not in {"stale", "retracted"}
-                if resource in {"attempt", "decision"}:
-                    case = get_entity(session, document["case_id"], "case")
-                    effective = effective and case.document["lifecycle"] == "active"
-                    if resource == "attempt":
-                        effective = effective and case.document["current_attempt_id"] == row.id
-                    else:
-                        effective = effective and (case.document["current_decision"] or {}).get("id") == row.id
-                document = {"record": document, "current_revision": row.revision, "currently_effective": effective}
+                case = get_entity(session, document["case_id"], "case") if resource in {"attempt", "decision"} else None
+                document = public_entity_read(row, resource, document=document, case=case, current=revision is None)
             return checked(schema, document)
         app.add_api_route(path, endpoint, methods=["GET"], operation_id=operation)
 

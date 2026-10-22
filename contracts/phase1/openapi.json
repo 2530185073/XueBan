@@ -2093,6 +2093,59 @@
           }
         ]
       }
+    },
+    "/v1/homeworks/{homework_id}/detail": {
+      "get": {
+        "operationId": "getHomeworkDetail",
+        "summary": "在只读一致快照中读取作业详情",
+        "description": "认证首条SQL前建立REPEATABLE READ只读事务；不写业务或调用模型。仅409 detail_bundle_limit表示容量超限且允许客户端回退逐项读取；其余错误不得降级。",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/HomeworkDetailRead"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "homework_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          }
+        ]
+      }
     }
   },
   "components": {
