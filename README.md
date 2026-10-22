@@ -12,6 +12,7 @@
 
 | 文件 | 用途 |
 |---|---|
+| [账号与登录使用说明](docs/ACCOUNT_GUIDE.md) | 学员/老师/管理员怎么开户、登录、改密、重置，以及给家长和孩子的介绍话术 |
 | [本机稳定运行](docs/LOCAL_SERVICE.md) | launchd 自启与崩溃自动恢复、每日备份、恢复演练、升级步骤和未验证事项 |
 | [学生网页端](apps/student-web/README.md) / [Mac 网页启动](docs/WEB_LOCAL_RUN.md) | 当前优先体验入口；浏览器上传、联网纠错、提示和订正，后续再封装 App |
 | [完整网页路线](docs/WEB_ROADMAP.md) / [一期规格](PHASE1.md) / [任务表](blueprint-v3/contracts/phase1-backlog.json) | 16 项纠错基础任务与 7 项完整网页任务，四角色流程及 C0/R1/R2 发布门槛 |
