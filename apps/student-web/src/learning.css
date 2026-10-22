@@ -428,3 +428,105 @@
 
 .star-cluster-tally{font-size:12px;letter-spacing:.04em;paint-order:stroke;stroke:#050a1c;stroke-width:3px;stroke-linejoin:round}
 .star-cluster-tally .stable_for_now{fill:#7cf5c0}.star-cluster-tally .consolidating{fill:#8fb8ff}.star-cluster-tally .needs_help_now{fill:#ffb86b}
+
+/* ======== Galaxy: the map is the page ======== */
+.galaxy-page{display:block}
+.galaxy-stage{--g-ink:#e8efff;--g-mute:#8fa3cf;--g-line:#ffffff1c;--g-glass:#0a1330cc;position:relative;height:clamp(560px,calc(100dvh - 150px),860px);border-radius:18px;overflow:hidden;background:#050a1c;color:var(--g-ink);isolation:isolate;box-shadow:0 24px 70px #0a1a4a66,0 0 0 1px #1d2f66;touch-action:none;user-select:none;-webkit-user-select:none}
+.galaxy{position:absolute;inset:0;cursor:grab;outline:none}
+.galaxy:active{cursor:grabbing}
+.galaxy-sky{position:absolute;inset:0;pointer-events:none;overflow:hidden;background:radial-gradient(ellipse 80% 60% at 50% 40%,#142b66 0,transparent 70%),radial-gradient(ellipse 50% 45% at 90% 95%,#321a6e 0,transparent 70%),radial-gradient(ellipse 45% 40% at 5% 90%,#0e3b55 0,transparent 70%),#050a1c}
+.galaxy-sky i{position:absolute;inset:-10%;background-repeat:repeat;opacity:.8}
+.galaxy-sky .g1{background-image:radial-gradient(1.1px 1.1px at 12% 18%,#fff 50%,#0000 51%),radial-gradient(1px 1px at 38% 72%,#cfe0ff 50%,#0000 51%),radial-gradient(1.2px 1.2px at 64% 14%,#fff 50%,#0000 51%),radial-gradient(1px 1px at 82% 58%,#bcd2ff 50%,#0000 51%);background-size:380px 300px;animation:g-drift 160s linear infinite}
+.galaxy-sky .g2{background-image:radial-gradient(.9px .9px at 22% 46%,#fff 50%,#0000 51%),radial-gradient(1.4px 1.4px at 70% 84%,#d8e6ff 50%,#0000 51%),radial-gradient(.8px .8px at 48% 28%,#9fc0ff 50%,#0000 51%);background-size:260px 220px;opacity:.55;animation:g-drift 110s linear infinite reverse}
+.galaxy-sky .g3{background:radial-gradient(circle at 50% 50%,#7fa4ff10 0,transparent 55%);animation:g-pulse 9s ease-in-out infinite alternate}
+.galaxy-svg{position:absolute;inset:0;width:100%;height:100%;display:block;overflow:visible;font-family:"PingFang SC","Microsoft YaHei",sans-serif}
+.galaxy-ring{fill:none;stroke:#7fa4ff;stroke-opacity:.16;stroke-width:1;stroke-dasharray:2 8;stroke-linecap:round}
+.galaxy-ring.inner{stroke-opacity:.08}
+.galaxy-cluster.on .galaxy-ring{stroke-opacity:.5;stroke-dasharray:none}
+.galaxy-links path{fill:none;stroke:#6f93e6;stroke-opacity:.22;stroke-width:1;stroke-linecap:round;transition:stroke-opacity .3s,stroke-width .3s;vector-effect:non-scaling-stroke}
+.galaxy-links path.cross{stroke:#b49cff;stroke-opacity:.16;stroke-dasharray:3 7}
+.galaxy-links path.lit{stroke:#a9d6ff;stroke-opacity:.95;stroke-width:2;stroke-dasharray:7 8;animation:g-flow 1s linear infinite;filter:drop-shadow(0 0 5px #7fc4ff)}
+.galaxy-links path.dim{stroke-opacity:.05}
+.galaxy-star{cursor:pointer;outline:none;transition:opacity .3s}
+.galaxy-star.dim{opacity:.22}
+.galaxy-hit{fill:transparent}
+.galaxy-core{fill:#4a5a82;stroke:#7a8db8;stroke-opacity:.5;stroke-width:1;transition:fill .25s,filter .25s,r .25s}
+.galaxy-star.no_judgment .galaxy-core,.galaxy-star.pending .galaxy-core{fill:#2b3858;stroke:#53638b;stroke-opacity:.7;stroke-dasharray:2 2}
+.galaxy-star.stable_for_now .galaxy-core{fill:#c4fff2;stroke:#7cf5c0;stroke-opacity:1;filter:drop-shadow(0 0 6px #7cf5c0) drop-shadow(0 0 16px #3fd9a4)}
+.galaxy-star.consolidating .galaxy-core{fill:#d9e8ff;stroke:#8fb8ff;stroke-opacity:1;filter:drop-shadow(0 0 6px #8fb8ff)}
+.galaxy-star.needs_help_now .galaxy-core{fill:#ffe3bd;stroke:#ffb86b;stroke-opacity:1;filter:drop-shadow(0 0 7px #ffb86b) drop-shadow(0 0 15px #ff8f3d)}
+.galaxy-spark{fill:#fff;pointer-events:none}
+.galaxy-halo{pointer-events:none;transform-box:fill-box;transform-origin:center;animation:g-breathe 4.4s ease-in-out infinite}
+.galaxy-star.needs_help_now .galaxy-halo{animation-duration:2.7s}
+.galaxy-orbit{fill:none;stroke:#fff;stroke-width:1.4;stroke-opacity:0;stroke-dasharray:3 5;transform-box:fill-box;transform-origin:center;transition:stroke-opacity .2s}
+.galaxy-star.hover .galaxy-orbit{stroke-opacity:.6}
+.galaxy-star.selected .galaxy-orbit{stroke-opacity:1;animation:g-spin 12s linear infinite}
+.galaxy-star:hover .galaxy-core,.galaxy-star.hover .galaxy-core{stroke:#fff;stroke-opacity:1}
+.galaxy-star:focus-visible .galaxy-orbit{stroke:#ffe27a;stroke-opacity:1;stroke-width:2.4}
+.galaxy-name{fill:#e1ebff;font-size:13px;letter-spacing:.02em;pointer-events:none;paint-order:stroke;stroke:#050a1c;stroke-width:4px;stroke-linejoin:round}
+.galaxy-star.no_judgment .galaxy-name{fill:#8ea0c9}
+.galaxy-star.selected .galaxy-name{fill:#fff;font-weight:600}
+.galaxy-title .idx{fill:#7fa4ff;fill-opacity:.8;font:600 12px/1 ui-monospace,Menlo,monospace;letter-spacing:.24em}
+.galaxy-title .name{fill:#ecf2ff;font-size:19px;font-weight:600;letter-spacing:.1em;paint-order:stroke;stroke:#050a1c;stroke-width:5px;stroke-linejoin:round;transition:opacity .3s}
+.galaxy-title.quiet .name,.galaxy-title.quiet .idx,.galaxy-title.quiet .tally{opacity:.35}
+.galaxy-title .tally{font-size:13px;paint-order:stroke;stroke:#050a1c;stroke-width:3.5px;stroke-linejoin:round}
+.galaxy-title .tally .stable_for_now{fill:#7cf5c0}.galaxy-title .tally .consolidating{fill:#8fb8ff}.galaxy-title .tally .needs_help_now{fill:#ffb86b}
+/* floating controls: glass over the sky, every target at least 44px */
+.galaxy-hud{position:absolute;z-index:3;display:flex;align-items:center;gap:10px;pointer-events:none}
+.galaxy-hud>*{pointer-events:auto}
+.galaxy-hud.top{inset:0 0 auto 0;justify-content:space-between;padding:18px 20px;background:linear-gradient(#050a1cdd,#050a1c00)}
+.galaxy-eyebrow{display:inline-flex;align-items:center;gap:6px;font-size:12px;letter-spacing:.14em;color:var(--g-mute)}
+.galaxy-title h2{margin:3px 0 0;font:600 clamp(18px,2.4vw,26px)/1.25 var(--serif);color:#f2f6ff;letter-spacing:.04em}
+.galaxy-tally{display:flex;align-items:baseline;gap:6px;margin-left:auto;color:var(--g-mute);font-size:13px}
+.galaxy-tally strong{font:600 clamp(26px,3.4vw,38px)/1 var(--serif);color:#fff}.galaxy-tally small{font-size:15px}
+.galaxy-view{display:flex;padding:4px;border:1px solid var(--g-line);border-radius:12px;background:var(--g-glass);backdrop-filter:blur(10px)}
+.galaxy-view button{display:grid;place-items:center;width:48px;height:44px;border:0;border-radius:9px;background:transparent;color:var(--g-mute);cursor:pointer;transition:background .2s,color .2s}
+.galaxy-view button[aria-pressed=true]{background:#1f3370;color:#fff}
+.galaxy-hud.chapters{left:18px;right:18px;bottom:62px;gap:8px;overflow-x:auto;padding:4px 2px 6px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.galaxy-hud.chapters::-webkit-scrollbar{display:none}
+.galaxy-hud.chapters button,.galaxy-hud.filters button{flex:0 0 auto;display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 16px;border:1px solid var(--g-line);border-radius:999px;background:var(--g-glass);backdrop-filter:blur(10px);color:#cdd9f5;font-size:14px;cursor:pointer;white-space:nowrap;transition:background .2s,border-color .2s,color .2s,transform .15s}
+.galaxy-hud.chapters button b{font:600 11px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;color:#7fa4ff}
+.galaxy-hud.chapters button.active{background:#243d86;border-color:#6f93e6;color:#fff;box-shadow:0 0 18px #4a76ff55}
+.galaxy-hud.chapters button:active,.galaxy-hud.filters button:active{transform:scale(.96)}
+.galaxy-hud.filters{left:18px;top:86px;flex-direction:column;align-items:stretch;gap:8px}
+.galaxy-hud.filters button{justify-content:flex-start;padding:0 14px}
+.galaxy-hud.filters button i{width:10px;height:10px;border-radius:50%;background:#53638b;flex:0 0 auto}
+.galaxy-hud.filters button small{margin-left:auto;padding-left:10px;color:#8fa3cf;font-size:12px}
+.galaxy-hud.filters .stable_for_now i{background:#7cf5c0;box-shadow:0 0 9px #7cf5c0}.galaxy-hud.filters .consolidating i{background:#8fb8ff;box-shadow:0 0 8px #8fb8ff}.galaxy-hud.filters .needs_help_now i{background:#ffb86b;box-shadow:0 0 9px #ffb86b}
+.galaxy-hud.filters button.active{background:#243d86;border-color:#6f93e6;color:#fff}
+.galaxy-hud.filters button:disabled{opacity:.4;cursor:default}
+.galaxy-hud.foot{inset:auto 0 0 0;justify-content:space-between;padding:10px 20px 14px;font-size:12px;color:#7f93bf;background:linear-gradient(#050a1c00,#050a1ce6);pointer-events:none}
+.galaxy-controls{position:absolute;right:18px;bottom:120px;z-index:3;display:flex;flex-direction:column;align-items:center;gap:6px;padding:6px;border:1px solid var(--g-line);border-radius:16px;background:var(--g-glass);backdrop-filter:blur(10px);transition:right .35s cubic-bezier(.2,.8,.2,1)}
+.galaxy-controls button{display:grid;place-items:center;width:44px;height:44px;border:0;border-radius:11px;background:transparent;color:#dbe6ff;cursor:pointer;transition:background .2s,transform .15s}
+.galaxy-controls button:hover:not(:disabled){background:#1f3370}.galaxy-controls button:active:not(:disabled){transform:scale(.92)}.galaxy-controls button:disabled{opacity:.35}
+.galaxy-zoom{font:600 12px/1 ui-monospace,Menlo,monospace;color:var(--g-mute)}
+.galaxy-list{position:absolute;inset:0;overflow:auto;padding:92px 20px 70px;background:#050a1c}
+.galaxy-list .knowledge-node-list{max-width:760px;margin:0 auto;color:#e6eeff}
+.galaxy-list .knowledge-node-list>button{color:#e6eeff;border-bottom-color:#1d2f66;min-height:56px}
+.galaxy-list .knowledge-node-list strong{color:#f2f6ff}.galaxy-list .knowledge-node-list small{color:#8fa3cf}
+/* detail: a drawer that slides over the stage, not a block far below it */
+.galaxy-drawer{position:absolute;z-index:5;top:0;right:0;bottom:0;width:min(430px,42%);overflow:auto;padding:22px 24px 40px;background:#f8f6ee;color:#283f35;box-shadow:-24px 0 60px #0008;animation:g-drawer .38s cubic-bezier(.2,.8,.2,1) both;overscroll-behavior:contain;touch-action:pan-y;user-select:text;-webkit-user-select:text}
+.galaxy-drawer-close{position:sticky;top:0;float:right;z-index:2;display:grid;place-items:center;width:44px;height:44px;margin:-8px -10px 0 0;border:1px solid #d8dccc;border-radius:50%;background:#fffdf6;color:#456;cursor:pointer}
+.galaxy-drawer .knowledge-detail{border:0;box-shadow:none;background:transparent;padding:0}
+.galaxy-drawer .knowledge-detail-top .icon-button{display:none}
+.galaxy-stage.has-drawer .galaxy-controls{right:calc(min(430px,42%) + 18px)}
+.galaxy-stage.has-drawer .galaxy-hud.top .galaxy-tally{display:none}
+@keyframes g-drawer{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
+@keyframes g-drift{to{transform:translate3d(-380px,-300px,0)}}
+@keyframes g-pulse{from{opacity:.4}to{opacity:1}}
+@keyframes g-breathe{0%,100%{transform:scale(.88);opacity:.62}50%{transform:scale(1.1);opacity:1}}
+@keyframes g-flow{to{stroke-dashoffset:-30}}
+@keyframes g-spin{to{transform:rotate(360deg)}}
+/* narrow / portrait tablet: the drawer becomes a bottom sheet, filters move to a row */
+@media(max-width:900px){
+  .galaxy-stage{height:clamp(540px,calc(100dvh - 130px),900px)}
+  .galaxy-hud.filters{left:18px;right:18px;top:auto;bottom:112px;flex-direction:row;overflow-x:auto;scrollbar-width:none}
+  .galaxy-hud.filters::-webkit-scrollbar{display:none}
+  .galaxy-hud.top{padding:14px 16px}.galaxy-hud.foot{flex-direction:column;align-items:flex-start;gap:2px}
+  .galaxy-controls{bottom:178px;right:14px;flex-direction:row}.galaxy-zoom{display:none}
+  .galaxy-drawer{top:auto;left:0;width:100%;height:68%;border-radius:22px 22px 0 0;box-shadow:0 -24px 60px #0008;animation-name:g-sheet}
+  .galaxy-stage.has-drawer .galaxy-controls{right:14px;bottom:calc(68% + 12px)}
+  .galaxy-stage.has-drawer .galaxy-hud.chapters,.galaxy-stage.has-drawer .galaxy-hud.filters,.galaxy-stage.has-drawer .galaxy-hud.foot{display:none}
+}
+@keyframes g-sheet{from{transform:translateY(60px);opacity:0}to{transform:none;opacity:1}}
+@media(prefers-reduced-motion:reduce){.galaxy-sky i,.galaxy-halo,.galaxy-links path.lit,.galaxy-star.selected .galaxy-orbit,.galaxy-drawer{animation:none!important}.galaxy-star,.galaxy-core{transition:none!important}}

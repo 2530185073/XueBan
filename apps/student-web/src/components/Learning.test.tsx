@@ -17,7 +17,7 @@ describe('knowledge map views', () => {
   it('renders real chapters and evidence-backed nodes without mastery percentages', () => {
     const html = renderToStaticMarkup(<KnowledgeMapView map={graphMap} onOpen={noop} />)
     for (const text of ['有理数', '代数式', '需要再看看', '还不判断', 'AI 初判', '老师核实', '个知识点有作答记录']) expect(html).toContain(text)
-    expect(html).toContain('role="button"'); expect(html).toContain('tabindex="0"'); expect(html).toContain('star-links')
+    expect(html).toContain('role="button"'); expect(html).toContain('tabindex="0"'); expect(html).toContain('galaxy-links'); expect(html).toContain('按章节飞行'); expect(html).toContain('按状态筛选')
     expect(html).not.toContain('%'); expect(html).not.toContain('掌握度')
   })
   it('hides stale judgments while the projection is pending, even with old node payloads', () => {

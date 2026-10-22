@@ -1,6 +1,6 @@
-import { StarMap } from './StarMap'
+import { Galaxy } from './Galaxy'
 import { evidenceTarget, type EvidenceTarget } from '../core/evidenceTrace'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, ArrowUpRight, BookOpen, ChevronRight, CircleDot, Clock3, Compass, Leaf, List, LoaderCircle, Map as MapIcon, RefreshCw, X } from 'lucide-react'
 import { safeError } from '../core'
 import { CurriculumBookPicker } from './CurriculumBookPicker'
@@ -90,31 +90,64 @@ function MapEmpty({ pending, hasScope }: { pending: boolean; hasScope: boolean }
     <small>没有记录，不等于不会；也不需要为填满地图额外做题。</small></div>
 }
 
-/** Current-student nodes and actual prerequisite edges only. No inferred mastery. */
-export function KnowledgeMapView({ map, onOpen, selectedId, onOpenHomework }: { map: KnowledgeMap; onOpen: (knowledgeId: string) => void; selectedId?: string | null; onOpenHomework?: OpenHomework }) {
-  const [subject, setSubject] = useState('all'), [chapterId, setChapterId] = useState('all'), [view, setView] = useState<'map' | 'list'>('map')
+const FILTERS = [
+  { key: 'all', label: '全部' }, { key: 'needs_help_now', label: '需要再看看' }, { key: 'consolidating', label: '正在巩固' },
+  { key: 'stable_for_now', label: '阶段性较稳' }, { key: 'no_judgment', label: '还不判断' },
+] as const
+type Filter = (typeof FILTERS)[number]['key']
+
+/**
+ * The map is the page: a full-bleed stage with a floating HUD. Chapters are chips that fly the camera to a cluster, status
+ * filters dim everything else, and a selected star opens the evidence in a drawer beside the map instead of far below it.
+ * Position, size and glow carry no score: the same four plain-word statuses as everywhere else.
+ */
+export function KnowledgeMapView({ map, onOpen, selectedId, onOpenHomework, drawer, onCloseDrawer }: {
+  map: KnowledgeMap; onOpen: (knowledgeId: string) => void; selectedId?: string | null; onOpenHomework?: OpenHomework
+  drawer?: React.ReactNode; onCloseDrawer?: () => void
+}) {
+  const [chapterId, setChapterId] = useState<string | null>(null), [view, setView] = useState<'map' | 'list'>('map'), [filter, setFilter] = useState<Filter>('all')
   const nodes = useMemo(() => knowledgeNodes(map), [map])
-  const subjects = [...new Set(nodes.map(node => node.subject).filter((value): value is string => !!value))]
-  const activeSubject = subjects.includes(subject) ? subject : 'all'
-  const scoped = nodes.filter(node => activeSubject === 'all' || node.subject === activeSubject)
-  const chapters = knowledgeChapters(scoped), activeChapter = chapters.find(chapter => chapter.id === chapterId)
-  const visible = activeChapter?.nodes ?? scoped, recorded = nodes.filter(node => node.valid_evidence_count > 0).length, pending = map.projection.pending
-  return <div className="knowledge-map-overview">
+  const chapters = useMemo(() => knowledgeChapters(nodes), [nodes])
+  const pending = map.projection.pending
+  const counts = useMemo(() => {
+    const c: Record<Filter, number> = { all: nodes.length, needs_help_now: 0, consolidating: 0, stable_for_now: 0, no_judgment: 0 }
+    for (const n of nodes) c[n.learning_status]++
+    return c
+  }, [nodes])
+  const shown = filter === 'all' || pending ? nodes : nodes.filter(n => n.learning_status === filter)
+  const recorded = nodes.filter(n => n.valid_evidence_count > 0).length
+  const stage = useRef<HTMLDivElement>(null)
+  const [drawerWidth, setDrawerWidth] = useState(0)
+  useLayoutEffect(() => {
+    if (!drawer || !stage.current) { setDrawerWidth(0); return }
+    const width = stage.current.getBoundingClientRect().width
+    setDrawerWidth(width >= 900 ? Math.min(430, width * 0.4) : 0)
+  }, [drawer])
+  return <div className="knowledge-map-overview galaxy-page">
     <MappingCoverageNote coverage={map.mapping_coverage} onOpenHomework={onOpenHomework} />
     {pending && <p className="knowledge-pending" role="status"><RefreshCw size={17} /> {PENDING_NOTICE}</p>}
-    {!nodes.length ? <MapEmpty pending={pending} hasScope={!!map.grade} /> : <>
-      <div className="knowledge-map-intro"><div><span className="knowledge-folio"><Leaf size={16} /> 我的学习足迹</span><h2>看见一点点，走稳每一步。</h2><p>选择一个知识点，看看它和哪次作答有关。</p></div><div className="knowledge-map-tally">{pending ? <><Clock3 size={24} /><span>更新中</span></> : <><strong>{recorded}<small> / {nodes.length}</small></strong><span>个知识点有作答记录</span></>}</div></div>
-      {subjects.length > 1 && <div className="knowledge-subject-tabs" aria-label="按学科查看"><button aria-pressed={activeSubject === 'all'} onClick={() => { setSubject('all'); setChapterId('all') }}>全部学科</button>{subjects.map(name => <button key={name} aria-pressed={activeSubject === name} onClick={() => { setSubject(name); setChapterId('all') }}>{name}</button>)}</div>}
-      <div className="knowledge-browser"><nav className="knowledge-chapters" aria-label="知识地图章节"><span className="eyebrow">章节索引</span>
-        <button className={!activeChapter ? 'active' : ''} aria-current={!activeChapter ? 'true' : undefined} onClick={() => setChapterId('all')}><span className="chapter-index"><Compass size={17} /></span><span>全部知识点</span><small>{scoped.length}</small></button>
-        {chapters.map((chapter, index) => <button key={chapter.id} className={activeChapter?.id === chapter.id ? 'active' : ''} aria-current={activeChapter?.id === chapter.id ? 'true' : undefined} onClick={() => setChapterId(chapter.id)}><span className="chapter-index">{String(index + 1).padStart(2, '0')}</span><span>{chapter.name}</span><small>{chapter.nodes.length}</small></button>)}
-        <p className="knowledge-index-note">一条连线，表示学习时会用到的基础。<br />它不会替你下判断。</p></nav>
-        <section className={`knowledge-map-sheet ${view === 'map' ? 'star' : ''}`} aria-label={activeChapter?.name || '全部知识点'}><div className="knowledge-sheet-toolbar"><div><h3>{activeChapter?.name || (activeSubject === 'all' ? '我的知识地图' : activeSubject)}</h3><span>{visible.length} 个知识点 · 点开看证据</span></div><div className="knowledge-view-switch" aria-label="展示方式"><button aria-label="地图视图" aria-pressed={view === 'map'} onClick={() => setView('map')}><MapIcon size={17} /></button><button aria-label="列表视图" aria-pressed={view === 'list'} onClick={() => setView('list')}><List size={18} /></button></div></div>
-          {view === 'map' ? <StarMap nodes={visible} edges={map.edges ?? []} pending={pending} selectedId={selectedId} onOpen={onOpen} />
-            : <div className="knowledge-node-list">{visible.map(node => <button className={selectedId === node.id ? 'selected' : ''} key={node.id} onClick={() => onOpen(node.id)}><span className={`knowledge-list-dot ${pending ? 'pending' : node.learning_status}`} /><span><strong>{node.name}</strong><small>{pending ? '记录正在更新' : sourceLabel(node.assessment_source)}</small></span><span className={`status-pill ${pending ? 'neutral' : statusLabels[node.learning_status].tone}`}>{pending ? '正在更新' : statusLabels[node.learning_status].label}</span><ChevronRight size={16} /></button>)}</div>}
-          {view === 'map' ? <div className="star-legend" aria-label="知识点状态说明">{pending ? <span><i className="none" />状态更新中，暂不显示旧结论</span> : <><span><i className="stable_for_now" />阶段性较稳</span><span><i className="consolidating" />正在巩固</span><span><i className="needs_help_now" />需要再看看</span><span><i className="none" />还不判断</span></>}<small>亮度表示记录的多少与来源，不是分数</small></div> : <div className="knowledge-legend" aria-label="知识点状态说明">{pending ? <span><span className="legend-dot" />状态更新中，暂不显示旧结论</span> : <><span><span className="legend-dot stable_for_now" />阶段性较稳</span><span><span className="legend-dot consolidating" />正在巩固</span><span><span className="legend-dot needs_help_now" />需要再看看</span><span><span className="legend-dot" />还不判断</span></>}</div>}
-        </section></div>
-    </>}
+    {!nodes.length ? <MapEmpty pending={pending} hasScope={!!map.grade} /> : <div className={`galaxy-stage ${drawer ? 'has-drawer' : ''}`} ref={stage}>
+      <header className="galaxy-hud top">
+        <div className="galaxy-title"><span className="galaxy-eyebrow"><Leaf size={14} /> 我的学习足迹</span><h2>看见一点点，走稳每一步</h2></div>
+        <div className="galaxy-tally">{pending ? <><Clock3 size={20} /><span>更新中</span></> : <><strong>{recorded}</strong><small> / {nodes.length}</small><span>个知识点有作答记录</span></>}</div>
+        <div className="galaxy-view" role="group" aria-label="展示方式">
+          <button aria-label="地图视图" aria-pressed={view === 'map'} onClick={() => setView('map')}><MapIcon size={18} /></button>
+          <button aria-label="列表视图" aria-pressed={view === 'list'} onClick={() => setView('list')}><List size={19} /></button>
+        </div>
+      </header>
+      {view === 'map'
+        ? <Galaxy nodes={shown} edges={map.edges ?? []} pending={pending} selectedId={selectedId} focusChapterId={chapterId} onOpen={onOpen} coveredRight={drawerWidth} />
+        : <div className="galaxy-list"><div className="knowledge-node-list">{shown.map(node => <button className={selectedId === node.id ? 'selected' : ''} key={node.id} onClick={() => onOpen(node.id)}><span className={`knowledge-list-dot ${pending ? 'pending' : node.learning_status}`} /><span><strong>{node.name}</strong><small>{pending ? '记录正在更新' : sourceLabel(node.assessment_source)}</small></span><span className={`status-pill ${pending ? 'neutral' : statusLabels[node.learning_status].tone}`}>{pending ? '正在更新' : statusLabels[node.learning_status].label}</span><ChevronRight size={16} /></button>)}</div></div>}
+      <nav className="galaxy-hud chapters" aria-label="按章节飞行">
+        <button className={chapterId === null ? 'active' : ''} aria-pressed={chapterId === null} onClick={() => setChapterId(null)}><Compass size={16} /> 全景</button>
+        {chapters.map((c, i) => <button key={c.id} className={chapterId === c.id ? 'active' : ''} aria-pressed={chapterId === c.id} onClick={() => setChapterId(chapterId === c.id ? null : c.id)}><b>{String(i + 1).padStart(2, '0')}</b>{c.name}</button>)}
+      </nav>
+      {!pending && <div className="galaxy-hud filters" role="group" aria-label="按状态筛选">
+        {FILTERS.map(f => <button key={f.key} className={`${f.key} ${filter === f.key ? 'active' : ''}`} aria-pressed={filter === f.key} onClick={() => setFilter(f.key)} disabled={f.key !== 'all' && !counts[f.key]}><i />{f.label}<small>{counts[f.key]}</small></button>)}
+      </div>}
+      <div className="galaxy-hud foot"><span>拖动移动 · 滚轮或双指缩放 · 点星星看证据</span><span>亮度表示记录的多少与来源，不是分数</span></div>
+      {drawer && <aside className="galaxy-drawer" aria-label="所选知识点详情"><button className="galaxy-drawer-close" onClick={onCloseDrawer} aria-label="关闭详情并回到全景"><X size={18} /></button>{drawer}</aside>}
+    </div>}
     {(map.source_note || map.graph_review_status === 'source_verified_ai_reviewed') && <p className="knowledge-graph-origin"><BookOpen size={15} /><span>{map.book_identity?.review_label || (map.graph_review_status === 'source_verified_ai_reviewed' ? '目录来源已核对，知识点关系由 AI 整理' : '知识点目录来源')}{map.source_note ? `：${map.source_note}` : '；尚未经老师逐点核实。'}</span></p>}
     {!!map.subjects?.length && <details className="knowledge-curriculum"><summary><BookOpen size={16} /><span>当前教材范围</span><small>查看版本信息</small></summary><div>{map.subjects.map(item => <article key={item.subject}><strong>{item.subject} · {item.publisher_name}</strong><span>{item.books.map(book => book.title).join('、') || '教材目录待确认'}</span><small>{item.graph_ready ? '知识点目录已就绪' : '知识点目录仍在校对'}{item.catalog_verified_at ? ` · 目录核对 ${dayLabel(item.catalog_verified_at)}` : ''}</small></article>)}</div></details>}
     <p className="muted small knowledge-notice">{map.notice}</p>
@@ -145,6 +178,7 @@ export function KnowledgeMapPage({ workspace, map, loading, loadError, onRefresh
     <CurriculumBookPicker workspace={workspace} grade={map?.grade} onChanged={() => { setOpenId(null); onRefresh() }} />
     {loading ? <div className="knowledge-loading" role="status"><LoaderCircle className="spin" size={26} /><h2>正在打开你的知识地图</h2><p>读取当前教材范围与最新作答记录…</p></div>
       : !map ? <div className="knowledge-load-error" role="alert"><BookOpen size={28} /><h2>这次没有读到知识地图</h2><p>{loadError || '稍后再试，已有作答记录会保留。'}</p><button className="button secondary" onClick={onRefresh}><RefreshCw size={16} /> 再试一次</button></div>
-        : <div className={`knowledge-layout ${openId ? 'has-detail' : ''}`}><KnowledgeMapView map={map} onOpen={open} selectedId={openId} onOpenHomework={onOpenHomework} />{openId && <aside className="knowledge-detail-panel" aria-label="所选知识点详情">{error ? <div className="knowledge-load-error" role="alert"><p>{error}</p><button className="text-button" onClick={close}><ArrowLeft size={16} /> 回到地图</button></div> : detail ? <KnowledgeDetailView detail={detail} onBack={close} pending={map.projection.pending} onOpenNode={open} onOpenHomework={onOpenHomework} busy={!!workspace.busy} /> : <div className="knowledge-detail-loading" role="status"><LoaderCircle className="spin" size={22} /><p>正在打开这个知识点…</p><button className="text-button" onClick={close}>回到地图</button></div>}</aside>}</div>}
+        : <KnowledgeMapView map={map} onOpen={open} selectedId={openId} onOpenHomework={onOpenHomework} onCloseDrawer={close}
+            drawer={openId ? (error ? <div className="knowledge-load-error" role="alert"><p>{error}</p><button className="text-button" onClick={close}><ArrowLeft size={16} /> 回到地图</button></div> : detail ? <KnowledgeDetailView detail={detail} onBack={close} pending={map.projection.pending} onOpenNode={open} onOpenHomework={onOpenHomework} busy={!!workspace.busy} /> : <div className="knowledge-detail-loading" role="status"><LoaderCircle className="spin" size={22} /><p>正在打开这个知识点…</p><button className="text-button" onClick={close}>回到地图</button></div>) : undefined} />}
   </section>
 }
