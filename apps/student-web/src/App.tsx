@@ -15,7 +15,7 @@ import { HistoryPage } from './components/HistoryPage'
 import { RecognitionResults } from './components/RecognitionResults'
 import { KnowledgeMapPage, useKnowledgeMap } from './components/KnowledgeMap'
 import { PreferencesPage } from './components/Preferences'
-import { OptionalActivityCard } from './components/OptionalActivities'
+import { OptionalActivityCard, optionalEntryVisible } from './components/OptionalActivities'
 import { PracticeRunner } from './components/PracticeRunner'
 import { VariantPracticePage } from './components/VariantPracticePage'
 import type { PracticeSession, VariantGeneration } from './core/learning'
@@ -117,7 +117,7 @@ export default function App() {
           {draft && !workspace.busy && ['failed', 'waiting', 'creating', 'uploading', 'recognizing', 'checking'].includes(draft.stage) && <button className="button secondary full" disabled={!workspace.online} onClick={() => void workspace.run()}><RefreshCw size={16} /> 继续未完成的检查</button>}
           {rows.length > 0 ? <RecognitionResults rows={rows} workspace={workspace} variantBusy={variantBusy} onVariant={row => void generateVariant(row)} selectedCaseId={selectedCaseId ?? draft?.correction?.caseId ?? null} onSelect={row => { evidenceNavigation.current++; setEvidenceFocus(null); setSelectedCaseId(row.case.id); setPhotoFocusVersion(value => value + 1) }} onCorrection={(row, camera) => { setSelectedCaseId(row.case.id); choosePhoto(camera, toCorrectionTarget(row)) }} onNext={nextQuestion} onSelectSubject={(row, subject) => { void workspace.setQuestionSubject(row, subject) }} /> : !pending && <div className="result-empty"><ScanNote /><h3>还没有可查看的逐题结果</h3><p>{detail?.homework.coverage.note || '未读清的地方不会被当成正确。可以重新拍清楚，或请老师一起核实。'}</p><div className="hint-actions">{detail && !detail.cases.length && workspace.draft?.homeworkId && !workspace.draft.correction && <button className="button primary" disabled={!!workspace.busy} onClick={() => void workspace.rerecognize()}><RefreshCw size={17} /> 重新识别这张照片</button>}<button className="button secondary" disabled={!!workspace.busy} onClick={() => choosePhoto()}><Camera size={17} /> 再拍清楚一点</button></div></div>}
         </>}</div></div>}</section>}
-        {page === 'work' && !detail && <OptionalActivityCard workspace={workspace} onStarted={startPractice} />}
+        {optionalEntryVisible({ page, draft, detail, busy: workspace.busy, evidenceActive: activeEvidence != null }) && <OptionalActivityCard workspace={workspace} onStarted={startPractice} />}
       </>}
       {workspace.busy && <div className="activity-indicator" role="status"><LoaderCircle className="spin" size={16} /><span>{workspace.busy}</span></div>}
     </main><footer className="footer"><span>学伴 <span className="footer-dot">·</span> 陪你完成自己的作业</span><span>AI 初判供参考，拿不准时请老师一起看。</span></footer>
