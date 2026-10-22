@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import examples from '../../../../contracts/phase1/examples.json'
-import type { CaseDetail, Decision, Hint } from '../core/types'
+import type { CaseDetail, Decision, Hint, Job } from '../core/types'
 import type { Workspace } from '../useStudentWorkspace'
 import { QuestionDetail } from './QuestionDetail'
 import { ResultsSummary } from './ResultsSummary'
@@ -32,6 +32,14 @@ describe('whole-page correction experience', () => {
     const html = renderToStaticMarkup(<QuestionDetail row={sample('candidate', 'incorrect')} workspace={workspace} onCorrection={() => {}} />)
     expect(html).toContain('需要订正'); expect(html).toContain('AI 发现了')
     expect(html).not.toContain('老师确认'); expect(button(html, '给我一点方向')).not.toContain('disabled')
+  })
+  it('counts a running check as processing instead of reusing its previous correct verdict', () => {
+    const row = sample('candidate', 'correct')
+    row.checkJob = { ...fixture<Job>('successful_check_job'), status: 'running' }
+    const html = renderToStaticMarkup(<ResultsSummary rows={[row]} detail={null} compact />)
+    expect(html).toContain('本次读到 1 题')
+    expect(html).toContain('AI 初判正确 0 道')
+    expect(html).toContain('处理中 1 道')
   })
   it('summarises mixed results separately and leaves correction available before all questions are confirmed', () => {
     const rows = [sample('candidate', 'incorrect'), sample('needs_review', 'correct'), sample('candidate', 'correct')]

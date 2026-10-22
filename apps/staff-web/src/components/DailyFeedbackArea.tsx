@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowRight, Check, CheckCheck, Copy, MessageSquareText, Plus, Send, TriangleAlert } from 'lucide-react'
 import type { QueuedReport, Report, ReportSnapshot } from '../api/learningTypes'
-import { dailyMessage, dateTime, dayLabel, deliveryLabel, recentDays, shareUrl } from '../learning'
+import { dailyMessage, dateTime, dayLabel, deliveryLabel, evidenceSourceCounts, evidenceSourceLabel, recentDays, reportJudgmentCounts, shareUrl } from '../learning'
 import { LoadNote, RefreshButton, useLoad, type LearningContext } from './LearningCommon'
 import { ShareLinkList } from './ShareLinkList'
 
@@ -9,29 +9,32 @@ const LINK_DAYS = 7
 
 export function DailySnapshotView({ snap }: { snap: ReportSnapshot }) {
   const { coverage, school_tasks: tasks, help } = snap
-  const pending = tasks.awaiting_verification + tasks.not_judged
+  const judgments = reportJudgmentCounts(tasks)
   const kinds = snap.activity_kinds
   const optional = snap.sections.optional_activity
   return <div className="snapshot">
-    {pending > 0 && <p className="preview-note"><TriangleAlert size={14} /> 还有 {pending} 道题未经老师核实，家长看到的对错只算已核实的题。可以先到坐班工作台核实再发送。</p>}
     <section className="report-block">
       <h4>今天的作业</h4>
       {coverage.homeworks ? <dl className="facts">
         <dt>拍照作业</dt><dd>{coverage.homeworks} 份，共 {tasks.questions} 道题</dd>
         <dt>老师已核实</dt><dd>{tasks.staff_verified} 道：答对 {tasks.verdicts.correct} · 答错 {tasks.verdicts.incorrect} · 部分正确 {tasks.verdicts.partially_correct}</dd>
+        {judgments.ai !== null && tasks.ai_verdicts ? <><dt>AI 初判，未经老师核实</dt><dd>{judgments.ai} 道：答对 {tasks.ai_verdicts.correct} · 答错 {tasks.ai_verdicts.incorrect} · 部分正确 {tasks.ai_verdicts.partially_correct} · 未作答 {tasks.ai_verdicts.unanswered}</dd></>
+          : <><dt>未分列的未核实记录</dt><dd>{judgments.unclassified} 道；这份记录未可靠分列有效 AI 初判与未完成识读。</dd></>}
+        <dt>{judgments.ai === null ? '尚无判定（已记录）' : '尚未形成可用判定'}</dt><dd>{judgments.unfinished} 道，不计作已确认对错。</dd>
         <dt>订正</dt><dd>已完成 {tasks.corrected_resolved} 道 · 还没完成 {tasks.correction_open} 道</dd>
+        {!!tasks.ai_corrected_pending && <><dt>订正 AI 初判通过</dt><dd>{tasks.ai_corrected_pending} 道，尚未经老师核实</dd></>}
       </dl> : <p className="subtle">今天没有拍照提交学校作业。</p>}
     </section>
     {(snap.mistakes ?? []).length > 0 && <section className="report-block"><h4>今天错的题和订正情况</h4>
       <div className="evidence-cards">{snap.mistakes!.map(item => <dl key={item.case_id} className="evidence-card">
         <dt>题目</dt><dd>{item.question || '（题目文字未识别）'}</dd>
         <dt>出处</dt><dd>{item.homework_title ?? '学校作业'}{item.page !== null && ` · 第 ${item.page} 页`}</dd>
-        {item.verdict && <><dt>老师判断</dt><dd>{item.verdict}</dd></>}
+        {item.verdict && <><dt>{evidenceSourceLabel(item.source_role)}</dt><dd>{item.verdict}</dd></>}
         <dt>订正</dt><dd><span className={`tag ${item.progress === 'verified_resolved' ? '' : 'amber'}`}>{item.correction}</span></dd>
       </dl>)}</div></section>}
     {snap.focus.length > 0 && <section className="report-block"><h4>今天卡住的知识点</h4><ul className="plain-list">{snap.focus.map(item =>
-      <li key={item.knowledge_id}>{item.name}：{item.denominator} 次核实作答中出错 {item.errors} 次{item.verified_scope.length > 0 && `（已核实：${item.verified_scope.join('；')}）`}</li>)}</ul></section>}
-    {snap.steady.length > 0 && <section className="report-block"><h4>今天做得好的</h4><p>{snap.steady.map(item => item.name).join('、')}</p></section>}
+      <li key={item.knowledge_id}>{item.name}：{item.denominator} 次有效作答中出错 {item.errors} 次（{evidenceSourceCounts(item)}）{item.verified_scope.length > 0 && `（已核实：${item.verified_scope.join('；')}）`}</li>)}</ul></section>}
+    {snap.steady.length > 0 && <section className="report-block"><h4>今天做得好的</h4><ul className="plain-list">{snap.steady.map(item => <li key={item.knowledge_id}>{item.name}（{evidenceSourceCounts(item)}）</li>)}</ul></section>}
     {(help.requests > 0 || help.hints_viewed > 0) && <section className="report-block"><h4>求助与提示</h4>
       <p>向老师求助 {help.requests} 次，查看提示 {help.hints_viewed} 次。</p>
       {help.staff_help.length > 0 && <ul className="plain-list">{help.staff_help.map((item, i) => <li key={i}>{item.question || '（题干待识别）'} —— {item.note}</li>)}</ul>}</section>}
@@ -99,7 +102,7 @@ function DailyDetail({ ctx, reportId, name, day }: { ctx: LearningContext; repor
       {report.published_at && <small className="subtle">发布于 {dateTime(report.published_at)}</small>}
       {draft && <small className="subtle">草稿会随作业和老师核实自动更新</small>}
     </div>
-    {draft && report.supersedes_id && <p className="preview-note">发送之后今天的情况又有变化（新作业、订正或改判），这是更新后的内容。家长原来的链接会自动显示最新版。</p>}
+    {draft && report.supersedes_id && <p className="preview-note">上一版发布后，今天的记录又有变化（新作业、订正或改判）。这是更新草稿；核对并发布后，已生成的家长链接才会显示新版。是否已发送以发送记录为准。</p>}
     <DailySnapshotView snap={report.snapshot} />
 
     <section className="report-block">
@@ -189,7 +192,7 @@ export default function DailyFeedbackArea({ ctx }: { ctx: LearningContext }) {
     <section className="learning-main">
       {selected?.report ? <DailyDetail key={selected.report.id} ctx={ctx} reportId={selected.report.id} name={selected.student.display_name} day={day} />
         : <div className="learning-empty"><span className="round-icon"><Check size={23} /></span><h2>今天交了什么、错在哪、订正了没有</h2>
-          <p>每份反馈只汇总这一天在托管班拍照提交的作业，对错以老师核实为准。草稿随作业和核实自动更新；发送后又有变化时会生成更新版本，家长原来的链接自动显示最新内容。</p></div>}
+          <p>每份反馈只汇总这一天在托管班拍照提交的作业，对错以老师核实为准。草稿随作业和核实自动更新；发布后记录变化会生成更新草稿。老师核对并发布新版后，已生成的家长链接才显示新内容。</p></div>}
     </section>
   </main>
 }

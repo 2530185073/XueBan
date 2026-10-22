@@ -2,12 +2,11 @@
 
 Teacher accounts reuse the long-lived password account machinery. A teacher is
 granted whole campuses, so learners created later are visible without per-learner
-grants. The review queue lists active cases that still need a person: model
-candidates awaiting verification during calibration, items the model could not
-judge, and recognitions that need revision.
+grants. The review queue lists active cases with an explicit human task. All
+archived questions remain available for voluntary inspection and review.
 """
 from datetime import datetime, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import uuid4
 
 from fastapi import Depends, Header, Query
@@ -23,6 +22,7 @@ from .correction_models import Entity
 from .device_auth import signing_key
 from .errors import Problem
 from .models import Homework, Principal, PrincipalRole, Student
+from .learning_rules import model_decision_usable
 from .passwords import hash_password
 
 STAFF_ROLES = ("sitting_teacher", "data_steward")
@@ -46,23 +46,67 @@ class StaffAccess(Strict):
     active: bool
 
 
+def usable_ai_initial(decision: dict, attempt: dict | None, question: dict | None = None) -> bool:
+    return (decision.get("validity") == "candidate" and model_decision_usable(decision)
+            and decision.get("verdict") in {"correct", "incorrect", "partially_correct", "unanswered"}
+            and decision.get("reason_code") not in {"unclear_image", "incomplete_question", "insufficient_process", "needs_staff", "unsupported_type"}
+            and attempt is not None and attempt.get("recognition_status") == "ready"
+            and attempt.get("answer_status") != "unclear"
+            and not attempt.get("recognition_uncertainties")
+            and not (question or {}).get("recognition_uncertainties"))
+
+
 def needs_staff(case: dict, attempt: dict | None, question: dict | None = None) -> str | None:
+    """Human attention is a task, not a synonym for provisional AI evidence.
+
+    A readable AI result remains a candidate without entering the mandatory
+    queue. Provider/format/model disagreement stays visible in the all-work
+    view; only explicit visual uncertainty or a staff-requested follow-up
+    becomes a review task. Help and appeals have their own unchanged queue.
+    """
     if case["lifecycle"] != "active" or case["progress"] == "verified_resolved":
         return None
     decision = case["current_decision"]
     if decision is not None:
-        if decision["validity"] == "needs_review":
+        if decision["validity"] == "confirmed":
+            return None
+        verification = decision.get("verification")
+        codes = set((verification or {}).get("reason_codes", []))
+        if usable_ai_initial(decision, attempt, question):
+            return None
+        # These codes describe an original-image limitation, unlike provider
+        # errors and unresolved differences between machine observations.
+        if "visual_unreadable" in codes:
             return "unable_to_judge"
-        if decision["validity"] == "candidate":
-            return "verify_candidate"
+        if verification is not None and (
+                codes or verification.get("status") in {"conflict", "degraded"}
+                or verification.get("independent_readback") is not True):
+            return None
+        if decision.get("reason_code") in {"unclear_image", "incomplete_question", "insufficient_process", "needs_staff", "unsupported_type"}:
+            return "unable_to_judge"
+        if attempt is not None and (attempt.get("answer_status") == "unclear"
+                or attempt.get("recognition_status") == "needs_revision"):
+            return "recognition_revision"
         return None
-    if attempt is not None and attempt["recognition_status"] in {"needs_revision", "failed"}:
+    if attempt is not None and attempt["recognition_status"] == "needs_revision":
         return "recognition_revision"
     # A staff revision or layout repair cleared the judgment; nobody else will start the next check.
     revised = case["check_ids"] or (question is not None and question.get("source") in {"staff_revision", "staff_layout"})
-    if attempt is not None and attempt["recognition_status"] == "ready" and revised:
+    if attempt is not None and attempt["recognition_status"] == "ready" and revised and case["progress"] != "rechecking":
         return "awaiting_check"
     return None
+
+
+def case_queue_reason(case: dict, attempt: dict | None, question: dict | None = None) -> str:
+    attention = needs_staff(case, attempt, question)
+    if attention:
+        return attention
+    decision = case.get("current_decision") or {}
+    if decision.get("origin") == "staff" and decision.get("validity") == "confirmed":
+        return "staff_verified"
+    if usable_ai_initial(decision, attempt, question):
+        return "ai_initial"
+    return "ai_pending"
 
 
 def install_staff(app, engine, cfg, database_session, current_actor):
@@ -197,7 +241,7 @@ def install_staff(app, engine, cfg, database_session, current_actor):
             return result
 
     @app.get("/v1/review-queue", operation_id="listReviewQueue")
-    def review_queue(actor: ActorDep, session: SessionDep, cursor: Annotated[str | None, Query(pattern=r"^case_[a-f0-9]{32}$")] = None, limit: Annotated[int, Query(ge=1, le=100)] = 30):
+    def review_queue(actor: ActorDep, session: SessionDep, cursor: Annotated[str | None, Query(pattern=r"^case_[a-f0-9]{32}$")] = None, limit: Annotated[int, Query(ge=1, le=100)] = 30, view: Literal["attention", "all"] = "attention"):
         if not set(actor.roles) & {"sitting_teacher", "campus_admin"}:
             raise Problem(403, "authorization", "forbidden", "此操作需要已获该学生授权的坐班老师。")
         students = accessible_students(actor).with_only_columns(Student.id, Student.display_name).subquery()
@@ -207,11 +251,20 @@ def install_staff(app, engine, cfg, database_session, current_actor):
         scan_limit = 2000
         items, scanned, last = [], 0, None
         # Scan in id order; filtering on JSON state stays portable across SQLite and PG.
-        for row, homework, display_name in session.execute(query.order_by(Entity.id).limit(scan_limit)):
+        rows = list(session.execute(query.order_by(Entity.id).limit(scan_limit)))
+        # Most clear AI cases no longer need attention. Fetch their referenced
+        # records together so an empty attention queue does not perform two
+        # extra database round trips for every skipped question.
+        references = {identifier for row, _, _ in rows
+                      for identifier in (row.document["current_attempt_id"], row.document["question_id"])}
+        related = {row.id: row for row in session.scalars(select(Entity).where(Entity.id.in_(references)))} if references else {}
+        for row, homework, display_name in rows:
             scanned += 1
-            attempt = session.get(Entity, row.document["current_attempt_id"])
-            question = session.get(Entity, row.document["question_id"])
-            reason = needs_staff(row.document, attempt.document if attempt else None, question.document if question else None)
+            attempt = related.get(row.document["current_attempt_id"])
+            question = related.get(row.document["question_id"])
+            args = (row.document, attempt.document if attempt else None, question.document if question else None)
+            reason = (case_queue_reason(*args) if view == "all" and row.document["lifecycle"] == "active"
+                      else needs_staff(*args))
             if reason is not None:
                 if len(items) == limit:
                     return {"items": items, "next_cursor": last}

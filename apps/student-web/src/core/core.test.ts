@@ -6,7 +6,7 @@ import { StudentApi } from './api'
 import { imageDimensions } from './photo'
 import { valid } from './validation'
 import examples from '../../../../contracts/phase1/examples.json'
-import type { Attempt, CapturedQuestionRevision, CaseDetail, CorrectionCase, Decision, Hint, HomeworkSession, ImageAsset, Job, NormalizedPhoto } from './types'
+import type { Attempt, CapturedQuestionRevision, CaseDetail, CheckRun, CorrectionCase, Decision, Hint, HomeworkSession, ImageAsset, Job, NormalizedPhoto } from './types'
 
 class MemorySession implements Storage {
   private values = new Map<string, string>()
@@ -167,6 +167,23 @@ describe('whole-page persisted correction results', () => {
     expect(result.detail?.cases.map(row => row.case.current_decision?.validity)).toEqual(results.map(state => state.validity))
     expect(result.detail!.cases.map(decisionLabel)).toEqual(['AI 初判 · 正确', 'AI 初判 · 需要订正', '暂时看不准 · 可以先看其他题', '暂时看不准 · 可以先看其他题'])
   })
+  it('does not swallow an explicit recheck behind an unfinished background run', async () => {
+    const s = wholePageSetup([{ validity: 'candidate', verdict: 'correct' }])
+    const completedResult = s.job.result
+    s.job.status = 'running'; s.job.result = null
+    let entered!: () => void, release!: () => void
+    const polling = new Promise<void>(resolve => { entered = resolve })
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const client = new StudentClient({ ...s.options, sleep: async () => { entered(); await gate } })
+    await client.login('synthetic.student', 'synthetic password only')
+    const draft = await client.createDraft(photo.blob), background = client.runDraft(draft.id)
+    await polling
+    const explicit = client.runDraft(draft.id, { forceCheckCaseIds: [s.rows[0].case.id], forceCheckToken: 'subject_change' })
+    s.job.status = 'succeeded'; s.job.result = completedResult; release()
+    expect((await background).stage).toBe('complete')
+    expect((await explicit).stage).toBe('complete')
+    expect(s.calls.filter(call => call.path.endsWith('/checks') && call.init.method === 'POST')).toHaveLength(1)
+  })
   it('keeps the photo and page decisions after a lost response, then resumes after reload without duplicate checks', async () => {
     const s = wholePageSetup(results); await s.client.login('synthetic.student', 'synthetic password only'); const draft = await s.client.createDraft(photo.blob)
     s.loseRecognition(); const failed = await s.client.runDraft(draft.id); expect(failed.stage).toBe('failed')
@@ -195,12 +212,12 @@ describe('whole-page persisted correction results', () => {
   })
 })
 
-function correctionSetup() {
+function correctionSetup(wholePageAssessment = false) {
   const s = setup(), c = fixture<CorrectionCase>('resolved_case'), q = fixture<CapturedQuestionRevision>('question_revision_2')
   let a = fixture<Attempt>('correction_across_question_revision')
-  c.scope = s.hw.scope; c.homework_id = s.hw.id; c.current_decision = null; c.progress = 'editing'; q.homework_id = s.hw.id
+  c.scope = s.hw.scope; c.homework_id = s.hw.id; c.current_decision = null; c.progress = 'editing'; c.check_ids = []; c.attempt_ids = [a.id]; q.homework_id = s.hw.id
   s.hw.case_ids = [c.id]; s.hw.question_ids = [q.question_id]
-  const jobs = new Map<string, Job>(); let count = 0
+  const jobs = new Map<string, Job>(), checks = new Map<string, CheckRun>(); let count = 0, checkCount = 0
   s.route((path, init) => {
     if (path === `/v1/cases/${c.id}`) return json(c)
     if (path === `/v1/questions/${q.question_id}`) return json({ record: q, current_revision: q.revision, currently_effective: true })
@@ -210,13 +227,44 @@ function correctionSetup() {
       a = { ...a, id: `attempt_retry${count}`, parent_attempt_id: a.id, recognition_status: count === 1 ? 'failed' : 'needs_revision', answer_text: null, answer_regions: [] }
       c.current_attempt_id = a.id; c.attempt_ids.push(a.id); c.revision++
       const job: Job = { ...s.job, id: `job_correction${count}`, kind: 'recognize_attempt', status: count === 1 ? 'failed' : 'succeeded', failure: count === 1 ? { code: 'invalid_provider_output', message: '合成失败', retryable: false } : null, result: count === 1 ? null : { resource_type: 'attempt', resource_id: a.id } }
+      if (wholePageAssessment) {
+        a.recognition_status = 'ready'; a.answer_text = '3x-6'; a.asset_ids = payload.asset_ids
+        a.recognition_revision = 1; a.recognition_uncertainties = []
+        job.status = 'succeeded'; job.failure = null; job.result = { resource_type: 'attempt', resource_id: a.id }
+        c.current_decision = { ...fixture<Decision>('model_candidate'), case_id: c.id, verdict: 'correct', validity: 'candidate', input_versions: { question_id: q.question_id, question_revision: q.revision, attempt_id: a.id, attempt_recognition_revision: a.recognition_revision, case_revision_at_submission: c.revision, fingerprint: '1'.repeat(64) } }
+      }
       jobs.set(job.id, job); s.hw.job_ids.push(job.id)
       return json({ job, created_resource: { resource_type: 'attempt', resource_id: a.id } })
     }
+    if (path === `/v1/cases/${c.id}/checks`) {
+      const payload = JSON.parse(init.body as string) as { attempt_id: string; question_revision: number; attempt_recognition_revision: number }
+      expect(payload.attempt_id).toBe(a.id); expect(payload.question_revision).toBe(q.revision); expect(payload.attempt_recognition_revision).toBe(a.recognition_revision); checkCount++
+      const job: Job = { ...s.job, id: `job_check${checkCount}`, kind: 'check', status: 'succeeded', result: { resource_type: 'check', resource_id: `check_retry${checkCount}` } }
+      const checkId = `check_retry${checkCount}`, check: CheckRun = { id: checkId, revision: 1, job_id: job.id, case_id: c.id, input_versions: { question_id: q.question_id, question_revision: q.revision, attempt_id: a.id, attempt_recognition_revision: a.recognition_revision, case_revision_at_submission: c.revision, fingerprint: '1'.repeat(64) }, model_version: null, rule_version: null, prompt_version: null, decision_ids: [`decision_retry${checkCount}`], created_at: now }
+      const decision = fixture<Decision>('model_candidate'); decision.id = `decision_retry${checkCount}`; decision.case_id = c.id; decision.check_id = checkId; decision.input_versions = check.input_versions; c.current_decision = decision; c.progress = 'needs_correction'; c.check_ids.push(checkId); c.revision++
+      jobs.set(job.id, job); checks.set(checkId, check); s.hw.job_ids.push(job.id)
+      return json({ job, created_resource: { resource_type: 'check', resource_id: checkId } }, 202)
+    }
+    if (path.startsWith(`/v1/checks/`)) return json(checks.get(path.split('/').at(-1)!))
     const job = jobs.get(path.split('/').at(-1)!); if (path.startsWith('/v1/jobs/') && job) return json(job)
   })
   return { ...s, c, q, current: () => a, replaceAttempt: () => { a.id = 'attempt_newer'; c.current_attempt_id = a.id } }
 }
+
+it('submits a new photo to the selected original question and reuses its whole-page assessment', async () => {
+  const s = correctionSetup(true); await s.client.login('synthetic.student', 'synthetic password only')
+  const parent = s.current().id
+  const draft = await s.client.createCorrection(s.c.id, photo.blob, 'unknown', parent)
+  const result = await s.client.runDraft(draft.id)
+  expect(result.error).toBeNull(); expect(result.stage).toBe('complete')
+  expect(result.homeworkId).toBe(s.hw.id); expect(result.correction?.caseId).toBe(s.c.id)
+  expect(s.current().id).not.toBe(parent); expect(s.current().parent_attempt_id).toBe(parent)
+  expect(s.current().asset_ids).toEqual(['asset_one'])
+  expect(result.detail?.cases[0].case.current_decision?.input_versions.attempt_id).toBe(s.current().id)
+  expect(result.detail?.cases[0].case.current_decision?.verdict).toBe('correct')
+  expect(s.calls.filter(call => call.init.method === 'POST' && (call.path.endsWith('/homeworks') || call.path.endsWith('/checks')))).toHaveLength(0)
+  expect(s.calls.filter(call => call.path.endsWith('/attempts'))).toHaveLength(1)
+})
 
 it('explicit retry of failed correction recognition chains to that failed attempt without overwriting a newer one', async () => {
   const s = correctionSetup(); await s.client.login('synthetic.student', 'synthetic password only'); const d = await s.client.createCorrection(s.c.id, photo.blob)

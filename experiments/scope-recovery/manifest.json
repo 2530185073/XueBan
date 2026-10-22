@@ -1,0 +1,81 @@
+{
+  "format": "xueban.scope-recovery-offline.v1",
+  "base_commit": "03aa3a2cd58089d49fb30acadf7e0dc6005e0595",
+  "mode": "mock_only",
+  "production_enabled": false,
+  "patch_sha256": "cc93552543a54a9315e265fb92bec670becf62fa02e269b925bb129f651edfd0",
+  "files": {
+    "services/backend/xueban_backend/providers/scope_recovery_contract.py": {
+      "status": "added",
+      "sha256": "14966aaef87b514eb0e15f7ee6144c2e7171e6f754267080b308bf8809926390"
+    },
+    "services/backend/xueban_backend/providers/scope_recovery_materializer.py": {
+      "status": "added",
+      "sha256": "31ff90a6f5c9755b7b53c1b8d826de74f6068b397606b24b97a6117df9c8350e"
+    },
+    "services/backend/xueban_backend/scope_recovery.py": {
+      "status": "added",
+      "sha256": "d7f39aaa4e34340d5b223c4f06f9602e8a9fbf0d636320bcba8dabf2123049df"
+    },
+    "services/backend/xueban_backend/scope_recovery_dispatch.py": {
+      "status": "added",
+      "sha256": "b432ffed4f6214773bca0bd9ec8c8151062c83773ce214faab279c25eab3324e"
+    },
+    "services/backend/xueban_backend/scope_recovery_apply.py": {
+      "status": "added",
+      "sha256": "9912eb8eb20ecbdf1e1130b3126198b2253697ba7c58b13082d33dd4ebb8400f"
+    },
+    "services/backend/tests/test_scope_recovery_contract.py": {
+      "status": "added",
+      "sha256": "617899859b7bae8ed2707c0b3396860a7a3daf8fb0af1ca6e9f6021b80c307e7"
+    },
+    "services/backend/tests/test_scope_recovery_materializer.py": {
+      "status": "added",
+      "sha256": "1e5dfec1f124812f986bfcac2e2275043f0593e8b7b9dca7ca8baaba8f44b4af"
+    },
+    "services/backend/tests/test_scope_recovery_durable.py": {
+      "status": "added",
+      "sha256": "f91bcb24de326dceb7196b8d9dba7ef856503ea794d0a967d07729382fb5ea53"
+    },
+    "services/backend/tests/test_scope_recovery_dispatch.py": {
+      "status": "added",
+      "sha256": "800f76706eb93087bec16a94794b25b8e9742eda31247faee8780f8e3e6f9712"
+    },
+    "services/backend/tests/test_scope_recovery_apply.py": {
+      "status": "added",
+      "sha256": "25c888076fb4cb4a57163b627c42e6304222a2a0a8f96b476f643a4ddc527a7e"
+    },
+    "services/backend/xueban_backend/recognition_recheck.py": {
+      "status": "modified",
+      "sha256": "4a868747546561667009860e62e60423c5af668e2c129399bd787313db3a8a5e",
+      "base_sha256": "1a0728f3c447bcb9f532d231f82107ce444e7d0b7a899c6285604f2c759c012f"
+    },
+    "contracts/phase1/data.schema.json": {
+      "status": "modified",
+      "sha256": "b1966ba353bf0d68af0463f562470bf4a6c6566076aff8484bf8e90c8670fc73",
+      "base_sha256": "5e72d88927f33840625624a9c36bf8ec3e63cd58601d18b084f08c74160b63a1"
+    }
+  },
+  "tests": [
+    "tests/test_scope_recovery_contract.py",
+    "tests/test_scope_recovery_materializer.py",
+    "tests/test_scope_recovery_durable.py",
+    "tests/test_scope_recovery_dispatch.py",
+    "tests/test_scope_recovery_apply.py",
+    "tests/test_recognition_recheck.py"
+  ],
+  "frozen_verification": {
+    "databases": [
+      "sqlite",
+      "postgresql"
+    ],
+    "summary": "316 passed, 1 warning in 47.58s",
+    "source_hashes_unchanged": true,
+    "real_model_requests": 0
+  },
+  "package_artifacts": {
+    "README.md": "e121c10a903247dab3d66bd2a4883f437d548f6920e3e3cedc5aa357ef282bc3",
+    "run_offline.py": "562b17b731be2de716e59bfb240543b5a90052f41bc75799629fc21ae5dc4c6f",
+    "test_run_offline.py": "723be6d81019bcd017931c7dd764d05e0c42ec8444817fc7d4b788846882f0b0"
+  }
+}

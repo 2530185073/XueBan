@@ -77,6 +77,16 @@ def normalize_literal_math(value, field_name=None):
         return None
     # Explicit fullwidth punctuation only; NFKC would erase exponent meaning.
     value = value.translate(str.maketrans("＋－＝／＊（）［］｛｝", "+-=/*()[]{}"))
+    # Expose adjacent operators before inspecting a fraction's context; spaces
+    # in a / ½b or x^ ½a must not bypass denominator/exponent protection.
+    value = re.sub(r"\s*([+\-*/=^(),\[\]{}])\s*", r"\1", value)
+    # A standalone half or a half coefficient before one/two literal variables
+    # has the same notation as 1/2. Do not expand a mixed number (2½), a
+    # denominator (a/½...), an exponent (x^½...) or an arbitrary adjacent word.
+    # Those need explicit grouping, not mechanical token concatenation.
+    if value == "½":
+        value = "1/2"
+    value = re.sub(r"(^|[(\[{])½(?=[ \t]*[A-Za-z]{1,2}(?![A-Za-z]))", r"\g<1>1/2", value)
     def exponent(match):
         text = match[0].translate(_SUPERSCRIPT_DIGITS)
         return "^" + text if re.fullmatch(r"[+-]?\d+", text) else "^{" + text + "}"
@@ -85,6 +95,9 @@ def normalize_literal_math(value, field_name=None):
     # 4 a and 4a use the same visible coefficient/letter; never merge 1 2,
     # x 2, or a whole word such as 4 apples into a different token.
     value = re.sub(r"(?<=[0-9])\s+(?=[A-Za-z](?:[^A-Za-z]|$))", "", value)
+    # Only a written rational coefficient's layout gap before a short variable
+    # product: 1/2 ah -> 1/2ah. Keep a h, digit groups and longer words intact.
+    value = re.sub(r"(?<![\w./^])(\d+/\d+)[ \t]+(?=[A-Za-z]{1,2}(?![A-Za-z]))", r"\1", value)
     return value
 
 
@@ -139,16 +152,69 @@ def normalize_page_stem(item):
     # remains mathematical content, as do commas separating numeric operands.
     value = re.sub(r"_(?:[ \t]*_)+", "____", value)
     value = re.sub(r"\s*([,:;])\s*", r"\1", value)
-    value = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])", "", value)
+    # Chinese typography often inserts spaces around an inline variable, number
+    # or unit. Remove only gaps touching Chinese text; keep internal Latin and
+    # digit gaps (a b, 1 2, x 2) so distinct math tokens cannot be joined.
+    value = re.sub(r"(?<=[\u4e00-\u9fff])\s+|\s+(?=[\u4e00-\u9fff])", "", value)
     value = value.strip()
     # One sentence stop is layout; an ellipsis may describe a mathematical
     # sequence and must never disappear from an exact binding comparison.
-    return value[:-1] if value.endswith(".") and not value.endswith("..") else value
+    value = value[:-1] if value.endswith(".") and not value.endswith("..") else value
+    # A terminal answer line after an existing equals sign is presentation:
+    # "57.2÷55=____" and "57.2÷55=" retain exactly the same printed condition.
+    # Keep the equals sign, internal operand blanks and single underscores.
+    value = re.sub(r"(?<==)_{2,}$", "", value)
+    # Only a choice question's terminal empty answer slot is presentation.
+    # Never erase populated parentheses, function calls or an empty slot in
+    # another question type. Recheck callers must preserve this type/context.
+    if item.get("question_type") in {"single_choice", "multiple_choice"} or item.get("options"):
+        value = re.sub(r"(?<=[\u4e00-\u9fff])\(\)$", "", value)
+    return value
+
+
+def _single_choice_wrapper_signature(item):
+    """Compare a single option's enclosing brackets, never rewrite the ink.
+
+    This optional presentation equivalence requires the complete same question
+    and option set on both sides. It is not an arithmetic/letter normalizer.
+    """
+    if (item.get("question_type") != "single_choice"
+            or item.get("answer_status") != "present"
+            or item.get("uncertainties") != []):
+        return None
+    answer, label = item.get("answer_text"), item.get("label")
+    if not isinstance(answer, str) or not isinstance(label, str) or not label.strip():
+        return None
+    match = re.fullmatch(r"\s*(?:([A-Z])|\(([A-Z])\)|（([A-Z])）)\s*", answer)
+    if match is None:
+        return None
+    selected = next(value for value in match.groups() if value is not None)
+    options = item.get("options")
+    if not isinstance(options, list) or not 2 <= len(options) <= 12:
+        return None
+    values = []
+    for option in options:
+        if (not isinstance(option, dict)
+                or not isinstance(option.get("label"), str)
+                or re.fullmatch(r"[A-Z]", option["label"]) is None
+                or not isinstance(option.get("text"), str) or not option["text"].strip()):
+            return None
+        values.append((option["label"], normalize_literal_math(option["text"])))
+    labels = [key for key, _ in values]
+    if len(set(labels)) != len(labels) or selected not in labels:
+        return None
+    stem = normalize_page_stem(item)
+    if not stem:
+        return None
+    return canonical_label(label), stem, tuple(sorted(values)), selected
 
 
 def _answer_equal(left, right):
-    return all(normalize_literal_math(left.get(key), key) == normalize_literal_math(right.get(key), key)
-               for key in ("answer_text", "answer_status"))
+    if all(normalize_literal_math(left.get(key), key) == normalize_literal_math(right.get(key), key)
+           for key in ("answer_text", "answer_status")):
+        return True
+    a, b = _single_choice_wrapper_signature(left), _single_choice_wrapper_signature(right)
+    return a is not None and a == b
 
 
 def _stem_compatible(left, right):
@@ -337,7 +403,8 @@ class WholePageCorrectionPipeline(CorrectionPipeline):
             "multimodel_audit": {"mode": "multimodel", "calls": audit, "independent_before_comparison": True}},
             self._metadata(calls, started), prompt_version=PROMPT_VERSION)
 
-    def _check(self, role, images, question, attempt, input_versions):
+    def _check(self, role, images, question, attempt, input_versions, student_grade=None,
+               knowledge_point_candidates=None, curriculum_context=None):
         # The independent reader sees source IDs and a label, not a provisional
         # answer. Only the main judge compares the current immutable snapshot.
         images, observation, question_regions, answer_regions = self._context(images, question, attempt, input_versions)

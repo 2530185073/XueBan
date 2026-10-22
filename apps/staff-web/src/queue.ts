@@ -1,7 +1,7 @@
 import type { HelpRequest } from './api/contracts.generated'
 import type { ReviewQueueItem, ReviewReason } from './api/types'
 
-export type QueueTab = 'help' | 'review'
+export type QueueTab = 'help' | 'review' | 'all'
 export type HelpFilter = 'all' | 'waiting' | 'claimed'
 
 export interface Selection { caseId: string; helpId: string | null }
@@ -11,7 +11,7 @@ export const emptyQueue = <T>(): QueueState<T> => ({ items: [], cursor: null, lo
 
 export const kindLabels: Record<HelpRequest['kind'], string> = { question: '作业答疑', recognition: '识别有误', judgment: '判断有疑问', appeal: '申请重查' }
 export const helpStatusLabels: Record<HelpRequest['status'], string> = { waiting: '待接手', claimed: '处理中', resolved: '帮助已结束', unresolved: '仍需帮助', cancelled: '已取消' }
-export const reasonLabels: Record<ReviewReason, string> = { verify_candidate: '核实 AI 候选', unable_to_judge: 'AI 无法判断', recognition_revision: '识别需修订', awaiting_check: '修订后待重新检查' }
+export const reasonLabels: Record<ReviewReason, string> = { verify_candidate: '核实 AI 候选', unable_to_judge: '原图需要核对', recognition_revision: '识读需核对', awaiting_check: '修订后待重新检查', ai_initial: 'AI 初判 · 可主动复核', ai_pending: 'AI 核对未完成', staff_verified: '老师已核实' }
 export const progressLabels: Record<string, string> = { pending: '待检查', editing: '订正中', rechecking: '检查中', needs_correction: '需要订正', verified_resolved: '已核实解决', paused: '已暂停' }
 
 /** Keep the order already on screen; refreshed items replace stale copies and new ones are appended. */

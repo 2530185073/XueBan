@@ -23,6 +23,21 @@ describe('history page', () => {
     expect(html.match(/继续订正/g)?.length).toBeGreaterThanOrEqual(2); expect(html).toContain('老师已重新切分部分题目')
     expect(html).toContain('题目统计暂时读不到'); expect(html).toContain('aria-pressed="true"')
   })
+  it('renders loaded history and enables read-only refresh while model work owns the mutation lock', () => {
+    const html = renderToStaticMarkup(<HistoryPage workspace={{ ...workspace, busy: '正在检查作业', historyLoading: false, historyLoaded: true }} onOpen={() => {}} onOpenDraft={() => {}} onNewWork={() => {}} />)
+    const refresh = html.match(/<button[^>]*>[\s\S]*?刷新记录<\/button>/)?.[0]
+    expect(refresh).not.toContain('disabled')
+    expect(html).toContain(workspace.history[0].title!)
+    expect(html).not.toContain('第一份作业，从今天开始')
+    expect(html.match(/<button[^>]*class="history-open"[^>]*>/)?.[0]).toContain('disabled') // mutation-driven opening remains protected
+  })
+  it('does not claim history is empty while the first read is pending or failed', () => {
+    for (const historyLoading of [true, false]) {
+      const html = renderToStaticMarkup(<HistoryPage workspace={{ ...workspace, history: [], historyLoaded: false, historyLoading }} onOpen={() => {}} onOpenDraft={() => {}} onNewWork={() => {}} />)
+      expect(html).not.toContain('第一份作业，从今天开始')
+      expect(html).toContain(historyLoading ? '正在查找已经保存的作业' : '历史记录还没有读到')
+    }
+  })
   it('offers a visible local-draft clear control and no empty graph/report/practice entries', () => {
     expect(html).toContain('清除本机草稿'); expect(html).toContain('7 天')
     for (const absent of ['知识图谱', '学习报告', '练习', '正确率', '%']) expect(html).not.toContain(absent)

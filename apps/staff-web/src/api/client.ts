@@ -221,8 +221,9 @@ export class StaffApi {
     const params = new URLSearchParams({ limit: '30' }); if (cursor) params.set('cursor', cursor)
     return this.request<HelpPage>(`/v1/help-requests?${params}`, 'HelpPage', { signal })
   }
-  reviewQueue(cursor?: string, signal?: AbortSignal) {
+  reviewQueue(cursor?: string, signal?: AbortSignal, view: 'attention' | 'all' = 'attention') {
     const params = new URLSearchParams({ limit: '30' }); if (cursor) params.set('cursor', cursor)
+    if (view === 'all') params.set('view', 'all')
     return this.request<ReviewQueuePage>(`/v1/review-queue?${params}`, isReviewQueuePage, { signal })
   }
 

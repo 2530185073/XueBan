@@ -17,6 +17,42 @@ BACKEND = Path(__file__).resolve().parents[1]
 REPO = BACKEND.parents[1]
 sys.path.insert(0, str(BACKEND))
 
+MODEL_CONFIG_NAMES = frozenset({
+    "ARK_BASE_URL",
+    "ARK_API_KEY",
+    "ARK_MODEL",
+    "ARK_FALLBACK_MODEL",
+})
+
+# Keep removing the retired review switch from inherited environments even
+# though it is no longer accepted from the private model configuration. This
+# prevents an old shell setting from reaching either API or Worker.
+LEGACY_MODEL_ENVIRONMENT_NAMES = frozenset({"REVIEW_PROTOCOL"})
+
+
+def _is_model_environment_name(name):
+    return (name in MODEL_CONFIG_NAMES or name in LEGACY_MODEL_ENVIRONMENT_NAMES
+            or name.startswith(("ARK_", "OPENAI_", "ZYAI_")))
+
+
+def without_model_environment(environment):
+    """Keep model credentials and routing variables inside the Worker only."""
+    return {name: value for name, value in environment.items()
+            if not _is_model_environment_name(name)}
+
+
+def _read_model_environment(path):
+    values = {}
+    for raw_line in read_private(path).splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, separator, value = line.partition("=")
+        name = name.strip()
+        if separator and name in MODEL_CONFIG_NAMES:
+            values[name] = value.strip()
+    return values
+
 
 def write_private(path, value):
     with os.fdopen(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600), "w") as file:
@@ -34,19 +70,17 @@ def load(runtime, *, require_model=False):
     config = json.loads(read_private(runtime / "runtime.json"))
     env = os.environ.copy()
     env.update(config["environment"])
+    env = without_model_environment(env)
     env["PYTHONPATH"] = str(BACKEND)
     web_dist = REPO / "apps/student-web/dist"
     if (web_dist / "index.html").is_file():
         env.setdefault("STUDENT_WEB_DIST", str(web_dist))
     if require_model:
         # Shutdown, status and revocation remain usable when model credentials are removed.
-        for line in read_private(Path(config["model_config"])).splitlines():
-            name, separator, value = line.partition("=")
-            if separator and name in {"ARK_BASE_URL", "ARK_API_KEY", "ARK_MODEL"}:
-                env[name] = value.strip()
+        env.update(_read_model_environment(Path(config["model_config"])))
         if not env.get("ARK_BASE_URL") or not env.get("ARK_API_KEY"):
             raise ValueError("Model configuration is incomplete")
-        if env.get("CORRECTION_MODE") == "multimodel":
+        if env.get("CORRECTION_MODE") in {"multimodel", "two_model"}:
             if config.get("gateway_config"):
                 for line in read_private(Path(config["gateway_config"])).splitlines():
                     name, separator, value = line.partition("=")
@@ -57,26 +91,36 @@ def load(runtime, *, require_model=False):
     return config, env
 
 
-def configure_models(runtime, *, mode, gateway_config=None, readback_model="kimi-k3", review_model="gpt-6-astra"):
+def configure_models(runtime, *, mode, gateway_config=None, readback_model="kimi-k3", review_model="gpt-6-astra",
+                     review_api="responses", review_thinking="enabled", reconciliation_provider="primary",
+                     visual_review_model="gpt-6-astra", visual_review_enabled="1"):
     """Keep secrets in their existing private file; persist only explicit paths and switches."""
     config, _ = load(runtime)
-    if mode not in {"single", "multimodel"}:
+    if mode not in {"single", "multimodel", "two_model"}:
         raise ValueError("Unknown correction mode")
-    for model in (readback_model, review_model):
+    if (review_api not in {"chat", "responses"} or review_thinking not in {"enabled", "disabled"}
+            or reconciliation_provider not in {"primary", "secondary"} or visual_review_enabled not in {"0", "1"}):
+        raise ValueError("Invalid review API or thinking mode")
+    if mode != "two_model" and (review_api != "responses" or review_thinking != "enabled"):
+        raise ValueError("Review API and thinking overrides require two_model mode")
+    for model in (readback_model, review_model, visual_review_model):
         if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", model):
             raise ValueError("Invalid model identifier")
     if gateway_config is not None:
         path = gateway_config.expanduser().resolve()
         read_private(path)
         config["gateway_config"] = str(path)
-    if mode == "multimodel":
+    if mode in {"multimodel", "two_model"}:
         path = config.get("gateway_config")
         if not path:
             raise ValueError("An explicit private gateway configuration is required")
         from scripts.vision_benchmark import read_config
         read_config(Path(path))
     config["environment"].update(CORRECTION_MODE=mode, READBACK_MODEL=readback_model, REVIEW_MODEL=review_model)
-    if mode == "multimodel":
+    config["environment"].update(REVIEW_API=review_api, REVIEW_THINKING=review_thinking)
+    config["environment"]["RECONCILIATION_PROVIDER"] = reconciliation_provider
+    config["environment"].update(VISUAL_REVIEW_MODEL=visual_review_model, VISUAL_REVIEW_ENABLED=visual_review_enabled)
+    if mode in {"multimodel", "two_model"}:
         config["environment"]["WORKER_LEASE_SECONDS"] = str(max(600, int(config["environment"].get("WORKER_LEASE_SECONDS", "300"))))
     temp = runtime / ("runtime-" + secrets.token_hex(8) + ".tmp")
     try:
@@ -86,12 +130,84 @@ def configure_models(runtime, *, mode, gateway_config=None, readback_model="kimi
         temp.unlink(missing_ok=True)
 
 
+def ledger_history_check(rows, entries):
+    """Current DB coverage only; cannot establish the history of older backups."""
+    by_id = {}
+    for entry in entries:
+        identity = (entry["tenant_id"], entry["student_id"])
+        if entry["deletion_id"] in by_id and by_id[entry["deletion_id"]] != identity:
+            raise ValueError("Conflicting deletion ledger entries")
+        by_id[entry["deletion_id"]] = identity
+    required = [row for row in rows if row["server_completed_at"] is not None
+                or row["status"] in {"waiting_devices", "completed"}
+                or row["targets"].get("backup_tombstone") == "done"
+                or row["targets"].get("sensitive_records") == "done"]
+    return {"deletion_requests": len(rows), "requires_ledger": len(required),
+            "ledger_entries": len(entries),
+            "missing_historical_entries": sum(by_id.get(row["id"]) != (row["tenant_id"], row["student_id"]) for row in required),
+            "historical_backup_compliance": "unverified"}
+
+
+def audit_deletion_ledger(runtime, ledger_path=None):
+    from sqlalchemy import create_engine, select, exists, func
+    from xueban_backend.governance_models import DeletionRequest
+    from xueban_backend.models import Student
+    from scripts.recovery_payload import validate_ledger
+    config, env = load(runtime)
+    configured = env.get("DELETION_LEDGER_PATH")
+    path = Path(ledger_path).expanduser().absolute() if ledger_path else Path(configured) if configured else None
+    entries = validate_ledger(read_private(path).encode()) if path is not None else []
+    engine = create_engine(env["DATABASE_URL"])
+    try:
+        with engine.connect() as connection:
+            rows = list(connection.execute(select(DeletionRequest.id, DeletionRequest.tenant_id, DeletionRequest.student_id,
+                            DeletionRequest.status, DeletionRequest.targets, DeletionRequest.server_completed_at)).mappings())
+            untracked = connection.scalar(select(func.count()).select_from(Student).where(
+                Student.display_name == "已删除学员", ~exists(select(DeletionRequest.id).where(DeletionRequest.student_id == Student.id))))
+    finally:
+        engine.dispose()
+    return {**ledger_history_check(rows, entries), "ledger_configured": bool(configured),
+            "candidate_file_provided": ledger_path is not None, "deleted_students_without_request": untracked}
+
+
+def configure_deletion_ledger(runtime, ledger_path):
+    from scripts.recovery_payload import validate_ledger
+    config, _ = load(runtime)
+    path = Path(ledger_path).expanduser().absolute()
+    if not path.parent.is_dir() or path.parent.stat().st_mode & 0o077:
+        raise ValueError("Ledger parent must be a private existing directory (0700)")
+    data = read_private(path)  # Never creates a missing/empty replacement ledger.
+    entries = validate_ledger(data.encode())
+    old = config["environment"].get("DELETION_LEDGER_PATH")
+    if old and Path(old).resolve() != path.resolve():
+        for service in ("api", "worker"):
+            pidfile = runtime / (service + ".pid")
+            if pidfile.exists() and alive(int(pidfile.read_text().strip())):
+                raise ValueError("Stop API and worker before moving an existing deletion ledger")
+        previous = validate_ledger(read_private(Path(old)).encode())
+        signatures = {json.dumps(e, sort_keys=True) for e in entries}
+        if any(json.dumps(e, sort_keys=True) not in signatures for e in previous):
+            raise ValueError("New ledger omits previously retained deletion entries")
+    audit = audit_deletion_ledger(runtime, path)
+    if audit["missing_historical_entries"] or audit["deleted_students_without_request"]:
+        raise ValueError("Historical deletion entries are missing; recover and audit the ledger before binding")
+    config["environment"]["DELETION_LEDGER_PATH"] = str(path)
+    temp = runtime / ("runtime-ledger-" + secrets.token_hex(8) + ".tmp")
+    try:
+        write_private(temp, json.dumps(config, indent=2))
+        os.replace(temp, runtime / "runtime.json")
+    finally:
+        temp.unlink(missing_ok=True)
+    return {**audit, "ledger_configured": True, "restart_required": True}
+
+
 def api_environment(env):
     """Only the worker needs external model credentials."""
-    return {key: value for key, value in env.items() if not key.startswith(("ARK_", "ZYAI_", "OPENAI_"))}
+    return without_model_environment(env)
 
 
 def run(args, *, env=None, log=None):
+    env = without_model_environment(os.environ if env is None else env)
     if log:
         with log.open("ab") as output:
             result = subprocess.run(args, cwd=REPO, env=env, stdout=output, stderr=subprocess.STDOUT)
@@ -123,6 +239,8 @@ def initialize(args):
     runtime.mkdir(parents=True, exist_ok=False, mode=0o700)
     (runtime / "assets").mkdir(mode=0o700)
     (runtime / "logs").mkdir(mode=0o700)
+    (runtime / "ledger").mkdir(mode=0o700)
+    write_private(runtime / "ledger/deletions.jsonl", "")
     initialize_issuer(runtime / "identity")
     password = secrets.token_urlsafe(32)
     write_private(runtime / "postgres-password", password)
@@ -134,6 +252,7 @@ def initialize(args):
         "SIGNING_PRIVATE_KEY_FILE": str(runtime / "identity/issuer-private.pem"),
         "DEVICE_SESSION_TTL_SECONDS": "28800", "PUBLIC_BASE_URL": base,
         "ASSET_STORAGE_DIR": str(runtime / "assets"), "WORKER_LEASE_SECONDS": "300",
+        "DELETION_LEDGER_PATH": str(runtime / "ledger/deletions.jsonl"),
         "CORS_ALLOWED_ORIGINS": "http://127.0.0.1:5173,http://localhost:5173",
     }}
     write_private(runtime / "runtime.json", json.dumps(config, indent=2))
@@ -147,7 +266,8 @@ def initialize(args):
 
 
 def start_postgres(runtime, config):
-    status = subprocess.run(pg_args(runtime, config, "status"), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    status = subprocess.run(pg_args(runtime, config, "status"), env=without_model_environment(os.environ),
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if status.returncode:
         run(pg_args(runtime, config, "start") + ["-l", str(runtime / "logs/postgres.log"), "-o",
             f"-p {config['pg_port']} -h 127.0.0.1 -k {shlex.quote(str(runtime))}"], log=runtime / "logs/postgres-control.log")
@@ -164,7 +284,8 @@ def alive(pid):
 def spawn(runtime, name, args, env):
     pidfile = runtime / (name + ".pid")
     if pidfile.exists() and alive(int(pidfile.read_text())):
-        command = subprocess.check_output(["ps", "-p", pidfile.read_text().strip(), "-o", "command="], text=True)
+        command = subprocess.check_output(["ps", "-p", pidfile.read_text().strip(), "-o", "command="],
+                                          env=without_model_environment(os.environ), text=True)
         expected = "xueban_backend.worker" if name == "worker" else "xueban_backend.app:create_app"
         if expected not in command:
             raise RuntimeError("PID was reused; refusing to reuse another process")
@@ -216,10 +337,19 @@ def main():
     for command in ("start", "stop", "status", "migrate"):
         commands.add_parser(command)
     models = commands.add_parser("configure-models")
-    models.add_argument("--mode", choices=("single", "multimodel"), required=True)
+    models.add_argument("--mode", choices=("single", "multimodel", "two_model"), required=True)
     models.add_argument("--gateway-config", type=Path)
     models.add_argument("--readback-model", default="kimi-k3")
     models.add_argument("--review-model", default="gpt-6-astra")
+    models.add_argument("--review-api", choices=("chat", "responses"), default="responses")
+    models.add_argument("--review-thinking", choices=("enabled", "disabled"), default="enabled")
+    models.add_argument("--reconciliation-provider", choices=("primary", "secondary"), default="primary")
+    models.add_argument("--visual-review-model", default="gpt-6-astra")
+    models.add_argument("--visual-review-enabled", choices=("0", "1"), default="1")
+    ledger_audit = commands.add_parser("audit-deletion-ledger")
+    ledger_audit.add_argument("--ledger-path", type=Path)
+    ledger_config = commands.add_parser("configure-deletion-ledger")
+    ledger_config.add_argument("--ledger-path", type=Path, required=True)
     admin = commands.add_parser("admin")
     admin.add_argument("arguments", nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -227,9 +357,19 @@ def main():
     if args.command == "init":
         initialize(args)
         return
+    if args.command == "audit-deletion-ledger":
+        print(json.dumps(audit_deletion_ledger(runtime, args.ledger_path)))
+        return
+    if args.command == "configure-deletion-ledger":
+        print(json.dumps(configure_deletion_ledger(runtime, args.ledger_path)))
+        return
     if args.command == "configure-models":
         configure_models(runtime, mode=args.mode, gateway_config=args.gateway_config,
-                         readback_model=args.readback_model, review_model=args.review_model)
+                         readback_model=args.readback_model, review_model=args.review_model,
+                         review_api=args.review_api, review_thinking=args.review_thinking,
+                         reconciliation_provider=args.reconciliation_provider,
+                         visual_review_model=args.visual_review_model,
+                         visual_review_enabled=args.visual_review_enabled)
         print("Correction configuration saved; restart the worker to apply:", args.mode)
         return
     config, env = load(runtime, require_model=args.command == "start")
@@ -252,7 +392,8 @@ def main():
             if pidfile.exists():
                 pid = int(pidfile.read_text())
                 if alive(pid):
-                    command = subprocess.check_output(["ps", "-p", str(pid), "-o", "command="], text=True)
+                    command = subprocess.check_output(["ps", "-p", str(pid), "-o", "command="],
+                                                      env=without_model_environment(os.environ), text=True)
                     if ("xueban_backend.worker" if name == "worker" else "xueban_backend.app:create_app") not in command:
                         raise RuntimeError("PID was reused; refusing to stop another process")
                     os.kill(pid, signal.SIGTERM)
@@ -268,7 +409,8 @@ def main():
         for name in ("api", "worker"):
             pidfile = runtime / (name + ".pid")
             print(name, "running" if pidfile.exists() and alive(int(pidfile.read_text())) else "stopped")
-        status = subprocess.run(pg_args(runtime, config, "status"), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        status = subprocess.run(pg_args(runtime, config, "status"), env=env,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         print("postgres", "running" if status.returncode == 0 else "stopped")
 
 

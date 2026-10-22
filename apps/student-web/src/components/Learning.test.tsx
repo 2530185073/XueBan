@@ -2,7 +2,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { AgentContext, KnowledgeDetail, KnowledgeMap, MemoryList, OptionalActivities, PracticeItem, PracticeSession } from '../core/learning'
 import { activities, context, detail, map, memory, session } from '../core/learning.fixtures'
-import { activityOffers } from '../learning'
+import { activityOffers, PENDING_NOTICE } from '../learning'
+import { graphMap } from '../core/knowledge.fixtures'
 import { AgentTips } from './AgentTips'
 import { KnowledgeDetailView, KnowledgeMapView } from './KnowledgeMap'
 import { MemoryForm, MemoryItems } from './Preferences'
@@ -13,13 +14,20 @@ const noop = () => {}
 const asMap = (value: unknown) => value as KnowledgeMap
 
 describe('knowledge map views', () => {
-  it('renders chapters and per-knowledge labels with reasons, without percentages', () => {
-    const html = renderToStaticMarkup(<KnowledgeMapView map={asMap(map)} onOpen={noop} />)
-    expect(html).toContain('有理数'); expect(html).toContain('需要再看看 1'); expect(html).toContain('还不判断 3'); expect(html).toContain('原因还要和老师一起看看')
-    expect(html).not.toContain('老师刚更新了批改'); expect(html).not.toContain('%')
+  it('renders real chapters and evidence-backed nodes without mastery percentages', () => {
+    const html = renderToStaticMarkup(<KnowledgeMapView map={graphMap} onOpen={noop} />)
+    for (const text of ['有理数', '代数式', '需要再看看', '还不判断', 'AI 初判', '老师核实', '个知识点有作答记录']) expect(html).toContain(text)
+    expect(html).toContain('role="button"'); expect(html).toContain('tabindex="0"'); expect(html).toContain('knowledge-edges')
+    expect(html).not.toContain('%'); expect(html).not.toContain('掌握度')
   })
-  it('says the map refreshes later while a teacher update is still projecting', () => {
-    expect(renderToStaticMarkup(<KnowledgeMapView map={asMap({ ...map, projection: { ...map.projection, pending: true } })} onOpen={noop} />)).toContain('老师刚更新了批改，地图稍后刷新')
+  it('hides stale judgments while the projection is pending, even with old node payloads', () => {
+    const html = renderToStaticMarkup(<KnowledgeMapView map={{ ...graphMap, projection: { ...graphMap.projection, pending: true } }} onOpen={noop} />)
+    expect(html).toContain(PENDING_NOTICE); expect(html).toContain('正在更新')
+    for (const text of ['需要再看看', '阶段性较稳', 'AI 初判，', '老师核实，', '个知识点有作答记录']) expect(html).not.toContain(text)
+  })
+  it('does not turn legacy states or an unreviewed catalog into a personal graph', () => {
+    const html = renderToStaticMarkup(<KnowledgeMapView map={asMap(map)} onOpen={noop} />)
+    expect(html).toContain('没有记录，不等于不会'); expect(html).not.toContain('knowledge-graph-node')
   })
   it('drills down to the objective, prerequisites and the student’s own dated evidence', () => {
     const html = renderToStaticMarkup(<KnowledgeDetailView detail={detail as KnowledgeDetail} onBack={noop} />)
@@ -65,7 +73,7 @@ describe('practice runner pieces', () => {
   const items = session.items as PracticeItem[]
   it('labels the answer input and offers a hint only for variant items that have one', () => {
     const html = renderToStaticMarkup(<PracticeItemCard item={items[0]} index={0} active hintsAllowed busy={false} onAnswer={async () => true} onHint={noop} />)
-    expect(html).toMatch(/<label for="[^"]+">你的答案<\/label>/); expect(html).toContain('inputMode="decimal"'); expect(html).toContain('给我一点提示')
+    expect(html).toMatch(/<label for="[^"]+">你的答案<\/label>/); expect(html).toContain('inputMode="text"'); expect(html).toContain('给我一点提示')
     expect(renderToStaticMarkup(<PracticeItemCard item={items[0]} index={0} active hintsAllowed={false} busy={false} onAnswer={async () => true} onHint={noop} />)).not.toContain('给我一点提示')
   })
   it('uses A–D radio choices for choice items', () => {
@@ -76,7 +84,7 @@ describe('practice runner pieces', () => {
     expect(renderToStaticMarkup(<PracticeItemCard item={items[1]} index={1} active hintsAllowed busy={false} onAnswer={async () => true} onHint={noop} />)).toContain('异号相加')
     const wrong = renderToStaticMarkup(<PracticeItemCard item={{ ...items[1], response: { answer_text: '7', result: 'incorrect', hint_used: false } }} index={1} active hintsAllowed busy={false} onAnswer={async () => true} onHint={noop} />)
     expect(wrong).toContain('没关系'); expect(wrong).toContain('解析')
-    expect(renderToStaticMarkup(<PracticeItemCard item={{ ...items[1], response: { answer_text: '大约两个', result: 'unscorable', hint_used: false } }} index={1} active hintsAllowed busy={false} onAnswer={async () => true} onHint={noop} />)).toContain('没法自动判断，可以对照解析')
+    expect(renderToStaticMarkup(<PracticeItemCard item={{ ...items[1], response: { answer_text: '大约两个', result: 'unscorable', hint_used: false } }} index={1} active hintsAllowed busy={false} onAnswer={async () => true} onHint={noop} />)).toContain('暂时没有确认对错')
   })
   it('presents preview targets as reading material and wraps up without debt', () => {
     const reading = renderToStaticMarkup(<PreviewReading targets={[{ id: 'kp-x', name: '去括号解方程', objective: '能去括号解一元一次方程', prerequisites: [{ id: 'kp-y', name: '去括号', learning_status: 'no_judgment' }] }]} />)

@@ -40,14 +40,18 @@ def context():
 
 def recognition():
     return {"items": [{"page": 1, "label": "1", "stem_text": "计算(-2)²。",
-                       "answer_text": "-4", "answer_status": "present", "uncertainties": []}]}
+                       "answer_text": "-4", "answer_status": "present", "uncertainties": [], "answer_slots": []}]}
+
+
+def recognition_run(data=None):
+    return [recognition() if data is None else data]
 
 
 def checked(**changes):
     return {"verdict": "incorrect", "reason_code": None,
             "readback": {"stem_text": "计算(-2)²。", "answer_text": "-4", "answer_status": "present"},
             "recognition_consistent": True, "basis_summary": "负数平方的符号需要核对。",
-            "uncertainties": [], **changes}
+            "uncertainties": [], "knowledge_points": [], "correct_answer": "4", **changes}
 
 
 def decision(ctx, **changes):
@@ -55,14 +59,15 @@ def decision(ctx, **changes):
             "origin": "model", "input_versions": deepcopy(ctx["input_versions"]), **changes}
 
 
-def envelope(data, *, finish="stop"):
-    return {"id": "response_synthetic", "model": "deepseek-v4-1-flash-260910",
+def envelope(data, *, finish="stop", model="deepseek-v4-1-flash-260910"):
+    return {"id": "response_synthetic", "model": model,
             "choices": [{"finish_reason": finish, "message": {"content": json.dumps(data, ensure_ascii=False)}}],
             "usage": {"prompt_tokens": 100, "completion_tokens": 30, "total_tokens": 130}}
 
 
 def pipeline(responses, requests=None, **settings):
     replies = iter(responses)
+    model = settings.pop("model", "deepseek-v4-1-flash-260910")
 
     def handle(request):
         if requests is not None:
@@ -72,10 +77,10 @@ def pipeline(responses, requests=None, **settings):
             raise reply
         if isinstance(reply, httpx.Response):
             return reply
-        return httpx.Response(200, json=envelope(reply), headers={"x-request-id": "request_synthetic"})
+        return httpx.Response(200, json=envelope(reply, model=model), headers={"x-request-id": "request_synthetic"})
 
     client = ArkClient(ArkSettings(base_url="https://synthetic.example.invalid/api/v3", api_key=settings.pop("api_key", SECRET),
-                                   max_attempts=settings.pop("max_attempts", 1), **settings),
+                                   model=model, max_attempts=settings.pop("max_attempts", 1), **settings),
                        transport=httpx.MockTransport(handle), sleep=lambda _: None)
     return CorrectionPipeline(client)
 
@@ -94,7 +99,8 @@ def test_credential_echo_never_leaves_pipeline_but_paid_attempt_survives(role, e
         output = {"guidance_code": "sign", "uncertainties": [echo]}
     else:
         output = checked(basis_summary=echo)
-    with pipeline([httpx.Response(429), output], max_attempts=2) as flow:
+    responses = [httpx.Response(429), output]
+    with pipeline(responses, max_attempts=2) as flow:
         with pytest.raises(ProviderError, match="^provider_credential_echo$") as failure:
             if role == "recognition":
                 flow.recognize(images=(picture(),))
@@ -105,8 +111,8 @@ def test_credential_echo_never_leaves_pipeline_but_paid_attempt_survives(role, e
                 getattr(flow, role)(**context())
     assert len(failure.value.attempts) == 2
     assert failure.value.attempts[0].code == "upstream_rate_limited"
-    assert failure.value.attempts[1].code == "provider_credential_echo"
-    assert failure.value.attempts[1].usage.total_tokens == 130
+    assert failure.value.attempts[-1].code == "provider_credential_echo"
+    assert failure.value.attempts[-1].usage.total_tokens == 130
     assert all(attempt.charge_status == "unknown" for attempt in failure.value.attempts)
     persisted = json.dumps([asdict(a) for a in failure.value.attempts]) + str(failure.value)
     assert SECRET not in persisted and escaped not in persisted
@@ -154,23 +160,36 @@ def test_metadata_credential_echo_is_rejected_even_if_candidate_is_safe():
 
 def test_recognition_splits_each_blank_and_preserves_raw_answer_not_expected_answer():
     data = recognition()
-    second = deepcopy(data["items"][0])
-    second.update(label="1 第二空", answer_text=None, answer_status="blank")
-    data["items"].append(second)
+    data["items"][0].update(blank_count=2, answer_slots=[
+        {"index": 1, "prompt": "第一个空____", "answer_text": "-4", "answer_status": "present"},
+        {"index": 2, "prompt": "第二个空____", "answer_text": "5", "answer_status": "present"},
+    ])
     requests = []
-    with pipeline([data], requests) as flow:
+    with pipeline(recognition_run(data), requests) as flow:
         result = flow.recognize(images=(picture(),))
-    assert len(result.data["items"]) == 2
-    assert result.data["items"][0]["answer_text"] == "-4"  # Actual wrong answer must survive OCR.
-    assert result.data["items"][1]["answer_status"] == "blank"
+    assert len(result.data["items"]) == 1
+    assert result.data["items"][0]["answer_text"] == "1. -4\n2. 5"  # Actual wrong answer must survive OCR.
+    assert result.data["items"][0]["blank_count"] == 2
     assert all(i["recognition_status"] == "ready" for i in result.data["items"])
     assert result.data["coverage"]["collection_scope"] == "partial"
     assert result.status == "candidate"
     assert result.metadata.usage.total_tokens == 130
+    assert len(requests) == 1
     body = requests[0]
     assert body["model"] == "deepseek-v4-1-flash-260910"
     assert body["response_format"] == {"type": "json_object"}
     assert body["messages"][1]["content"][1]["image_url"]["url"] == PNG
+
+
+def test_recognition_allows_numbering_restart_when_stems_differ():
+    data = recognition()
+    second = deepcopy(data["items"][0])
+    second.update(label="1", stem_text="显微镜的使用。", answer_text="正确")
+    data["items"].append(second)
+    with pipeline(recognition_run(data)) as flow:
+        result = flow.recognize(images=(picture(),))
+    assert [item["label"] for item in result.data["items"]] == ["1", "1"]
+    assert [item["stem_text"] for item in result.data["items"]] == ["计算(-2)²。", "显微镜的使用。"]
 
 
 def test_unreadable_page_is_explicit_empty_recognition_not_all_correct():
@@ -182,11 +201,11 @@ def test_unreadable_page_is_explicit_empty_recognition_not_all_correct():
     assert "verdict" not in result.data
 
 
-def test_recognition_asks_for_no_positions_and_ties_each_question_to_its_whole_page():
+def test_recognition_sends_original_pages_once_and_ties_questions_to_source_pages():
     data = recognition()
-    data["items"].append({**deepcopy(data["items"][0]), "page": 2, "label": "2"})
     requests = []
     images = (PipelineImage("asset_first", PNG, 30, 20), PipelineImage("asset_second", PNG, 40, 50))
+    data["items"].append({**deepcopy(data["items"][0]), "page": 2, "label": "2"})
     with pipeline([data], requests) as flow:
         result = flow.recognize(images=images)
     first, second = result.data["items"]
@@ -194,10 +213,21 @@ def test_recognition_asks_for_no_positions_and_ties_each_question_to_its_whole_p
     assert first["regions"] == [region("asset_first", width=30, height=20)]
     assert second["regions"] == [region("asset_second", width=40, height=50)]
     assert first["answer_regions"] == second["answer_regions"] == []
-    assert len(requests) == 1 and len(result.metadata.attempts) == 1
-    prompt = requests[0]["messages"][0]["content"]
-    assert "按原样完整抄下来" in prompt
-    assert "regions" not in prompt and "像素" not in prompt
+    assert len(requests) == len(result.metadata.attempts) == 1
+    sent = requests[0]["messages"][1]["content"]
+    assert [item["image_url"]["url"] for item in sent[1:]] == [image.data_url for image in images]
+    assert "layout_units" not in sent[0]["text"]
+
+
+def test_recognition_preserves_array_order_repeated_and_nonsequential_labels():
+    labels = ["1", "3", "四", "1", "未编号"]
+    data = {"items": [{**recognition()["items"][0], "label": label, "stem_text": f"题干{i}"}
+                      for i, label in enumerate(labels)]}
+    with pipeline([data]) as flow:
+        result = flow.recognize(images=(picture(),))
+    assert [item["label"] for item in result.data["items"]] == labels
+    assert [item["reading_order"] for item in result.data["items"]] == list(range(5))
+    assert [item["stem_text"] for item in result.data["items"]] == [f"题干{i}" for i in range(5)]
 
 
 def test_page_beyond_the_sent_photos_fails_closed():
@@ -209,31 +239,29 @@ def test_page_beyond_the_sent_photos_fails_closed():
     assert (diagnostic.rule, diagnostic.path) == ("unknown_asset", ("items", 0, "page"))
 
 
-def test_unclear_transcription_is_kept_for_review_rather_than_dropped():
+def test_unclear_transcription_is_kept_and_can_be_starred_without_blocking_the_row():
     data = recognition()
     data["items"][0]["uncertainties"] = ["第二个数字可能是 4 也可能是 9。"]
-    with pipeline([data]) as flow:
+    with pipeline(recognition_run(data)) as flow:
         item = flow.recognize(images=(picture(),)).data["items"][0]
-    assert item["recognition_status"] == "needs_revision"
+    assert item["recognition_status"] == "ready"
     assert item["regions"] == [region()]
 
 
-@pytest.mark.parametrize("change", ["duplicate_blank", "present_without_text", "blank_with_text", "confirmed", "model_regions"])
+@pytest.mark.parametrize("change", ["present_without_text", "blank_with_text", "confirmed", "model_regions"])
 def test_invalid_recognition_preserves_billable_attempt_and_fails_closed(change):
     data = recognition()
-    if change == "duplicate_blank": data["items"].append(deepcopy(data["items"][0]))
     if change == "present_without_text": data["items"][0]["answer_text"] = None
     if change == "blank_with_text": data["items"][0]["answer_status"] = "blank"
     if change == "confirmed": data["items"][0]["confirmed"] = True
     if change == "model_regions": data["items"][0]["regions"] = [region()]
-    with pipeline([data]) as flow, pytest.raises(ProviderError, match="^invalid_output$") as failure:
+    with pipeline(recognition_run(data)) as flow, pytest.raises(ProviderError, match="^invalid_output$") as failure:
         flow.recognize(images=(picture(),))
     assert failure.value.attempts[-1].usage.total_tokens == 130
     assert failure.value.attempts[-1].code == "invalid_output"
     assert failure.value.attempts[-1].charge_status == "unknown"
     assert SECRET not in str(failure.value)
     expected = {
-        "duplicate_blank": ("candidate_semantics", "duplicate_label", ("items", 1, "label")),
         "present_without_text": ("candidate_semantics", "answer_status_conflict", ("items", 0, "answer_text")),
         "blank_with_text": ("candidate_semantics", "answer_status_conflict", ("items", 0, "answer_text")),
         "confirmed": ("candidate_schema", "additionalProperties", ("items", 0)),
@@ -251,12 +279,12 @@ def test_independent_expression_targets_remain_separate_with_shared_conditions()
     second.update(label="6 求值目标二", stem_text="已知 a=2,b=3，求 a-b。", answer_text="-1")
     data["items"].append(second)
     requests = []
-    with pipeline([data], requests) as flow:
+    with pipeline(recognition_run(data), requests) as flow:
         result = flow.recognize(images=(picture(),))
     assert [i["answer_text"] for i in result.data["items"]] == ["6", "-1"]
     assert all(i["stem_text"].startswith("已知 a=2,b=3") for i in result.data["items"])
     system = requests[0]["messages"][0]["content"]
-    assert "每个小问、每个填空单独一项" in system
+    assert "完整可理解的题干" in system
     assert "不输出判题结论" in system
     assert "候选 correct、incorrect" not in system
     assert "unable_to_judge" not in system
@@ -268,7 +296,7 @@ def test_recognition_top_level_extra_fields_are_rejected_without_silent_unwrappi
     data = recognition()
     data[extra_key] = {"text": "synthetic-private-extra-value"}
     requests = []
-    with pipeline([data], requests) as flow, pytest.raises(ProviderError, match="^invalid_output$") as failure:
+    with pipeline(recognition_run(data), requests) as flow, pytest.raises(ProviderError, match="^invalid_output$") as failure:
         flow.recognize(images=(picture(),))
     assert len(requests) == 1
     diagnostic = failure.value.attempts[-1].diagnostic
@@ -284,23 +312,54 @@ def test_recognition_top_level_extra_fields_are_rejected_without_silent_unwrappi
 
 def test_check_is_candidate_and_can_be_converted_to_contract_decision():
     ctx = context()
-    with pipeline([checked()]) as flow:
+    requests = []
+    with pipeline([checked()], requests) as flow:
         result = flow.check(**ctx)
     data = deepcopy(result.data)
     assert data["verdict"] == "incorrect"
+    assert data["correct_answer"] == "4"
     assert data["validity"] == "candidate" and data["origin"] == "model"
     assert data["confirmed_by"] is data["confirmed_at"] is data["confirmation_source"] is None
     assert data["basis"][0]["kind"] == "model_hypothesis"
     assert data["input_versions"] == ctx["input_versions"]
+    assert requests[0]["max_tokens"] == 8192
     # Worker adds persistent identity/audit fields; internal readback stays out
     # of the public Decision shape rather than silently extending the contract.
-    del data["uncertainties"], data["readback"]
+    del data["uncertainties"], data["readback"], data["evidence_verified"]
     data.update(id="decision_one", revision=1, case_id="case_one", check_id="check_one",
                 replaces_decision_id=None, invalidated_by_event_id=None, created_at="2026-10-17T00:00:00Z")
     root = Path(__file__).resolve().parents[3] / "contracts" / "phase1"
     schemas = [json.loads((root / name).read_text()) for name in ("data.schema.json", "states.schema.json")]
     registry = Registry().with_resources((s["$id"], Resource.from_contents(s)) for s in schemas)
     Draft202012Validator({"$ref": schemas[0]["$id"] + "#/$defs/Decision"}, registry=registry).validate(data)
+
+
+def test_check_uses_grade_and_curriculum_candidates_as_student_facing_tag_boundary():
+    ctx = context()
+    requests = []
+    output = checked(knowledge_points=["有理数的乘方"])
+    with pipeline([output], requests) as flow:
+        result = flow.check(**ctx, student_grade=7,
+                            knowledge_point_candidates=["有理数的乘方", "数轴", "有理数的加减法"])
+    assert result.data["knowledge_points"] == ["有理数的乘方"]
+    body = json.loads(requests[0]["messages"][1]["content"][0]["text"])
+    assert body["task_input"]["student_learning_context"] == {
+        "grade": 7,
+        "knowledge_point_candidates": ["有理数的乘方", "数轴", "有理数的加减法"],
+    }
+    system = requests[0]["messages"][0]["content"]
+    assert "学生档案年级为初中7年级" in system
+    assert "只能原样选择候选中的名称" in system
+    assert '"enum": ["有理数的乘方", "数轴", "有理数的加减法"]' in system
+
+
+def test_check_without_grade_does_not_claim_a_curriculum_level():
+    requests = []
+    with pipeline([checked()], requests) as flow:
+        flow.check(**context(), student_grade=None)
+    system = requests[0]["messages"][0]["content"]
+    assert "当前档案没有可靠年级" in system
+    assert "不推测学生年级" in system
 
 
 def test_correct_answers_are_not_assumed_wrong():
@@ -316,10 +375,10 @@ def test_correct_answers_are_not_assumed_wrong():
 
 def test_printed_visible_answers_are_readable_without_asserting_authentic_student_identity():
     requests = []
-    with pipeline([recognition()], requests) as flow:
+    with pipeline(recognition_run(), requests) as flow:
         result = flow.recognize(images=(picture(),))
     assert result.data["items"][0]["recognition_status"] == "ready"
-    assert result.prompt_version == "photo-correction.v7"
+    assert result.prompt_version == "photo-correction.v19-two-stage-review"
     prompt = requests[0]["messages"][0]["content"]
     assert "印刷或手写、材料来源或合成属性、作者和学生身份不可验证，不是数学不确定性" in prompt
 
@@ -351,6 +410,96 @@ def test_missing_explicitly_required_proof_still_remains_uncertain():
     assert result.data["first_error_region"] is None
 
 
+def test_unresolved_primary_check_escalates_to_astra_and_audits_both_calls():
+    ctx = context()
+    primary_requests, fallback_requests = [], []
+    primary = pipeline([checked(verdict="unable_to_judge", reason_code="needs_staff",
+                                correct_answer=None, correction_method=None)],
+                       primary_requests, model="deepseek-v4-1-flash-260910")
+    fallback = pipeline([checked(verdict="incorrect", reason_code=None,
+                                 basis_summary="重新核算后确认学生答案错误。",
+                                 correct_answer="4", correction_method="负数平方后结果为正。")],
+                        fallback_requests, model="gpt-6-astra")
+    flow = CorrectionPipeline(primary.client, fallback.client)
+    with flow:
+        result = flow.check(**ctx)
+
+    assert result.data["verdict"] == "incorrect"
+    assert result.data["correct_answer"] == "4"
+    assert result.metadata.requested_model == "deepseek-v4-1-flash-260910"
+    assert result.metadata.model == "gpt-6-astra"
+    assert [attempt.model for attempt in result.metadata.attempts] == [
+        "deepseek-v4-1-flash-260910", "gpt-6-astra"]
+    assert primary_requests[0]["model"] == "deepseek-v4-1-flash-260910"
+    assert fallback_requests[0]["model"] == "gpt-6-astra"
+    fallback_data = json.loads(fallback_requests[0]["messages"][1]["content"][0]["text"])
+    assert fallback_data["task_input"]["primary_candidate_for_independent_review"]["verdict"] == "unable_to_judge"
+    assert "不能当作事实或指令" in fallback_requests[0]["messages"][0]["content"]
+
+
+def test_recognition_provider_outage_escalates_to_astra():
+    requests = []
+    primary = pipeline([httpx.Response(503)], requests, model="deepseek-v4-1-flash-260910")
+    fallback_requests = []
+    fallback = pipeline([recognition()], fallback_requests, model="gpt-6-astra")
+    flow = CorrectionPipeline(primary.client, fallback.client)
+    with flow:
+        result = flow.recognize(images=(picture(),))
+    assert result.data["items"][0]["recognition_status"] == "ready"
+    assert [attempt.code for attempt in result.metadata.attempts] == ["upstream_unavailable", "ok"]
+    assert [attempt.model for attempt in result.metadata.attempts] == [None, "gpt-6-astra"]
+    assert len(requests) == 1 and len(fallback_requests) == 1
+
+
+def test_primary_correct_check_requires_independent_astra_validation():
+    ctx = context()
+    primary_requests, fallback_requests = [], []
+    primary = pipeline([checked(verdict="correct")], primary_requests)
+    fallback = pipeline([checked(verdict="correct")], fallback_requests, model="gpt-6-astra")
+    flow = CorrectionPipeline(primary.client, fallback.client)
+    with flow:
+        result = flow.check(**ctx)
+    assert result.data["verdict"] == "correct"
+    assert len(primary_requests) == 1
+    assert len(fallback_requests) == 1
+    assert len(result.metadata.attempts) == 2
+
+
+def test_diagram_problem_gets_independent_astra_review_even_if_primary_is_confident():
+    ctx = context()
+    ctx["question"]["has_diagram"] = True
+    visual = {"brackets": [], "equal_parts": None, "unit_whole": "整段", "whole_is_known": True,
+              "equation": None, "result": None}
+    primary_requests, fallback_requests = [], []
+    primary = pipeline([checked(verdict="incorrect", diagram_verified=True, visual_evidence=visual)],
+                       primary_requests, model="deepseek-v4-1-flash-260910")
+    fallback = pipeline([checked(verdict="incorrect", diagram_verified=True, visual_evidence=visual,
+                                 basis_summary="复核原图后确认。", correction_method="负数平方后结果为正。")], fallback_requests,
+                        model="gpt-6-astra")
+    flow = CorrectionPipeline(primary.client, fallback.client)
+    with flow:
+        result = flow.check(**ctx)
+    assert result.data["verdict"] == "incorrect"
+    assert result.metadata.model == "gpt-6-astra"
+    assert len(result.metadata.attempts) == 2
+    assert len(primary_requests) == len(fallback_requests) == 1
+    payload = json.loads(fallback_requests[0]["messages"][1]["content"][0]["text"])
+    assert payload["task_input"]["primary_candidate_for_independent_review"]["diagram_verified"] is True
+
+
+def test_from_env_configures_fallback_model_without_a_second_secret():
+    with CorrectionPipeline.from_env({
+        "ARK_BASE_URL": "https://synthetic.example.invalid/api/v3",
+        "ARK_API_KEY": SECRET,
+        "ARK_MODEL": "deepseek-v4-1-flash-260910",
+        "ARK_FALLBACK_MODEL": "gpt-6-astra",
+    }) as flow:
+        assert flow.client.settings.model == "deepseek-v4-1-flash-260910"
+        assert flow.fallback_client.settings.model == "gpt-6-astra"
+        assert flow.fallback_client.settings.base_url == flow.client.settings.base_url
+        assert flow.fallback_client.settings.api_key == flow.client.settings.api_key == SECRET
+
+
 def test_authorized_question_revision_can_reassess_same_original_attempt():
     ctx = context()
     ctx["question"]["revision"] = 2
@@ -364,7 +513,7 @@ def test_authorized_question_revision_can_reassess_same_original_attempt():
 def test_recognition_removes_only_explicit_field_labels_from_persisted_fields():
     output = recognition()
     output["items"][0].update(stem_text="Question: 计算(-2)²。", answer_text="Student answer: -4")
-    with pipeline([output]) as flow:
+    with pipeline(recognition_run(output)) as flow:
         item = flow.recognize(images=(picture(),)).data["items"][0]
     assert item["label"] == "1"
     assert item["stem_text"] == "计算(-2)²。"
@@ -373,24 +522,59 @@ def test_recognition_removes_only_explicit_field_labels_from_persisted_fields():
 
 
 @pytest.mark.parametrize("role", ["check", "recheck"])
-def test_explicit_readback_field_labels_do_not_create_false_recognition_conflicts(role):
+def test_second_pass_uses_first_pass_recognition_without_competing_readback(role):
     ctx = context()
     ctx["attempt"]["answer_text"] = "4"
     if role == "recheck":
         ctx["images"] = (picture(), picture("asset_new"))
         ctx["attempt"].update(asset_ids=["asset_new"], answer_regions=[region("asset_new")])
     output = checked(verdict="correct")
-    output["readback"].update(stem_text="Question: 计算(-2)²。", answer_text="Student answer: 4")
+    output.pop("readback")
+    output.pop("recognition_consistent")
     requests = []
     with pipeline([output], requests) as flow:
         result = getattr(flow, role)(**ctx)
     assert result.data["verdict"] == "correct"
     assert result.data["validity"] == "candidate"
-    assert result.data["readback"] == output["readback"]  # Original readback is auditable.
+    assert result.data["readback"]["stem_text"] == ctx["question"]["stem_text"]
+    assert result.data["readback"]["answer_text"] == "4"
     system = requests[0]["messages"][0]["content"]
-    assert "旧答案与当前答案不同是正常订正" in system
-    assert "不能拿旧答案来比较" in system
-    assert "当前作答图自身有多个无法确定取舍的答案" in system
+    assert "这是第二轮判题" in system
+    assert "不要重新抄写题干、选项或手写答案" in system
+    assert "不要输出 readback 或 recognition_consistent 字段" in system
+
+
+def test_repeated_choice_options_do_not_turn_a_judgeable_check_into_a_conflict():
+    ctx = context()
+    ctx["question"].update(
+        stem_text="下列说法正确的是。",
+        options=[{"label": "A", "text": "甲说法"}, {"label": "B", "text": "乙说法"}],
+    )
+    output = checked(verdict="correct", basis_summary="学生选择 B，答案与题意一致。")
+    output.pop("readback")
+    output.pop("recognition_consistent")
+    ctx["attempt"]["answer_text"] = "B"
+    requests = []
+    with pipeline([output], requests) as flow:
+        result = flow.check(**ctx)
+    assert result.data["verdict"] == "correct"
+    assert result.data["validity"] == "candidate"
+    sent = json.dumps(requests[0], ensure_ascii=False)
+    assert "甲说法" in sent and "乙说法" in sent
+
+
+def test_legacy_readback_mismatch_cannot_override_first_pass_judgment():
+    output = checked(verdict="incorrect", basis_summary="第一轮识别的学生答案与正确答案不一致。")
+    output["readback"].update(stem_text="另一道题", answer_text="另一个答案")
+    with pipeline([output]) as flow:
+        result = flow.check(**context())
+    assert result.data["verdict"] == "incorrect"
+    assert result.data["validity"] == "candidate"
+    assert result.data["readback"] == {
+        "stem_text": context()["question"]["stem_text"],
+        "answer_text": context()["attempt"]["answer_text"],
+        "answer_status": context()["attempt"]["answer_status"],
+    }
 
 
 @pytest.mark.parametrize("field,value,expected", [
@@ -415,27 +599,20 @@ def test_field_labels_never_make_distinct_math_equivalent(observed, expected):
     assert normalize_field_for_comparison("Student answer: " + observed, "answer_text") != normalize_field_for_comparison(expected, "answer_text")
 
 
-@pytest.mark.parametrize("case", ["missing_minus", "u_v", "overwritten_step", "not_ready", "superscript", "separated_digits"])
-def test_formula_and_handwriting_uncertainty_cannot_become_definite_correct(case):
+@pytest.mark.parametrize("case", ["u_v", "overwritten_step", "not_ready"])
+def test_recognized_answer_is_judged_in_second_pass(case):
     ctx = context()
     output = checked(verdict="correct")
-    if case == "missing_minus": output["readback"]["answer_text"] = "4"
     if case == "u_v": output["uncertainties"] = ["手写首字母可能是u，也可能是v。"]
     if case == "overwritten_step": output["uncertainties"] = ["中间项被涂改，不能依据最终答案补写。"]
     if case == "not_ready": ctx["attempt"]["recognition_status"] = "needs_revision"
-    if case == "superscript":
-        ctx["attempt"]["answer_text"] = "x²"
-        output["readback"]["answer_text"] = "x2"
-    if case == "separated_digits":
-        ctx["attempt"]["answer_text"] = "1 2"
-        output["readback"]["answer_text"] = "12"
     original_answer = ctx["attempt"]["answer_text"]
     with pipeline([output]) as flow:
         data = flow.check(**ctx).data
-    assert data["verdict"] == "unable_to_judge" and data["validity"] == "needs_review"
+    if case in {"u_v", "overwritten_step", "not_ready"}:
+        assert data["verdict"] == "correct" and data["validity"] == "candidate"
     assert data["first_error_region"] is None
     assert ctx["attempt"]["answer_text"] == original_answer
-    if case == "missing_minus": assert data["reason_code"] == "recognition_conflict"
 
 
 def test_blank_and_unreadable_answers_are_not_conflated():
@@ -602,7 +779,8 @@ def test_trusted_task_policy_is_system_and_all_photo_candidate_data_is_user_json
     if role == "hint":
         output = {"guidance_code": "sign", "uncertainties": []}
     requests = []
-    with pipeline([output], requests) as flow:
+    responses = recognition_run(output) if role == "recognition" else [output]
+    with pipeline(responses, requests) as flow:
         if role == "recognition":
             flow.recognize(images=(picture(),))
         elif role == "hint":
@@ -637,8 +815,8 @@ def test_nonblocking_claim_in_returned_uncertainties_is_not_silently_removed(war
                      uncertainties=[warning])
     with pipeline([output]) as flow:
         result = flow.check(**context())
-    assert result.data["verdict"] == "unable_to_judge"
-    assert result.data["validity"] == "needs_review"
+    assert result.data["verdict"] == "correct"
+    assert result.data["validity"] == "candidate"
     assert result.data["uncertainties"] == output["uncertainties"]
 
 

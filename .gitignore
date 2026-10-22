@@ -1,6 +1,8 @@
 __pycache__/
 .pytest_cache/
 .venv/
+.venv
+node_modules
 *.pyc
 .env
 .env.*
@@ -18,3 +20,7 @@ __pycache__/
 /infra/xueban.env
 /infra/model.env
 /infra/backups/
+
+# Private staged restore artifacts
+/infra/restores/
+/infra/compose.override.yaml

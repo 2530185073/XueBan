@@ -50,7 +50,8 @@ export function HistoryPage({ workspace, onOpen, onOpenDraft, onNewWork }: { wor
   const localOnly = workspace.drafts.filter(d => !d.id.startsWith('remote_') && (!d.homeworkId || !items.some(h => h.id === d.homeworkId)))
   const unfiltered = filter.status === 'all' && !filter.subject
   return <section className="history-page">
-    <div className="page-title-row"><div><span className="eyebrow">我的学习足迹</span><h1>每一份认真，都留在这里。</h1><p>按日期查看之前的作业，也可以接着订正还没完成的题。</p></div><button className="button secondary" disabled={!!workspace.busy} onClick={() => void workspace.loadHistory()}><RefreshCw size={17} /> 刷新记录</button></div>
+    <div className="page-title-row"><div><span className="eyebrow">我的学习足迹</span><h1>每一份认真，都留在这里。</h1><p>按日期查看之前的作业，也可以接着订正还没完成的题。</p></div><button className="button secondary" disabled={workspace.historyLoading} onClick={() => void workspace.loadHistory()}><RefreshCw size={17} /> 刷新记录</button></div>
+    {workspace.historyLoading && <p className="muted small" role="status">正在读取历史记录…</p>}
     {target && <div className="continue-banner"><div><strong>还有题目等你订正</strong><p className="muted">{items.find(h => h.id === target.homeworkId)?.title || '学校作业'} · {countsSentence(workspace.summaries[target.homeworkId]!.counts)}</p></div><button className="button primary" disabled={!!workspace.busy} onClick={() => onOpen(target.homeworkId, target.caseId)}><PenLine size={17} /> 继续订正</button></div>}
     {items.length > 0 && <div className="history-filters" role="search" aria-label="筛选历史作业">
       <label htmlFor={subjectId}>科目</label>
@@ -59,10 +60,10 @@ export function HistoryPage({ workspace, onOpen, onOpenDraft, onNewWork }: { wor
     </div>}
     {counting > 0 && <p className="muted small filter-note" role="status">还有 {counting} 份作业正在统计，统计完成后才会出现在这个筛选里。</p>}
     {unfiltered && localOnly.length > 0 && <section className="history-day" aria-labelledby="local-drafts"><h2 id="local-drafts" className="day-label">这台设备上的草稿</h2><div className="history-grid">{localOnly.map(item => <article className="history-card" key={item.id}><button className="history-open" disabled={!!workspace.busy} onClick={() => onOpenDraft(item.id)}><span className="history-paper" aria-hidden="true"><FileImage size={26} strokeWidth={1.3} /></span><span className="history-info"><time dateTime={item.createdAt}>{dateLabel(item.createdAt)}{item.pageCount > 1 ? ` · ${item.pageCount} 页` : ''}</time><strong>{item.title}</strong><span className={`status-pill ${item.stage === 'failed' ? 'amber' : 'neutral'}`}>{stageLabels[item.stage]}</span><span className="muted small">{uploadState(item).label}</span></span><ChevronRight size={19} aria-hidden="true" /></button></article>)}</div></section>}
-    {!items.length && !localOnly.length ? <div className="history-empty"><History size={37} strokeWidth={1.2} /><h2>第一份作业，从今天开始</h2><p>拍下自己的作答，检查和订正记录会保留在这里。</p><button className="button primary" onClick={onNewWork}>去拍一份作业 <ArrowRight size={17} /></button></div>
+    {!items.length && !localOnly.length && !workspace.historyLoaded ? <p className="history-none" role="status">{workspace.historyLoading ? '正在查找已经保存的作业，请稍等。' : '历史记录还没有读到，请点击刷新记录。'}</p> : !items.length && !localOnly.length ? <div className="history-empty"><History size={37} strokeWidth={1.2} /><h2>第一份作业，从今天开始</h2><p>拍下自己的作答，检查和订正记录会保留在这里。</p><button className="button primary" onClick={onNewWork}>去拍一份作业 <ArrowRight size={17} /></button></div>
       : items.length > 0 && !groups.length ? <p className="history-none" role="status">没有符合条件的作业。可以换个科目或状态看看。</p>
       : groups.map(group => <section className="history-day" key={group.key} aria-labelledby={`day-${group.key}`}><h2 id={`day-${group.key}`} className="day-label">{group.label}<span className="muted">{group.items.length} 份</span></h2><div className="history-grid">{group.items.map(item => <HomeworkCard key={item.id} item={item} workspace={workspace} onOpen={onOpen} />)}</div></section>)}
-    {workspace.cursor && <button className="button secondary load-more" disabled={!!workspace.busy} onClick={() => void workspace.loadHistory(true)}>再看一些记录 <ArrowDownToLine size={16} /></button>}
+    {workspace.cursor && <button className="button secondary load-more" disabled={workspace.historyLoading} onClick={() => void workspace.loadHistory(true)}>再看一些记录 <ArrowDownToLine size={16} /></button>}
     <LocalDataControl workspace={workspace} />
   </section>
 }

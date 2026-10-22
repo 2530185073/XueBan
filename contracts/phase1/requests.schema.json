@@ -707,6 +707,34 @@
         "reason"
       ],
       "additionalProperties": false
+    },
+    "StartRecognitionRecheck": {
+      "type": "object",
+      "properties": {
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "attempt_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "question_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "attempt_recognition_revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "expected_revision",
+        "attempt_id",
+        "question_revision",
+        "attempt_recognition_revision"
+      ],
+      "additionalProperties": false
     }
   }
 }

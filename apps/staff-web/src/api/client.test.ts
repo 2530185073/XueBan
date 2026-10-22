@@ -19,6 +19,18 @@ async function signedIn(...responses: (Response | Error)[]) {
 }
 
 describe('账号登录与会话', () => {
+  it('主动复核读取全部题，默认待核接口继续独立', async () => {
+    const candidate = { ...sampleReviewItem, reason: 'ai_initial' }
+    const unfinished = { ...sampleReviewItem, case_id: 'case_' + 'b'.repeat(32), reason: 'ai_pending' }
+    const page = { items: [candidate, unfinished], next_cursor: null }
+    const { client, call } = await signedIn(response({ items: [], next_cursor: null }), response(page))
+    expect((await client.reviewQueue()).items).toEqual([])
+    expect(new URL(call(1).url).searchParams.has('view')).toBe(false)
+    expect(await client.reviewQueue(undefined, undefined, 'all')).toEqual(page)
+    expect(new URL(call(2).url).searchParams.get('view')).toBe('all')
+    expect(call(2).init.headers.Authorization).toBe('Bearer session-token')
+  })
+
   it('同源匿名登录，令牌只出现在后续请求头中', async () => {
     const { client, call } = await signedIn(response(sampleIdentity))
     const login = call(0)

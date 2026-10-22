@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { IDBFactory } from 'fake-indexeddb'
 import examples from '../../../../contracts/phase1/examples.json'
 import { StudentClient } from './student'
+import { RecognitionRecoveryController } from './recognitionRecovery'
+import { HistoryReader, type HistoryView } from './historyReader'
 import { DraftStore, LOCAL_TTL_MS } from './store'
-import type { Attempt, CapturedQuestionRevision, CheckRun, CorrectionCase, Decision, HelpRequest, Hint, HomeworkSession, Job, JournalEntry, NormalizedPhoto, Review, StoredDraft } from './types'
+import type { HomeworkPage, RecognitionRecoveryStatus, RecognitionRecheckAccepted, Attempt, CapturedQuestionRevision, CheckRun, CorrectionCase, Decision, HelpRequest, Hint, HomeworkSession, Job, JournalEntry, NormalizedPhoto, Review, StoredDraft } from './types'
 
 class MemorySession implements Storage {
   private values = new Map<string, string>()
@@ -37,7 +39,7 @@ function harness(store = new DraftStore(new IDBFactory())) {
     if (path === '/v1/me') return me()
     if (path === `/v1/homeworks/${hw.id}`) return json(hw)
     if (init.method === 'POST') { const response = write?.(path, init); if (response) return response }
-    const read = reads.get(path); if (read) return json(read())
+    const read = reads.get(path); if (read) return json(await read())
     throw new Error(`Unexpected synthetic route ${path}`)
   }) as unknown as typeof fetch
   const options = { origin: 'http://localhost', storage, store, transport, normalize: async () => photo, sleep: async () => undefined }
@@ -272,5 +274,145 @@ describe('device cache hygiene', () => {
     const third = s.client.objectUrl(photo.blob); revoke.mockClear()
     await s.client.logout(); expect(revoke).toHaveBeenCalledWith(third)
     revoke.mockRestore()
+  })
+})
+
+
+describe('original-image recognition recovery', () => {
+  function recoveryHarness() {
+    const s = harness(), { c, q, a } = s.addCase('case_one')
+    a.answer_text = null; a.recognition_status = 'needs_revision'; s.hw.case_ids = [c.id]
+    const status: RecognitionRecoveryStatus = { case_id: c.id, attempt_id: a.id, limit: 2, used: 0, remaining: 2, active_job_id: null, last_job_id: null, last_outcome: null, eligible: true, blocked_reason: null }
+    s.reads.set(`/v1/cases/${c.id}/recognition-rechecks/status`, () => status)
+    const accepted = (): RecognitionRecheckAccepted => ({ ...fixture<RecognitionRecheckAccepted>('accepted_recognition_recheck'), recovery: { ...status } })
+    const running = () => { Object.assign(status, { used: 1, remaining: 1, active_job_id: 'job_recheck', last_job_id: 'job_recheck', eligible: false, blocked_reason: 'active_recovery' }); return accepted() }
+    return { ...s, c, q, a, status, row: { case: c, question: q, attempt: a }, running }
+  }
+  it('requests original-image recovery with null transcript and all four versions, without creating an attempt', async () => {
+    const s = recoveryHarness(); await login(s.client)
+    s.onWrite(path => path.endsWith('/recognition-rechecks') ? json(s.running(), 202) : undefined)
+    const result = await s.client.startRecognitionRecheck(s.row)
+    expect(result.active_job_id).toBe('job_recheck')
+    const posts = s.calls.filter(c => c.init.method === 'POST' && !c.path.includes('/auth/'))
+    expect(posts.map(p => p.path)).toEqual(['/v1/cases/case_one/recognition-rechecks'])
+    expect(JSON.parse(String(posts[0].init.body))).toEqual({ expected_revision: s.c.revision, attempt_id: s.a.id, question_revision: s.q.revision, attempt_recognition_revision: s.a.recognition_revision })
+    expect(s.c.attempt_ids).toEqual([s.a.id])
+  })
+  it('uses server exhaustion and restores an in-flight job after reload without POST', async () => {
+    const s = recoveryHarness(); await login(s.client)
+    Object.assign(s.status, { used: 2, remaining: 0, eligible: false, blocked_reason: 'budget_exhausted', last_job_id: 'job_last', last_outcome: 'unchanged_pending' })
+    expect((await s.client.startRecognitionRecheck(s.row)).remaining).toBe(0)
+    s.running()
+    const restored = new StudentClient(s.options); await restored.restore()
+    expect((await restored.recognitionRecoveryStatus(s.c.id, s.a.id)).active_job_id).toBe('job_recheck')
+    expect((await restored.startRecognitionRecheck(s.row)).active_job_id).toBe('job_recheck')
+    expect(s.calls.filter(c => c.init.method === 'POST' && !c.path.includes('/auth/'))).toHaveLength(0)
+  })
+  it.each(['network', '503'])('resolves unknown %s submission by GET and does not dispatch another request', async kind => {
+    const s = recoveryHarness(); await login(s.client)
+    s.onWrite(path => { if (!path.endsWith('/recognition-rechecks')) return; s.running(); if (kind === 'network') throw new Error('synthetic disconnection'); return json({ status: 503 }, 503) })
+    expect((await s.client.startRecognitionRecheck(s.row)).active_job_id).toBe('job_recheck')
+    expect(s.calls.filter(c => c.path.endsWith('/recognition-rechecks') && c.init.method === 'POST')).toHaveLength(1)
+  })
+  it('preserves the unknown original idempotency key after reload and manual retry', async () => {
+    const s = recoveryHarness(); await login(s.client)
+    s.onWrite(path => { if (path.endsWith('/recognition-rechecks')) throw new Error('synthetic no commit'); return undefined })
+    await expect(s.client.startRecognitionRecheck(s.row)).rejects.toMatchObject({ code: 'network_unknown' })
+    const restored = new StudentClient(s.options); await restored.restore()
+    s.onWrite(path => path.endsWith('/recognition-rechecks') ? json(s.running(), 202) : undefined)
+    await restored.startRecognitionRecheck(s.row)
+    const posts = s.calls.filter(c => c.path.endsWith('/recognition-rechecks') && c.init.method === 'POST')
+    expect(posts).toHaveLength(2)
+    expect(posts[0].init.body).toBe(posts[1].init.body)
+    expect((posts[0].init.headers as Record<string, string>)['Idempotency-Key']).toBe((posts[1].init.headers as Record<string, string>)['Idempotency-Key'])
+  })
+  it('does not accept another attempt, student or impossible budget in a recovery response', async () => {
+    const s = recoveryHarness(); await login(s.client)
+    s.status.attempt_id = 'attempt_other'
+    await expect(s.client.recognitionRecoveryStatus(s.c.id, s.a.id)).rejects.toMatchObject({ code: 'stale_input' })
+    s.status.attempt_id = s.a.id; s.status.remaining = 1
+    await expect(s.client.recognitionRecoveryStatus(s.c.id, s.a.id)).rejects.toMatchObject({ code: 'invalid_response' })
+    s.c.scope.student_id = 'student_other'
+    await expect(s.client.startRecognitionRecheck(s.row)).rejects.toMatchObject({ code: 'access_denied' })
+  })
+  it.each(['normal', 'correction'] as const)('persists a first-read applied result into the active %s cache without altering draft identity or sending POST', async kind => {
+    const s = recoveryHarness(); await login(s.client)
+    const opened = await s.client.openHomework(s.hw.id)
+    const cached = await s.store.draft(scopeOf(), opened.draftId!)
+    cached.stage = 'complete'; cached.pages = [{ id: 'page_local', photo, rotation: 0, crop: null, uploaded: true, ticketGeneration: 2, assetId: 'asset_test' }]
+    cached.generation = 3; cached.checkJobs = { [s.c.id]: 'job_original' }
+    if (kind === 'correction') {
+      cached.id = 'correction_local'; cached.correction = { caseId: s.c.id, parentAttemptId: 'attempt_parent', reportedHelp: 'unknown' }
+    }
+    await s.store.saveDraft(cached)
+    const before = await s.client.getDraft(cached.id), originalRow = before.detail!.cases[0]
+    expect(originalRow.attempt.answer_text).toBeNull()
+    s.c.revision++; s.q.revision++; s.c.current_question_revision = s.q.revision
+    s.a.answer_text = '7'; s.a.recognition_revision++
+    s.c.current_decision = s.decisionFor(s.c, s.a, { verdict: 'correct' })
+    s.reads.set(`/v1/questions/${s.q.question_id}`, () => ({ record: s.q, current_revision: s.q.revision, currently_effective: true }))
+    s.reads.set(`/v1/attempts/${s.a.id}`, () => ({ record: s.a, current_revision: s.a.recognition_revision, currently_effective: true }))
+    Object.assign(s.status, { used: 1, remaining: 1, last_job_id: 'job_recheck', last_outcome: 'applied', eligible: false, blocked_reason: 'already_resolved' })
+    let refreshes = 0
+    const controller = new RecognitionRecoveryController(s.client, originalRow, () => {}, async () => { refreshes++; await s.client.refreshRecognitionDraft(cached.id, s.hw.id) })
+    await controller.load(); await controller.load(); controller.dispose()
+    const refreshed = await s.client.getDraft(cached.id), stored = await s.store.draft(scopeOf(), cached.id)
+    expect(refreshes).toBe(1); expect(refreshed.detail!.cases[0].attempt.answer_text).toBe('7')
+    expect(refreshed.detail!.cases[0].case.current_decision?.verdict).toBe('correct')
+    expect(refreshed.detail!.draftId).toBe(cached.id)
+    expect(stored.correction).toEqual(cached.correction); expect(stored.pages).toEqual(cached.pages)
+    expect(stored.generation).toBe(3); expect(stored.checkJobs).toEqual(cached.checkJobs); expect(stored.stage).toBe('complete')
+    expect(s.calls.filter(c => c.init.method === 'POST' && !c.path.includes('/auth/'))).toHaveLength(0)
+    // A subsequent ordinary sync/reopen reads the same persisted versions, not old null text.
+    expect((await s.client.getDraft(cached.id)).detail!.cases[0].attempt.answer_text).toBe('7')
+  })
+  it('does not let background draft polling launch /checks while recovery is active', async () => {
+    const s = recoveryHarness(); await login(s.client)
+    const accepted = s.running(); s.hw.job_ids = [accepted.job.id]
+    s.reads.set(`/v1/jobs/${accepted.job.id}`, () => accepted.job)
+    const opened = await s.client.openHomework(s.hw.id)
+    expect((await s.client.runDraft(opened.draftId!)).stage).toBe('waiting')
+    expect(s.calls.filter(c => c.init.method === 'POST' && !c.path.includes('/auth/'))).toHaveLength(0)
+  })
+})
+
+
+describe('independent history reads', () => {
+  const route = '/v1/students/student_one/homeworks'
+  function gate() { let resolve!: (page: HomeworkPage) => void; const promise = new Promise<HomeworkPage>(done => { resolve = done }); return { promise, resolve } }
+  it('performs a history GET while a model job remains running, without restarting any model request', async () => {
+    const s = harness(); await login(s.client)
+    const { c, a } = s.addCase('case_one'); a.recognition_status = 'needs_revision'; s.hw.case_ids = [c.id]
+    const running = { ...fixture<RecognitionRecheckAccepted>('accepted_recognition_recheck').job, status: 'running' } // synthetic server has an in-flight model job
+    s.hw.job_ids = ['job_busy']; s.reads.set('/v1/jobs/job_busy', () => running)
+    s.reads.set(route, () => ({ items: [s.hw], next_cursor: null }))
+    const update = vi.fn(), reader = new HistoryReader(s.client)
+    expect((await reader.load(false, update))?.map(x => x.id)).toEqual([s.hw.id])
+    expect(s.calls.some(call => call.path === route && call.init.method === 'GET')).toBe(true)
+    expect(update.mock.lastCall?.[0]).toMatchObject({ loaded: true, loading: false, items: [{ id: s.hw.id }] })
+    expect(s.calls.filter(c => c.init.method === 'POST' && !c.path.includes('/auth/'))).toHaveLength(0)
+  })
+  it('keeps the newer refresh when two actual GET responses return out of order', async () => {
+    const s = harness(); await login(s.client)
+    const first = gate(), second = gate(); let reads = 0
+    s.reads.set(route, () => ++reads === 1 ? first.promise : second.promise)
+    const update = vi.fn(), reader = new HistoryReader(s.client)
+    const older = reader.load(false, update); await vi.waitFor(() => expect(reads).toBe(1))
+    const newer = reader.load(false, update); await vi.waitFor(() => expect(reads).toBe(2))
+    second.resolve({ items: [{ ...s.hw, id: 'homework_newer', title: '新页' }], next_cursor: 'cursor_new' }); await newer
+    first.resolve({ items: [{ ...s.hw, id: 'homework_older', title: '旧页' }], next_cursor: null }); expect(await older).toBeNull()
+    const view = update.mock.lastCall?.[0] as HistoryView
+    expect(view.items.map(x => x.id)).toEqual(['homework_newer']); expect(view.cursor).toBe('cursor_new')
+  })
+  it.each(['logout', 'relogin'] as const)('does not publish a late response after %s, even for the same student account', async transition => {
+    const s = harness(); await login(s.client); const pending = gate(); let started = false
+    s.reads.set(route, () => { started = true; return pending.promise })
+    const update = vi.fn(), reader = new HistoryReader(s.client), oldScope = s.client.historyScope
+    const read = reader.load(false, update); await vi.waitFor(() => expect(started).toBe(true))
+    await s.client.logout(); if (transition === 'relogin') await login(s.client)
+    expect(s.client.historyScope).not.toBe(oldScope)
+    const before = update.mock.calls.length
+    pending.resolve({ items: [s.hw], next_cursor: null }); expect(await read).toBeNull()
+    expect(update).toHaveBeenCalledTimes(before)
   })
 })

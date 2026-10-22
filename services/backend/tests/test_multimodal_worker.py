@@ -1,5 +1,6 @@
 """Whole-page candidates use real HTTP/worker transactions and no external API."""
 from copy import deepcopy
+from dataclasses import replace
 from datetime import timedelta
 
 import pytest
@@ -99,7 +100,7 @@ def test_one_conflicting_item_does_not_discard_clear_page_results(flow):
     assert all(case["progress"] != "verified_resolved" for case in cases)
 
 
-@pytest.mark.parametrize("flag", ["unclear", "uncertainty", "degraded", "not_independent", "not_ready"])
+@pytest.mark.parametrize("flag", ["unclear", "uncertainty", "item_uncertainty", "degraded", "reason_codes", "not_independent", "not_ready"])
 def test_worker_does_not_promote_questionable_assessment_to_clear_correct(flow, flag):
     def uncertain(items):
         item = items[0]
@@ -110,8 +111,12 @@ def test_worker_does_not_promote_questionable_assessment_to_clear_correct(flow, 
             item["recognition_status"] = "needs_revision"
         elif flag == "uncertainty":
             item["assessment"]["uncertainties"] = ["末位字迹不清"]
+        elif flag == "item_uncertainty":
+            item["uncertainties"] = ["末位字迹不清"]
         elif flag == "degraded":
             item["assessment"]["verification"]["status"] = "degraded"
+        elif flag == "reason_codes":
+            item["assessment"]["verification"]["reason_codes"] = ["answer_disagreement"]
         else:
             item["assessment"]["verification"]["independent_readback"] = False
 
@@ -120,6 +125,48 @@ def test_worker_does_not_promote_questionable_assessment_to_clear_correct(flow, 
     assert case["current_decision"]["verdict"] == "unable_to_judge"
     assert case["current_decision"]["validity"] == "needs_review"
     assert case["progress"] == "pending"
+
+
+def test_two_model_page_publishes_safe_provenance_without_extra_auto_check(flow):
+    flow.worker.settings = replace(flow.worker.settings, auto_check_after_recognition=True)
+    flow.pipeline.extra_item_label = "2"
+
+    def evaluated(items):
+        for item in items:
+            item["assessment"]["verification"]["mode"] = "two_model"
+            item["assessment"].update(correct_answer="2", correction_method="先核对这一步运算。",
+                                      knowledge_points=[])
+        items[1]["assessment"]["verification"]["status"] = "conflict"
+        items[1]["assessment"]["verification"]["reason_codes"] = ["answer_disagreement"]
+
+    enable_page_assessments(flow, evaluated)
+    flow.ready()
+    cases = [current_case(flow, case_id) for case_id in flow.homework()["case_ids"]]
+    clear = next(c for c in cases if c["current_decision"]["verdict"] == "incorrect")
+    pending = next(c for c in cases if c["current_decision"]["verdict"] == "unable_to_judge")
+    assert clear["current_decision"]["correct_answer"] == "2"
+    assert clear["current_decision"]["verification"] == {
+        "mode": "two_model", "status": "matched", "independent_readback": True, "reason_codes": []}
+    assert pending["current_decision"]["correct_answer"] is None
+    assert pending["current_decision"]["correction_method"] is None
+    assert pending["current_decision"]["knowledge_points"] == []
+    assert pending["current_decision"]["uncertainties"]
+    assert not flow.worker.run_once()
+    assert len(flow.homework()["job_ids"]) == 1
+    assert flow.pipeline.calls == ["recognize"]
+
+
+def test_page_service_degradation_is_not_described_as_handwriting_conflict(flow):
+    def unavailable(items):
+        items[0]["recognition_status"] = "needs_revision"
+        items[0]["assessment"]["verification"].update(
+            status="degraded", reason_codes=["provider_unavailable"])
+
+    enable_page_assessments(flow, unavailable)
+    decision = flow.ready()["current_decision"]
+    assert decision["verdict"] == "unable_to_judge"
+    assert "服务暂未完成" in decision["basis"][0]["summary"]
+    assert decision["knowledge_points"] == []
 
 
 def test_page_lease_recovery_and_duplicate_finish_cannot_duplicate_decisions(flow):

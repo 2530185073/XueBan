@@ -1,0 +1,435 @@
+{
+  "schema_version": "curriculum-independent-audit-1",
+  "candidate_id": "pep-math-g7-up-9787107382468-candidate-r3-20261021",
+  "candidate_revision": 3,
+  "candidate_sha256": "c7a7c8aacce97e74c95d2430bb8f33ce7ed37fcaf866ba6a04d8a8483a985f79",
+  "status": "source_verified_ai_reviewed",
+  "review_kind": "independent_ai_content_review",
+  "reviewer": "/root/curriculum_independent_audit",
+  "author_agent": "/root/pr3_frontend_review",
+  "reviewed_at": "2026-10-20T18:47:04.468567Z",
+  "answer_blind": false,
+  "teacher_review": false,
+  "student_edition_confirmed": false,
+  "human_reviewer": null,
+  "human_reviewed_at": null,
+  "review_document": "docs/curriculum/PEP_G7_UP_AUDIT_R3_20261021.md",
+  "scope": {
+    "publisher_code": "PEP",
+    "subject": "数学",
+    "grade": 7,
+    "term": "up",
+    "isbn": "9787107382468",
+    "platform_id": "540ac93d-67fc-4353-9e49-1ef20d02b5a4",
+    "platform_asset_revision": "1787023107563",
+    "official_catalog_chapters_verified": 6,
+    "official_catalog_main_sections_verified": 15,
+    "project_authored_knowledge_nodes_reviewed": 75,
+    "project_authored_relations_reviewed": 71,
+    "primary_chapter_numbers": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "primary_section_ids": [
+      "pep-g7-up-1.1",
+      "pep-g7-up-1.2",
+      "pep-g7-up-2.1",
+      "pep-g7-up-2.2",
+      "pep-g7-up-2.3",
+      "pep-g7-up-3.1",
+      "pep-g7-up-3.2",
+      "pep-g7-up-4.1",
+      "pep-g7-up-4.2",
+      "pep-g7-up-5.1",
+      "pep-g7-up-5.2",
+      "pep-g7-up-5.3",
+      "pep-g7-up-6.1",
+      "pep-g7-up-6.2",
+      "pep-g7-up-6.3"
+    ],
+    "not_yet_modeled_chapter_numbers": [],
+    "all_main_sections_represented": true,
+    "detailed_textbook_body_reviewed": false,
+    "complete_textbook_body_coverage": false,
+    "student_evidence_reviewed": false,
+    "live_photo_recognition_evaluated": false,
+    "database_runtime_behavior_evaluated": false
+  },
+  "checks": {
+    "r2_inheritance": {
+      "status": "passed",
+      "candidate_sha256": "bb514e01492d067df83417f0cd410cf55ec6475ec5ce7b109ded9091c79efab4",
+      "review_manifest_sha256": "4599b2d3c0923d352d5cc567aa3b0bfdfee392299dd7c9d6bded748a6832e2c5",
+      "r2_files_unchanged": true,
+      "inherited_nodes": 25,
+      "inherited_relations": 37,
+      "inherited_reference_cases": 25,
+      "inherited_boundary_cases": 22,
+      "mathematical_objectives_boundaries_relations_and_answers_unchanged": true,
+      "allowed_history_differences": [
+        "scope_role",
+        "inherited_from_revision",
+        "content_review_status",
+        "independent_review_record_index",
+        "independent_review_status"
+      ]
+    },
+    "official_metadata_and_catalog": {
+      "status": "passed",
+      "method": "R3 identity and complete TOC equal previously independently reviewed R2; retained source bytes rehashed and TOC images 5,6,7 visually re-inspected this review.",
+      "catalog_titles_and_start_pages_match": true,
+      "isbn_basis": "official_source_filename",
+      "physical_edition_confirmed": false
+    },
+    "source_checks": [
+      {
+        "id": "official-details",
+        "sha256": "4b47d774956d04d0a99da361a6e10259fecd5f5c98fd50b554a123dacbc33dfd",
+        "method": "same_session_r2_verified_artifact_rechecked_hash"
+      },
+      {
+        "id": "official-preview-1",
+        "sha256": "aa2df977e799efd4ab947536b61d9a217089565d17940bf2095706b7ba8e8f89",
+        "method": "same_session_r2_verified_artifact_rechecked_hash"
+      },
+      {
+        "id": "official-preview-2",
+        "sha256": "236022a58e42b4fc4d7a3e56ba55c344688eb9a71d092ac49cb86223d7f51b13",
+        "method": "same_session_r2_verified_artifact_rechecked_hash"
+      },
+      {
+        "id": "official-preview-3",
+        "sha256": "8f6cab2245690a583e0eb4c40dcfc36aa11f2155b074e865c8e5d18018e6b301",
+        "method": "same_session_r2_verified_artifact_rechecked_hash"
+      },
+      {
+        "id": "official-preview-5",
+        "sha256": "d1bdea6d1724f47c064f72a5d1d9dca7f9ba8253099e5642eefb5b0012086ed9",
+        "method": "same_session_r2_verified_artifact_rechecked_hash"
+      },
+      {
+        "id": "official-preview-6",
+        "sha256": "71bd6d3c3378cd6103092891cb5b3b3682593bcc88d9c2acdaee8c0db8209195",
+        "method": "same_session_r2_verified_artifact_rechecked_hash"
+      },
+      {
+        "id": "official-preview-7",
+        "sha256": "5a93fb26b27190cb1720e9998335e3ff15a2a8fc3d1842b89c1db24bcde4fef1",
+        "method": "same_session_r2_verified_artifact_rechecked_hash"
+      },
+      {
+        "id": "math-standard-2022",
+        "sha256": "2adddf52cbc2a359ae265e82b30b8d5ae314dfe8b5a95583bdc9516b08700d5d",
+        "method": "refetched_official_pdf_system_tls_rendered_inspection"
+      },
+      {
+        "id": "math-standard-equations-2022",
+        "sha256": "2adddf52cbc2a359ae265e82b30b8d5ae314dfe8b5a95583bdc9516b08700d5d",
+        "method": "refetched_official_pdf_system_tls_rendered_inspection"
+      },
+      {
+        "id": "math-standard-number-requirements-2022",
+        "sha256": "2adddf52cbc2a359ae265e82b30b8d5ae314dfe8b5a95583bdc9516b08700d5d",
+        "method": "refetched_official_pdf_system_tls_rendered_inspection"
+      },
+      {
+        "id": "math-standard-basic-geometry-2022",
+        "sha256": "2adddf52cbc2a359ae265e82b30b8d5ae314dfe8b5a95583bdc9516b08700d5d",
+        "method": "refetched_official_pdf_system_tls_rendered_inspection"
+      }
+    ],
+    "curriculum_standard_scope": {
+      "status": "passed",
+      "official_pdf_refetched_this_review": true,
+      "tls_verification_disabled": false,
+      "sha256": "2adddf52cbc2a359ae265e82b30b8d5ae314dfe8b5a95583bdc9516b08700d5d",
+      "printed_pages_inspected_this_review": [
+        56,
+        58,
+        59,
+        63,
+        64
+      ],
+      "pdf_pages_inspected_one_based_this_review": [
+        63,
+        65,
+        66,
+        70,
+        71
+      ],
+      "inherited_r2_printed_pages_inspected": [
+        54,
+        55
+      ],
+      "limitation": "Grade-band scope does not certify fine-grained textbook body alignment or official authorship of project nodes."
+    },
+    "publisher_companion_resource": {
+      "status": "passed_limited_scope",
+      "url": "https://www.pep.com.cn/xw/zt/xkzt/csazy/csa7s/",
+      "sha256": "d47f379d50da434ac7b4851eac5f95875cb65c658f5ee362c3300790ee768fa6",
+      "supports": [
+        "Publisher resource index places solids/nets at 6.1",
+        "Publisher resource index places cylinder-side route activity at 6.2"
+      ],
+      "does_not_establish": [
+        "Exact ISBN or printing",
+        "All textbook body pages",
+        "Interactive resource contents",
+        "Required student exercises"
+      ]
+    },
+    "revision_requests": [
+      {
+        "id": "R3-A1",
+        "node_id": "draft-pep7-angle-bisector",
+        "status": "resolved",
+        "field": "standard_printed_page",
+        "before": 63,
+        "after": 64,
+        "evidence": "Official PDF page 71 / printed 64 explicitly includes angle bisector."
+      },
+      {
+        "id": "R3-A2",
+        "node_id": "draft-pep7-complement-supplement",
+        "status": "resolved",
+        "field": "standard_printed_page",
+        "before": 63,
+        "after": 64,
+        "evidence": "Official PDF page 71 / printed 64 explicitly includes complementary and supplementary angles."
+      }
+    ],
+    "revision_scope": {
+      "submitted_candidate_sha256": "945bfdae0926624d00f4cef7dac90aca20de72fc24c42a1cd5f9a5a7367fa1b2",
+      "final_candidate_sha256": "c7a7c8aacce97e74c95d2430bb8f33ce7ed37fcaf866ba6a04d8a8483a985f79",
+      "json_diff_exactly_two_locator_values": true,
+      "implemented_by": "/root/curriculum_independent_audit",
+      "authorization": "Root explicitly authorized these two locator corrections after the independent findings; author confirmed no concurrent candidate edits.",
+      "mathematical_content_changed": false
+    },
+    "knowledge_nodes": {
+      "status": "passed_content_review",
+      "count": 75,
+      "new_count": 50,
+      "zero_unobserved_skill_inference_required": true,
+      "exact_textbook_body_position_verified": false
+    },
+    "relation_safety": {
+      "status": "passed_content_review",
+      "count": 71,
+      "new_count": 34,
+      "relation_type_counts": {
+        "prerequisite_of": 54,
+        "supports": 11,
+        "specializes_to": 6
+      },
+      "acyclic": true,
+      "all_gates_learning_false": true,
+      "all_requires_whole_source_node_mastery_false": true,
+      "all_propagate_mastery_or_weakness_false": true,
+      "dispatch_on_relation_type_required": true
+    },
+    "reference_cases": {
+      "status": "passed_independent_derivation_nonblind",
+      "count": 75,
+      "new_count": 50,
+      "answer_blind": false,
+      "is_human_gold": false,
+      "case_ids": [
+        "draft-review-01",
+        "draft-review-02",
+        "draft-review-03",
+        "draft-review-04",
+        "draft-review-05",
+        "draft-review-06",
+        "draft-review-07",
+        "draft-review-08",
+        "draft-review-09",
+        "draft-review-10",
+        "draft-review-11",
+        "draft-review-12",
+        "draft-review-13",
+        "draft-review-14",
+        "draft-review-15",
+        "draft-review-16",
+        "draft-review-17",
+        "draft-review-18",
+        "draft-review-19",
+        "draft-review-20",
+        "draft-review-21",
+        "draft-review-22",
+        "draft-review-23",
+        "draft-review-24",
+        "draft-review-25",
+        "r3-review-26",
+        "r3-review-27",
+        "r3-review-28",
+        "r3-review-29",
+        "r3-review-30",
+        "r3-review-31",
+        "r3-review-32",
+        "r3-review-33",
+        "r3-review-34",
+        "r3-review-35",
+        "r3-review-36",
+        "r3-review-37",
+        "r3-review-38",
+        "r3-review-39",
+        "r3-review-40",
+        "r3-review-41",
+        "r3-review-42",
+        "r3-review-43",
+        "r3-review-44",
+        "r3-review-45",
+        "r3-review-46",
+        "r3-review-47",
+        "r3-review-48",
+        "r3-review-49",
+        "r3-review-50",
+        "r3-review-51",
+        "r3-review-52",
+        "r3-review-53",
+        "r3-review-54",
+        "r3-review-55",
+        "r3-review-56",
+        "r3-review-57",
+        "r3-review-58",
+        "r3-review-59",
+        "r3-review-60",
+        "r3-review-61",
+        "r3-review-62",
+        "r3-review-63",
+        "r3-review-64",
+        "r3-review-65",
+        "r3-review-66",
+        "r3-review-67",
+        "r3-review-68",
+        "r3-review-69",
+        "r3-review-70",
+        "r3-review-71",
+        "r3-review-72",
+        "r3-review-73",
+        "r3-review-74",
+        "r3-review-75"
+      ]
+    },
+    "validation_cases": {
+      "status": "passed_content_and_expected_behavior_review_nonblind",
+      "count": 52,
+      "new_count": 30,
+      "answer_blind": false,
+      "is_human_gold": false,
+      "case_ids": [
+        "draft-boundary-01",
+        "draft-boundary-02",
+        "draft-boundary-03",
+        "draft-boundary-04",
+        "draft-boundary-05",
+        "draft-boundary-06",
+        "draft-boundary-07",
+        "draft-boundary-08",
+        "draft-boundary-09",
+        "draft-boundary-10",
+        "draft-boundary-11",
+        "draft-boundary-12",
+        "draft-boundary-13",
+        "draft-boundary-14",
+        "draft-boundary-15",
+        "draft-boundary-16",
+        "draft-boundary-17",
+        "draft-boundary-18",
+        "draft-boundary-19",
+        "draft-boundary-20",
+        "draft-boundary-21",
+        "draft-boundary-22",
+        "r3-boundary-01",
+        "r3-boundary-02",
+        "r3-boundary-03",
+        "r3-boundary-04",
+        "r3-boundary-05",
+        "r3-boundary-06",
+        "r3-boundary-07",
+        "r3-boundary-08",
+        "r3-boundary-09",
+        "r3-boundary-10",
+        "r3-boundary-11",
+        "r3-boundary-12",
+        "r3-boundary-13",
+        "r3-boundary-14",
+        "r3-boundary-15",
+        "r3-boundary-16",
+        "r3-boundary-17",
+        "r3-boundary-18",
+        "r3-boundary-19",
+        "r3-boundary-20",
+        "r3-boundary-21",
+        "r3-boundary-22",
+        "r3-boundary-23",
+        "r3-boundary-24",
+        "r3-boundary-25",
+        "r3-boundary-26",
+        "r3-boundary-27",
+        "r3-boundary-28",
+        "r3-boundary-29",
+        "r3-boundary-30"
+      ]
+    },
+    "independent_supplemental_checks": {
+      "status": "passed",
+      "candidate_sha256": "c7a7c8aacce97e74c95d2430bb8f33ce7ed37fcaf866ba6a04d8a8483a985f79",
+      "skills": 75,
+      "relations": 71,
+      "main_sections": 15,
+      "reference_cases": 75,
+      "boundary_cases": 52,
+      "exact_arithmetic_checks": 28,
+      "additional_numeric_geometry_checks": 6,
+      "r2_bytes_unchanged": true,
+      "r3_change_only_two_locator_values": true,
+      "network_model_calls": 0,
+      "database_writes": 0,
+      "limits": "Structural and exact arithmetic supplements to independent content review, not recognition or student proficiency evaluation."
+    },
+    "evidence_policy": {
+      "status": "passed_declaration_review_only",
+      "duplicate_independent_attempts_for_overlapping_skills_forbidden": true,
+      "unresolved_or_service_failure_not_learning_evidence": true,
+      "same_student_question_revision_assessment_event_required": true,
+      "runtime_deduplication_tested": false
+    },
+    "geometry_coverage": {
+      "status": "usable_declared_structure_with_limited_case_coverage",
+      "diagram_conditions_required": true,
+      "apparent_lengths_angles_or_alignment_not_exact_givens": true,
+      "real_diagram_reading_or_protractor_detection_tested": false,
+      "positive_cube_net_and_negative_strip_independently_checked": true,
+      "reference_items_do_not_prove_mastery": true
+    },
+    "publication_cli_validation": {
+      "status": "validated",
+      "command_action": "validate",
+      "graph_version": "pep7-up-2022-r3",
+      "nodes": 81,
+      "skill_nodes": 75,
+      "chapter_nodes": 6,
+      "edges": 71,
+      "candidate_sha256": "c7a7c8aacce97e74c95d2430bb8f33ce7ed37fcaf866ba6a04d8a8483a985f79",
+      "database_connected": false,
+      "database_writes": 0
+    }
+  },
+  "notes": [
+    "Approval applies only to candidate_sha256. These bytes contain two source-page corrections made by the independent reviewer after explicit root authorization; all mathematical content stayed unchanged.",
+    "Source verified means bibliographic/TOC facts and stated standard scope checked. All 75 skills and 71 relations remain project-authored, not an official publisher graph.",
+    "This is independent nonblind AI content review, not teacher review, strict blind evaluation, human gold labeling, or recognition accuracy measurement.",
+    "All six chapters and fifteen main sections have substantive represented skills, but complete textbook-body, all exercise types, exact subskill page placement and student mastery are not established.",
+    "R2 candidate and R2 audit bytes are unchanged. Same node IDs do not authorize cross-version student evidence migration.",
+    "Do not inflate independent practice counts or confidence when broad and narrow skills describe the same student/question-revision/assessment event. Runtime enforcement was not exercised by this content audit.",
+    "Actual geometric reasoning requires clear diagram conditions. Existing short text cases establish selected boundaries, not image-reading or complete spatial-skill performance.",
+    "Publication, runtime integration, real-photo validation, and individual student edition binding are separate operations; this review did not write a database or call paid models.",
+    "Generation-time pending statuses remain historical in the candidate; this sidecar records a later independent review event. This is not a cryptographic signature."
+  ]
+}

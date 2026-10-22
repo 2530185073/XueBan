@@ -176,7 +176,7 @@ def test_daily_feedback_is_drafted_the_same_day_and_lists_what_to_correct(flow, 
     assert queued["id"] == draft["id"] and queued["student_name"] and queued["mistake_count"] == 1
     assert draft["id"] not in {r["id"] for r in flow.client.get("/v1/reports").json()["items"]}
     snapshot = draft["snapshot"]
-    assert snapshot["rule_version"] == "daily-r1" and snapshot["unknown_current"] == []
+    assert snapshot["rule_version"] == "daily-r2-evidence-source" and snapshot["unknown_current"] == []
     [mistake] = snapshot["mistakes"]
     assert mistake["case_id"] == case["id"] and mistake["verdict"] == "答错" and mistake["correction"] == "还没订正"
     assert [f["knowledge_id"] for f in snapshot["focus"]] == ["kp-rational-add-sub"]
@@ -196,7 +196,8 @@ def test_daily_feedback_is_drafted_the_same_day_and_lists_what_to_correct(flow, 
     assert items[2]["staff_note"] == "今天很专注。"
     assert publish(flow, items[2]).status_code == 200
     page = flow.client.get(created["path"], headers={"Authorization": ""}).text
-    assert "老师发送后又更新了今天的情况" in page and "今天错的题和订正情况" not in page
+    assert "老师更新了今天的情况" in page and "今天错的题和订正情况" not in page
+    assert "发送后" not in page
 
 
 def test_daily_feedback_keeps_publish_copy_confirmed_send_and_opened_apart(flow, same_day):
@@ -213,16 +214,23 @@ def test_daily_feedback_keeps_publish_copy_confirmed_send_and_opened_apart(flow,
     assert created["message_copied_at"] is None and created["sent_confirmed_at"] is None
     [published] = flow.client.get(queue).json()["items"]
     assert published["delivery"]["links"] == 1 and not published["delivery"]["copied"] and published["delivery"]["sent_confirmed_at"] is None
+    page = flow.client.get(created["path"], headers={"Authorization": ""}).text
+    assert "发布于 " in page and "发送于" not in page and "确认发送记录" not in page
+    data_url = f"/v1/report-links/{created['token']}"
+    assert flow.client.get(data_url, headers={"Authorization": ""}).json()["delivery"]["sent_confirmed_at"] is None
 
     copied = flow.client.post(f"/v1/report-share-links/{created['id']}/copied")
     assert copied.status_code == 200 and copied.json()["message_copied_at"]
     assert flow.client.get(queue).json()["items"][0]["delivery"]["sent_confirmed_at"] is None
+    assert "确认发送记录" not in flow.client.get(created["path"], headers={"Authorization": ""}).text
     sent = flow.client.post(f"/v1/report-share-links/{created['id']}/confirm-sent", json={"note": "已发妈妈微信"})
     assert sent.status_code == 200 and sent.json()["sent_confirmed_at"] and sent.json()["sent_note"] == "已发妈妈微信"
     again = flow.client.post(f"/v1/report-share-links/{created['id']}/confirm-sent", json={"note": "改一下"}).json()
     assert again["sent_confirmed_at"] == sent.json()["sent_confirmed_at"] and again["sent_note"] == "已发妈妈微信"
     delivery = flow.client.get(queue).json()["items"][0]["delivery"]
-    assert delivery["copied"] and delivery["sent_confirmed_at"] and delivery["opened_at"] is None
+    assert delivery["copied"] and delivery["sent_confirmed_at"]
+    assert flow.client.get(data_url, headers={"Authorization": ""}).json()["delivery"]["sent_confirmed_at"] == sent.json()["sent_confirmed_at"]
+    assert "老师确认发送记录：" in flow.client.get(created["path"], headers={"Authorization": ""}).text
 
     flow.client.get(created["path"], headers={"Authorization": ""})
     assert flow.client.get(queue).json()["items"][0]["delivery"]["opened_at"]
@@ -231,6 +239,30 @@ def test_daily_feedback_keeps_publish_copy_confirmed_send_and_opened_apart(flow,
     flow.client.post(f"/v1/report-share-links/{other['id']}/revoke")
     assert flow.client.post(f"/v1/report-share-links/{other['id']}/confirm-sent", json={}).status_code == 409
     assert flow.client.post("/v1/report-share-links/share_missing/copied").status_code == 404
+
+
+def test_new_report_version_does_not_inherit_old_send_confirmation(flow, same_day):
+    case = reviewed(flow)
+    teacher(flow)
+    link(flow, review(flow, case))
+    learning(flow).drain()
+    [first] = reports(flow, "daily")
+    assert publish(flow, first).status_code == 200
+    old_link = flow.client.post(f"/v1/reports/{first['id']}/share-links", json={}).json()
+    assert flow.client.post(f"/v1/report-share-links/{old_link['id']}/confirm-sent", json={}).status_code == 200
+    review(flow, flow.client.get(f"/v1/cases/{case['id']}").json(), action="replace", verdict="correct")
+    learning(flow).drain()
+    second = next(row for row in reports(flow, "daily") if row["version"] == 2)
+    assert publish(flow, second).status_code == 200
+    data_url = f"/v1/report-links/{old_link['token']}"
+    current = flow.client.get(data_url, headers={"Authorization": ""}).json()
+    assert current["report"]["version"] == 2
+    assert current["delivery"]["sent_confirmed_at"] is None
+    page = flow.client.get(old_link["path"], headers={"Authorization": ""}).text
+    assert "确认发送记录" not in page and "发布于 " in page
+    new_link = flow.client.post(f"/v1/reports/{second['id']}/share-links", json={}).json()
+    assert flow.client.post(f"/v1/report-share-links/{new_link['id']}/confirm-sent", json={}).status_code == 200
+    assert flow.client.get(data_url, headers={"Authorization": ""}).json()["delivery"]["sent_confirmed_at"]
 
 
 def test_daily_feedback_can_be_requested_for_today_but_not_tomorrow(flow, same_day):

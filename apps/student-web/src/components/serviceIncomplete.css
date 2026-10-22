@@ -1,0 +1,20 @@
+/* Only the embedded service-interrupted presentation; recovery logic is unchanged. */
+.service-incomplete-detail{padding:0!important}
+.service-next-step{display:flex;flex-wrap:wrap;gap:4px 16px;align-items:center}
+.service-next-step>p{flex:1 1 230px;margin:0;color:var(--muted);font-size:12px;line-height:1.8}
+.service-next-step>.text-button{min-height:44px;flex-shrink:0}
+.service-incomplete-detail>.recognition-recovery{margin:12px 0;padding:14px}
+.service-incomplete-detail>.recognition-recovery>p{margin:8px 0 10px}
+.service-secondary-actions{display:flex;justify-content:flex-end}
+.service-secondary-actions>.text-button{min-height:44px}
+.service-supplement{border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-top:4px}
+.service-supplement>summary{display:flex;align-items:center;gap:8px;min-height:44px;cursor:pointer;list-style:none;color:var(--ink);font-size:12px}
+.service-supplement>summary::-webkit-details-marker{display:none}
+.service-supplement>summary:after{content:"展开";margin-left:auto;font-size:11px;color:var(--muted)}
+.service-supplement[open]>summary:after{content:"收起"}
+.service-supplement>summary:focus-visible{outline:3px solid #a8bc8e;outline-offset:2px}
+.service-supplement-body{display:flex;flex-direction:column;gap:9px;padding:5px 0 14px}
+.service-supplement-body>.correction-note{margin:0}
+.service-supplement-body>.text-button{align-self:flex-start;min-height:44px}
+.service-incomplete-detail>.help-panel{margin-top:14px;padding-top:14px}
+.service-incomplete-detail>.case-history{margin-top:14px;padding-top:10px}

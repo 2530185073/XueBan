@@ -13,14 +13,22 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .auth import Actor
-from .correction_models import Entity
+from .correction_models import Entity, Task
+from .contracts import Contracts
 from .errors import Problem
-from .learning_models import (AttemptCondition, KnowledgeDiagnosis, KnowledgeEdge, KnowledgeNode, LearningEvidence,
+from .learning_models import (AttemptCondition, CurriculumGraph, KnowledgeDiagnosis, KnowledgeEdge, KnowledgeNode, LearningEvidence,
                               LearningProjection, QuestionKnowledgeLink, StudentKnowledgeState, StudentLearningProfile)
-from .correction_core import remember_idempotent, replay_idempotent
+from .correction_core import (invalidate, iso, remember_idempotent, replay_idempotent, save_entity,
+                              set_task, update_case)
 from .learning_projection import OptionalKey, fingerprints, new_id, published_graph
-from .learning_rules import RULE_VERSION, chapter_rollup, hints_seen_before
+from .learning_rules import RULE_VERSION, chapter_rollup, hints_seen_before, model_decision_usable
 from .models import Homework, Student
+from .curriculum_catalog import (canonical_subject, curriculum_stage, graph_is_usable,
+                                 node_matches_scope, scope_for_profile, scope_payload, scopes_for_grade, scopes_for_profile,
+                                 curriculum_matches_scope,
+                                 supported_scopes, supported_scope)
+from .curriculum_binding import book_payload
+from .learning_coverage import mapping_coverage
 
 KID = r"^[a-z][a-z0-9_-]{2,63}$"
 STAFF = {"sitting_teacher", "campus_admin"}
@@ -44,7 +52,19 @@ class LinkInput(Strict):
     role: Literal["primary", "secondary"]
     status: Literal["confirmed", "rejected"]
     expected_link_id: str | None = Field(default=None, max_length=64)
+    expected_question_revision: int | None = Field(default=None, ge=1)
+    expected_graph_version: str | None = Field(default=None, max_length=64)
     rationale: str | None = Field(default=None, max_length=500)
+
+
+class QuestionSubjectInput(Strict):
+    expected_question_revision: int = Field(ge=1)
+    subject: str = Field(min_length=1, max_length=40)
+
+
+class BookSelectionInput(Strict):
+    expected_revision: int = Field(ge=0)
+    graph_version: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class ConditionInput(Strict):
@@ -73,6 +93,7 @@ def _node_dict(node: KnowledgeNode) -> dict:
 
 def _link_dict(link: QuestionKnowledgeLink, names: dict) -> dict:
     return {"id": link.id, "question_id": link.question_id, "question_revision": link.question_revision,
+            "graph_version": link.graph_version,
             "knowledge_id": link.knowledge_id, "knowledge_name": names.get(link.knowledge_id), "role": link.role,
             "source": link.source, "status": link.status, "rationale": link.rationale, "actor_id": link.actor_id,
             "supersedes_id": link.supersedes_id, "created_at": link.created_at.isoformat()}
@@ -84,25 +105,163 @@ def diagnosis_dict(row: KnowledgeDiagnosis) -> dict:
 
 
 def current_links(session, question_id) -> dict[str, QuestionKnowledgeLink]:
-    current = {}
-    for link in session.scalars(select(QuestionKnowledgeLink).where(QuestionKnowledgeLink.question_id == question_id)
-                                .order_by(QuestionKnowledgeLink.created_at, QuestionKnowledgeLink.id)):
-        current[link.knowledge_id] = link
-    return current
+    """Show machine attribution only for the unique current observation.
+
+    Staff links describe the question. Machine links describe one reading of
+    one answer; a historical link must never leak into a new attempt's editor.
+    Ambiguous or stale case pointers expose only staff links until resolved.
+    """
+    from .learning_mapping import _current_links
+    question = session.get(Entity, question_id)
+    if question is None or question.kind != "question":
+        return {}
+    cases = [case for case in session.scalars(select(Entity).where(
+        Entity.homework_id == question.homework_id, Entity.kind == "case"))
+        if case.document.get("question_id") == question_id
+        and case.document.get("lifecycle", "active") == "active"]
+    attempt = decision = None
+    if len(cases) == 1:
+        document = cases[0].document
+        pointer = document.get("current_decision") or {}
+        candidate_attempt = session.get(Entity, document.get("current_attempt_id")) if document.get("current_attempt_id") else None
+        candidate_decision = session.get(Entity, pointer.get("id")) if pointer.get("id") else None
+        versions = candidate_decision.document.get("input_versions", {}) if candidate_decision else {}
+        if (candidate_attempt is not None and candidate_attempt.kind == "attempt"
+                and candidate_decision is not None and candidate_decision.kind == "decision"
+                and candidate_attempt.homework_id == question.homework_id == candidate_decision.homework_id
+                and candidate_attempt.document.get("question_id") == question_id
+                and candidate_decision.document.get("case_id") == cases[0].id
+                and candidate_decision.document.get("origin") in {"model", "staff"}
+                and candidate_decision.document.get("validity") in {"candidate", "confirmed", "needs_review"}
+                and pointer.get("revision") == candidate_decision.revision
+                and versions.get("question_revision") == question.revision
+                and versions.get("attempt_id") == candidate_attempt.id
+                and versions.get("attempt_recognition_revision") == candidate_attempt.document.get("recognition_revision")):
+            attempt, decision = candidate_attempt, candidate_decision
+    return _current_links(session, question_id, attempt=attempt, decision=decision)
 
 
 def install_learning(app, engine, cfg, database_session, current_actor):
     from .app import require_student
     ActorDep = Annotated[Actor, Depends(current_actor)]
     SessionDep = Annotated[Session, Depends(database_session)]
+    contracts = Contracts(cfg.contracts_dir)
 
-    def graph_nodes(session):
-        graph = published_graph(session)
+    def graph_nodes(session, student_id=None):
+        graph = published_graph(session, student_id)
         if graph is None:
             raise Problem(503, "service", "service_unavailable", "尚未发布课程知识图谱。")
         nodes = list(session.scalars(select(KnowledgeNode).where(KnowledgeNode.graph_version == graph.version)
                                      .order_by(KnowledgeNode.sort_order)))
         return graph, nodes
+
+    def student_grade(session, student_id: str) -> int | None:
+        profile = session.get(StudentLearningProfile, student_id)
+        grade = profile.document.get("grade") if profile else None
+        return grade if type(grade) is int and 5 <= grade <= 8 else None
+
+    def student_graph(session, student_id):
+        grade = student_grade(session, student_id)
+        profile = session.get(StudentLearningProfile, student_id)
+        scopes = {scope.subject: scope for scope in scopes_for_profile(profile.document if profile else {})}
+        available = [scope for scope in scopes.values() if scope_payload(scope)["catalog_status"] == "available"]
+        graph = published_graph(session, student_id)
+        if not available or not graph_is_usable(graph):
+            return grade, scopes, None, []
+        nodes = [node for node in session.scalars(select(KnowledgeNode).where(
+            KnowledgeNode.graph_version == graph.version).order_by(KnowledgeNode.sort_order, KnowledgeNode.id))
+                 if any(node_matches_scope(node, scope) for scope in available)]
+        return grade, scopes, graph, nodes
+
+    def projection_info(session, student_id):
+        projection = session.get(LearningProjection, student_id)
+        expected = fingerprints(session, [student_id]).get(student_id)
+        return {"evidence_revision": projection.evidence_revision if projection else 0,
+                "state_version": projection.state_version if projection else 0,
+                "projected_at": projection.projected_at.isoformat() if projection else None,
+                "pending": bool(expected) and (projection is None or projection.source_fingerprint != expected)}
+
+    def current_states(session, student_id, graph, projection):
+        if graph is None or projection["pending"]:
+            return {}
+        return {row.knowledge_id: row.document for row in session.scalars(select(StudentKnowledgeState).where(
+            StudentKnowledgeState.student_id == student_id, StudentKnowledgeState.graph_version == graph.version,
+            StudentKnowledgeState.rule_version == RULE_VERSION))}
+
+    def scoped_edges(session, graph, by_id):
+        if graph is None or not by_id:
+            return []
+        return [edge for edge in session.scalars(select(KnowledgeEdge).where(
+            KnowledgeEdge.graph_version == graph.version, KnowledgeEdge.relation_type == "prerequisite_of")
+            .order_by(KnowledgeEdge.id)) if edge.from_id in by_id and edge.to_id in by_id]
+
+    @app.get("/v1/curriculum/catalog", operation_id="getCurriculumCatalog")
+    def curriculum_catalog(actor: ActorDep, session: SessionDep):
+        return {"revision_policy": "publisher_latest", "grades": sorted({scope.grade for scope in supported_scopes()}),
+                "subjects": {str(grade): [scope_payload(scope) for scope in scopes_for_grade(grade)]
+                             for grade in sorted({scope.grade for scope in supported_scopes()})},
+                "notice": "课程版本按国家中小学智慧教育平台最新目录；尚未完成知识点校对的学科只累计作答数据。"}
+
+    @app.get("/v1/students/{student_id}/curriculum", operation_id="getStudentCurriculum")
+    def student_curriculum(student_id: str, actor: ActorDep, session: SessionDep):
+        require_student(session, actor, student_id)
+        grade = student_grade(session, student_id)
+        profile = session.get(StudentLearningProfile, student_id)
+        scopes = scopes_for_profile(profile.document if profile else {})
+        return {"student_id": student_id, "grade": grade, "stage": curriculum_stage(grade),
+                "subjects": [scope_payload(scope) for scope in scopes],
+                "notice": "如果年级未登记，请先选择年级；学科出版社未提供的范围不会创建知识图谱。"}
+
+    def student_books(session, student_id):
+        profile = session.get(StudentLearningProfile, student_id)
+        grade = student_grade(session, student_id)
+        graphs = list(session.scalars(select(CurriculumGraph).where(CurriculumGraph.status == "published")
+                                      .order_by(CurriculumGraph.published_at.desc(), CurriculumGraph.version)))
+        books = [book_payload(graph) for graph in graphs if graph.book_identity
+                 and graph.book_identity.get("grade") == grade and graph_is_usable(graph)]
+        binding = (profile.document.get("curriculum_binding") or {}) if profile else {}
+        selected = session.get(CurriculumGraph, binding.get("graph_version")) if binding else None
+        return {"student_id": student_id, "profile_revision": profile.revision if profile else 0,
+                "current_binding": book_payload(selected) if selected else None, "books": books}
+
+    @app.get("/v1/students/{student_id}/curriculum-books", operation_id="getStudentCurriculumBooks")
+    def get_books(student_id: str, actor: ActorDep, session: SessionDep):
+        require_student(session, actor, student_id)
+        return student_books(session, student_id)
+
+    @app.put("/v1/students/{student_id}/curriculum-books", operation_id="selectStudentCurriculumBook")
+    def select_book(student_id: str, payload: BookSelectionInput, actor: ActorDep, session: SessionDep):
+        student = require_student(session, actor, student_id)
+        if not ("student" in actor.roles and actor.bound_student_id == student_id):
+            _staff(actor)
+        session.scalar(select(Student).where(Student.id == student_id).with_for_update())
+        profile = session.scalar(select(StudentLearningProfile).where(StudentLearningProfile.student_id == student_id)
+                                 .with_for_update().execution_options(populate_existing=True))
+        if (profile.revision if profile else 0) != payload.expected_revision:
+            raise Problem(409, "conflict", "revision_conflict", "教材选择已更新，请刷新后重试。")
+        if profile is None or student_grade(session, student_id) is None:
+            raise Problem(422, "validation", "invalid_request", "请先登记学生年级。")
+        binding = None
+        if payload.graph_version is not None:
+            graph = session.get(CurriculumGraph, payload.graph_version)
+            if (graph is None or graph.status != "published" or not graph.book_identity
+                    or not graph_is_usable(graph) or graph.book_identity.get("grade") != student_grade(session, student_id)):
+                raise Problem(422, "validation", "invalid_request", "请选择当前年级已发布、来源与审查记录完整的具体教材。")
+            binding = {**graph.book_identity, "graph_version": graph.version}
+        previous = profile.document.get("curriculum_binding")
+        if previous == binding:
+            return student_books(session, student_id)
+        stamp = datetime.now(timezone.utc)
+        history = list(profile.document.get("curriculum_binding_history") or [])
+        history.append({"previous_graph_version": (previous or {}).get("graph_version"),
+                        "graph_version": payload.graph_version, "actor_id": actor.id, "changed_at": stamp.isoformat()})
+        profile.document = {**profile.document, "curriculum_binding": binding,
+                            "curriculum_binding_history": history, "current_knowledge_ids": [],
+                            "textbook_revision": "isbn:" + binding["isbn"] if binding else "publisher_latest"}
+        profile.revision += 1
+        profile.updated_by, profile.updated_at = actor.id, stamp
+        session.commit()
+        return student_books(session, student_id)
 
     def question_scope(session, actor, question_id):
         question = session.get(Entity, question_id)
@@ -113,11 +272,20 @@ def install_learning(app, engine, cfg, database_session, current_actor):
         return question, homework, student
 
     @app.get("/v1/curriculum/graph", operation_id="getCurriculumGraph")
-    def curriculum_graph(actor: ActorDep, session: SessionDep):
-        graph, nodes = graph_nodes(session)
+    def curriculum_graph(actor: ActorDep, session: SessionDep, student_id: str | None = None,
+                         question_id: str | None = None):
+        if question_id is not None:
+            _, homework, _ = question_scope(session, actor, question_id)
+            if student_id is not None and student_id != homework.student_id:
+                raise Problem(404, "not_found", "not_found", "资源不存在或不可访问。")
+            student_id = homework.student_id
+        if student_id is not None:
+            require_student(session, actor, student_id)
+        graph, nodes = graph_nodes(session, student_id)
         edges = session.scalars(select(KnowledgeEdge).where(KnowledgeEdge.graph_version == graph.version).order_by(KnowledgeEdge.id))
         return {"graph_version": graph.version, "title": graph.title, "review_status": graph.review_status,
-                "source_note": graph.source_note, "nodes": [_node_dict(n) for n in nodes],
+                "source_note": graph.source_note, "book_identity": book_payload(graph) if graph.book_identity else None,
+                "nodes": [_node_dict(n) for n in nodes],
                 "edges": [{"id": e.id, "from_id": e.from_id, "to_id": e.to_id, "relation_type": e.relation_type,
                            "scope": e.scope, "rationale": e.rationale} for e in edges]}
 
@@ -132,17 +300,35 @@ def install_learning(app, engine, cfg, database_session, current_actor):
 
     @app.put("/v1/students/{student_id}/learning-profile", operation_id="putLearningProfile")
     def put_profile(student_id: str, payload: ProfileInput, actor: ActorDep, session: SessionDep):
-        _staff(actor)
+        if payload.textbook_revision not in (None, "publisher_latest", "isbn:9787107382468"):
+            raise Problem(422, "validation", "invalid_request", "具体教材版本请通过教材选择设置。")
+        student_self_service = "student" in actor.roles and actor.bound_student_id == student_id
+        if student_self_service:
+            if payload.grade not in {5, 6, 7, 8} or payload.term is not None or payload.current_knowledge_ids or payload.note is not None:
+                raise Problem(422, "validation", "invalid_request", "学生本人只能设置已纳入范围的年级。")
+        else:
+            _staff(actor)
         student = require_student(session, actor, student_id)
-        _, nodes = graph_nodes(session)
-        known = {n.id for n in nodes}
-        if not set(payload.current_knowledge_ids) <= known:
-            raise Problem(422, "validation", "invalid_request", "当前课次必须引用已发布的知识点。")
+        if not student_self_service:
+            _, nodes = graph_nodes(session, student_id)
+            known = {n.id for n in nodes}
+            if not set(payload.current_knowledge_ids) <= known:
+                raise Problem(422, "validation", "invalid_request", "当前课次必须引用已发布的知识点。")
         row = session.scalar(select(StudentLearningProfile).where(StudentLearningProfile.student_id == student_id).with_for_update())
         revision = row.revision if row else 0
         if payload.expected_revision != revision:
             raise Problem(409, "conflict", "revision_conflict", "学员档案已被修改，请刷新后核实。")
-        document = payload.model_dump(exclude={"expected_revision"})
+        if row and row.document.get("curriculum_binding") and payload.grade != row.document.get("grade"):
+            raise Problem(409, "conflict", "course_unknown", "请先取消当前具体教材选择，再修改年级。")
+        if payload.textbook_revision == "isbn:9787107382468" and not (row and row.document.get("curriculum_binding")):
+            raise Problem(422, "validation", "invalid_request", "请先显式选择对应教材，不能只填写版本名。")
+        document = {**(row.document if row else {}), "grade": payload.grade}
+        if payload.grade is not None:
+            document["textbook_revision"] = "publisher_latest"
+        if not student_self_service:
+            document.update(payload.model_dump(exclude={"expected_revision"}))
+        if document.get("curriculum_binding"):
+            document["textbook_revision"] = "isbn:" + document["curriculum_binding"]["isbn"]
         stamp = datetime.now(timezone.utc)
         if row is None:
             row = StudentLearningProfile(student_id=student_id, tenant_id=student.tenant_id, revision=1, document=document,
@@ -151,18 +337,43 @@ def install_learning(app, engine, cfg, database_session, current_actor):
         else:
             row.revision, row.document, row.updated_by, row.updated_at = revision + 1, document, actor.id, stamp
         session.commit()
+        if student_self_service:
+            scopes = scopes_for_profile(row.document)
+            return {"student_id": student_id, "grade": payload.grade, "stage": curriculum_stage(payload.grade),
+                    "subjects": [scope_payload(scope) for scope in scopes],
+                    "notice": "课程版本按国家中小学智慧教育平台最新目录。"}
         return {"student_id": student_id, "revision": row.revision, **row.document, "updated_at": row.updated_at.isoformat()}
 
     @app.get("/v1/students/{student_id}/knowledge", operation_id="getStudentKnowledge")
     def student_knowledge(student_id: str, actor: ActorDep, session: SessionDep):
         require_student(session, actor, student_id)
-        graph, nodes = graph_nodes(session)
+        grade, scopes, graph, nodes = student_graph(session, student_id)
         by_id = {n.id: n for n in nodes}
-        states = {row.knowledge_id: row.document for row in session.scalars(
-            select(StudentKnowledgeState).where(StudentKnowledgeState.student_id == student_id))}
-        projection = session.get(LearningProjection, student_id)
-        expected = fingerprints(session, [student_id]).get(student_id)
+        projection = projection_info(session, student_id)
+        states = current_states(session, student_id, graph, projection)
         items = []
+        graph_items = []
+        for node in nodes:
+            parent = by_id.get(node.parent_id)
+            chapter = node if node.node_type == "chapter" else parent
+            visited = set()
+            while chapter and chapter.node_type != "chapter" and chapter.id not in visited:
+                visited.add(chapter.id)
+                chapter = by_id.get(chapter.parent_id)
+            if chapter and chapter.node_type != "chapter":
+                chapter = None
+            state = states.get(node.id, {})
+            graph_items.append({
+                **_node_dict(node), "parent_id": parent.id if parent else None,
+                "subject": next((subject for subject, scope in scopes.items() if node_matches_scope(node, scope)), None),
+                "chapter_id": chapter.id if chapter else None, "chapter_name": chapter.name if chapter else None,
+                "learning_status": state.get("learning_status", "no_judgment"),
+                "reason_codes": state.get("reason_codes", []),
+                "valid_evidence_count": state.get("valid_evidence_count", 0),
+                "model_evidence_count": state.get("model_evidence_count", 0),
+                "staff_verified_evidence_count": state.get("staff_verified_evidence_count", 0),
+                "assessment_source": state.get("assessment_source", "none"),
+            })
         for knowledge_id, state in states.items():
             node = by_id.get(knowledge_id)
             if node is None:
@@ -171,67 +382,194 @@ def install_learning(app, engine, cfg, database_session, current_actor):
             items.append({**state, "name": node.name, "chapter_id": node.parent_id, "chapter_name": parent.name if parent else None,
                           "sort_order": node.sort_order})
         items.sort(key=lambda s: s["sort_order"])
-        return {"student_id": student_id, "graph_version": graph.version, "graph_review_status": graph.review_status,
+        entities = session.scalars(select(Entity).where(Entity.homework_id.in_(select(Homework.id).where(
+            Homework.student_id == student_id, Homework.processing_blocked.is_(False))), Entity.kind == "case")).all()
+        counts = {subject: {"correct_count": 0, "incorrect_count": 0, "partial_count": 0,
+                            "scorable_count": 0} for subject in scopes}
+        for case in entities:
+            decision = case.document.get("current_decision") or {}
+            if (case.document.get("lifecycle") != "active"
+                    or decision.get("validity") not in {"candidate", "confirmed"}
+                    or (decision.get("origin") == "model" and not model_decision_usable(decision))):
+                continue
+            homework = session.get(Homework, case.homework_id)
+            course = homework.curriculum if homework and isinstance(homework.curriculum, dict) else {}
+            question = session.get(Entity, case.document.get("question_id"))
+            if question is None or course.get("grade") != grade:
+                continue
+            subject = canonical_subject((question.annotations or {}).get("subject_override")
+                                        or question.document.get("subject"))
+            scope = scopes.get(subject)
+            if (scope is None or not curriculum_matches_scope(course, scope)
+                    or scope_payload(scope)["catalog_status"] != "available"):
+                continue
+            verdict = decision.get("verdict")
+            if verdict == "correct":
+                counts[subject]["correct_count"] += 1
+                counts[subject]["scorable_count"] += 1
+            elif verdict == "partially_correct":
+                counts[subject]["partial_count"] += 1
+                counts[subject]["incorrect_count"] += 1
+                counts[subject]["scorable_count"] += 1
+            elif verdict in {"incorrect", "unanswered"}:
+                counts[subject]["incorrect_count"] += 1
+                counts[subject]["scorable_count"] += 1
+        subjects = []
+        for subject, scope in scopes.items():
+            item = counts[subject]
+            scoped_nodes = [node for node in nodes if node_matches_scope(node, scope)]
+            graph_ready = bool(graph_is_usable(graph) and scoped_nodes)
+            score_points = item["correct_count"] + item["partial_count"] * 0.5
+            item.update(scope_payload(scope), graph_ready=graph_ready,
+                        status="ready" if graph_ready else "building",
+                        score_percent=round(100 * score_points / item["scorable_count"])
+                        if item["scorable_count"] else None)
+            subjects.append(item)
+        graph_version = graph.version if graph else None
+        graph_review_status = graph.review_status if graph else "not_ready_latest_edition"
+        return {"student_id": student_id, "grade": grade, "graph_version": graph_version, "graph_review_status": graph_review_status,
+                "book_identity": book_payload(graph) if graph and graph.book_identity else None,
+                "source_note": graph.source_note if graph else None,
                 "rule_version": RULE_VERSION,
-                "projection": {"evidence_revision": projection.evidence_revision if projection else 0,
-                               "state_version": projection.state_version if projection else 0,
-                               "projected_at": projection.projected_at.isoformat() if projection else None,
-                               "pending": bool(expected) and (projection is None or projection.source_fingerprint != expected)},
+                "projection": projection, "nodes": graph_items,
+                "edges": [{"id": edge.id, "from_id": edge.from_id, "to_id": edge.to_id,
+                           "relation_type": edge.relation_type, "scope": edge.scope, "rationale": edge.rationale}
+                          for edge in scoped_edges(session, graph, by_id)],
                 "states": items, "chapters": chapter_rollup([_node_dict(n) for n in nodes], states),
-                "notice": "状态只根据坐班老师已核实的作答计算；没有记录的知识点表示资料不足，不代表薄弱。"}
+                "subjects": subjects,
+                "mapping_coverage": mapping_coverage(session, session.get(Student, student_id)),
+                "notice": "仅统计当前年级与所选教材范围内的有效判定；参考分来自已拍作业样本，不代表整本教材掌握率。具体书图的知识点与关系由项目 AI 整理并经独立 AI 审查，不等于教师审核；未建模内容暂不判断。"}
 
     @app.get("/v1/students/{student_id}/knowledge/{knowledge_id}", operation_id="getStudentKnowledgeNode")
     def knowledge_node(student_id: str, knowledge_id: str, actor: ActorDep, session: SessionDep,
                        include_invalidated: bool = False):
         require_student(session, actor, student_id)
-        graph, nodes = graph_nodes(session)
+        if include_invalidated:
+            _staff(actor)
+        _, _, graph, nodes = student_graph(session, student_id)
+        if graph is None:
+            raise Problem(503, "service", "service_unavailable", "当前年级的最新版教材知识点目录仍在建设中。")
         by_id = {n.id: n for n in nodes}
         node = by_id.get(knowledge_id)
         if node is None:
             raise Problem(404, "not_found", "not_found", "知识点不存在。")
-        if include_invalidated:
-            _staff(actor)
+        projection = projection_info(session, student_id)
+        states = current_states(session, student_id, graph, projection)
         query = select(LearningEvidence).where(LearningEvidence.student_id == student_id, LearningEvidence.knowledge_id == knowledge_id)
         if not include_invalidated:
             query = query.where(LearningEvidence.validity == "valid")
         evidence = []
         for row in session.scalars(query.order_by(LearningEvidence.occurred_at, LearningEvidence.id)):
+            if projection["pending"]:
+                break
             question = session.get(Entity, row.document["question_id"])
+            if not include_invalidated and (
+                    row.document.get("graph_version") != graph.version or question is None
+                    or row.document.get("question_revision") != question.revision):
+                continue
             homework = session.get(Homework, row.document["homework_id"])
             evidence.append({"id": row.id, **{k: row.document[k] for k in (
                 "attempt_id", "case_id", "homework_id", "question_id", "decision_id", "verdict", "event_type", "result",
                 "assistance_level", "independent", "link_role", "occurred_at")},
                 "validity": row.validity, "invalidation_reason": row.invalidation_reason,
-                "question_text": question.document["stem_text"] if question else None,
+                "source_role": row.document.get("source_role", "unknown"),
+                "question_revision": row.document.get("question_revision"),
+                "captured_question_revision": row.document.get("captured_question_revision"),
+                "graph_version": row.document.get("graph_version"),
+                "question_text": question.document["stem_text"] if question and
+                row.document.get("question_revision") == question.revision else None,
                 "homework_title": homework.title if homework else None})
-        state = session.get(StudentKnowledgeState, (student_id, knowledge_id))
-        edges = list(session.scalars(select(KnowledgeEdge).where(KnowledgeEdge.graph_version == graph.version,
-                                                                 KnowledgeEdge.relation_type == "prerequisite_of",
-                                                                 (KnowledgeEdge.to_id == knowledge_id) | (KnowledgeEdge.from_id == knowledge_id))))
-        states = {row.knowledge_id: row.document["learning_status"] for row in session.scalars(
-            select(StudentKnowledgeState).where(StudentKnowledgeState.student_id == student_id))}
-        related = lambda ids: [{"id": i, "name": by_id[i].name, "learning_status": states.get(i, "no_judgment")} for i in ids if i in by_id]  # noqa: E731
-        return {"node": _node_dict(node), "state": state.document if state else None, "evidence": evidence,
+        edges = scoped_edges(session, graph, by_id)
+        related = lambda ids: [{"id": i, "name": by_id[i].name, "learning_status": states.get(i, {}).get("learning_status", "no_judgment")} for i in ids if i in by_id]  # noqa: E731
+        return {"node": _node_dict(node), "graph_version": graph.version, "rule_version": RULE_VERSION,
+                "projection": projection, "state": states.get(knowledge_id), "evidence": evidence,
                 "prerequisites": related([e.from_id for e in edges if e.to_id == knowledge_id]),
                 "leads_to": related([e.to_id for e in edges if e.from_id == knowledge_id]),
                 "notice": "前置关系只用于提出诊断问题，不会因为本知识点出错就把前置知识点判为薄弱。"}
 
     @app.get("/v1/questions/{question_id}/knowledge-links", operation_id="listQuestionKnowledgeLinks")
     def list_links(question_id: str, actor: ActorDep, session: SessionDep):
-        question_scope(session, actor, question_id)
-        _, nodes = graph_nodes(session)
+        question, _, student = question_scope(session, actor, question_id)
+        graph, nodes = graph_nodes(session, student.id)
         names = {n.id: n.name for n in nodes}
-        return {"question_id": question_id, "items": [_link_dict(l, names) for l in current_links(session, question_id).values()]}
+        return {"question_id": question_id, "question_revision": question.revision, "graph_version": graph.version,
+                "items": [_link_dict(l, names) for l in current_links(session, question_id).values()]}
+
+    @app.put("/v1/questions/{question_id}/subject", operation_id="setUnrecognizedQuestionSubject")
+    def set_question_subject(question_id: str, payload: QuestionSubjectInput, actor: ActorDep, session: SessionDep):
+        question, homework, student = question_scope(session, actor, question_id)
+        # All cross-domain writers serialize the learner before homework and
+        # question, including correction results, mapping and deletion.
+        session.scalar(select(Student).where(Student.id == student.id).with_for_update()
+                       .execution_options(populate_existing=True))
+        require_student(session, actor, student.id)
+        homework = session.scalar(select(Homework).where(Homework.id == homework.id).with_for_update()
+                                  .execution_options(populate_existing=True))
+        if homework.processing_blocked:
+            raise Problem(409, "conflict", "processing_blocked", "该作业已停止处理。")
+        question = session.scalar(select(Entity).where(
+            Entity.id == question_id, Entity.kind == "question").with_for_update()
+                                  .execution_options(populate_existing=True))
+        if question is None:
+            raise Problem(404, "not_found", "not_found", "资源不存在或不可访问。")
+        if question.revision != payload.expected_question_revision:
+            raise Problem(409, "conflict", "revision_conflict", "题目已更新，请刷新后再选择学科。")
+        profile = session.get(StudentLearningProfile, student.id)
+        grade = profile.document.get("grade") if profile else None
+        curriculum = homework.curriculum if isinstance(homework.curriculum, dict) else {}
+        if type(grade) is not int or curriculum.get("grade") != grade:
+            raise Problem(409, "conflict", "course_unknown", "请先登记学生年级，再选择对应学科。")
+        subject = canonical_subject(payload.subject)
+        scope = scope_for_profile(profile.document if profile else {}, subject)
+        if scope is None:
+            raise Problem(422, "validation", "invalid_request", "所选学科不在当前年级范围内。")
+        if canonical_subject((question.annotations or {}).get("subject_override")) == subject:
+            return {"question_id": question.id, "subject": subject, "question_revision": question.revision}
+        if canonical_subject(question.document.get("subject")) is not None:
+            raise Problem(409, "conflict", "subject_already_recognized", "AI 已识别这道题的学科，不能通过手动选择覆盖。")
+        annotations = dict(question.annotations or {})
+        annotations["subject_override"] = subject
+        annotations["subject_override_actor_id"] = actor.id
+        annotations["subject_override_at"] = iso()
+        # A subject correction does not change the image's diagram/slots.
+        if annotations.get("diagram_revision") == question.revision:
+            annotations["diagram_revision"] = question.revision + 1
+        question.annotations = annotations
+        save_entity(session, contracts, homework.id, "question",
+                    {**question.document, "revision": question.revision + 1}, row=question)
+        affected = set()
+        for case in session.scalars(select(Entity).where(Entity.homework_id == homework.id, Entity.kind == "case")):
+            if case.document["question_id"] != question.id or case.document.get("lifecycle", "active") != "active":
+                continue
+            invalidate(session, contracts, case, "question_subject_revision")
+            update_case(session, contracts, case, current_question_revision=question.revision,
+                        current_decision=None, progress="paused" if case.document["progress"] == "paused" else "pending")
+            affected.add(case.id)
+        # Running calls are fenced by question_revision in the worker's
+        # commit-time check. Do not lock them in the opposite order to finish().
+        for task in session.scalars(select(Task).where(Task.homework_id == homework.id,
+                                                       Task.status.in_(["queued", "retryable_failed"]))):
+            if task.inputs.get("case_id") in affected:
+                set_task(session, contracts, task, "superseded")
+        session.commit()
+        return {"question_id": question.id, "subject": subject, "question_revision": question.revision}
 
     @app.post("/v1/questions/{question_id}/knowledge-links", status_code=201, operation_id="decideQuestionKnowledgeLink")
     def decide_link(question_id: str, payload: LinkInput, actor: ActorDep, session: SessionDep):
         _staff(actor)
         question, homework, student = question_scope(session, actor, question_id)
-        graph, nodes = graph_nodes(session)
+        session.scalar(select(Student).where(Student.id == student.id).with_for_update()
+                       .execution_options(populate_existing=True))
+        require_student(session, actor, student.id)
+        question = session.scalar(select(Entity).where(Entity.id == question_id).with_for_update()
+                                  .execution_options(populate_existing=True))
+        graph, nodes = graph_nodes(session, student.id)
+        if ((payload.expected_question_revision is not None and question.revision != payload.expected_question_revision)
+                or (payload.expected_graph_version is not None and graph.version != payload.expected_graph_version)):
+            raise Problem(409, "conflict", "revision_conflict", "题目或知识图谱版本已更新，请刷新后核实。")
         names = {n.id: n.name for n in nodes if n.node_type in ("concept", "skill")}
         if payload.knowledge_id not in names:
             raise Problem(422, "validation", "invalid_request", "只能关联已发布的知识点（不含章节）。")
-        session.scalar(select(Entity).where(Entity.id == question_id).with_for_update())
         links = current_links(session, question_id)
         current = links.get(payload.knowledge_id)
         if (current.id if current else None) != payload.expected_link_id:
@@ -239,10 +577,13 @@ def install_learning(app, engine, cfg, database_session, current_actor):
         if payload.role == "primary" and payload.status == "confirmed" and any(
                 l.role == "primary" and l.status == "confirmed" and k != payload.knowledge_id for k, l in links.items()):
             raise Problem(409, "conflict", "revision_conflict", "这道题已有主知识点；请先把原主知识点改为次要或驳回。")
+        previous = current or session.scalar(select(QuestionKnowledgeLink).where(
+            QuestionKnowledgeLink.question_id == question_id, QuestionKnowledgeLink.knowledge_id == payload.knowledge_id)
+            .order_by(QuestionKnowledgeLink.created_at.desc(), QuestionKnowledgeLink.id.desc()))
         link = QuestionKnowledgeLink(id=new_id("qkl"), tenant_id=student.tenant_id, student_id=student.id, homework_id=homework.id,
                                      question_id=question_id, question_revision=question.revision, knowledge_id=payload.knowledge_id,
                                      graph_version=graph.version, role=payload.role, source="staff", status=payload.status,
-                                     rationale=payload.rationale, actor_id=actor.id, supersedes_id=current.id if current else None,
+                                     rationale=payload.rationale, actor_id=actor.id, supersedes_id=previous.id if previous else None,
                                      created_at=datetime.now(timezone.utc))
         session.add(link)
         session.commit()
@@ -274,6 +615,9 @@ def install_learning(app, engine, cfg, database_session, current_actor):
             raise Problem(404, "not_found", "not_found", "资源不存在或不可访问。")
         homework = session.get(Homework, attempt.homework_id)
         student = require_student(session, actor, homework.student_id)
+        session.scalar(select(Student).where(Student.id == student.id).with_for_update()
+                       .execution_options(populate_existing=True))
+        require_student(session, actor, student.id)
         session.scalar(select(Entity).where(Entity.id == attempt_id).with_for_update())
         current = current_condition(session, attempt_id)
         if (current.id if current else None) != payload.expected_condition_id:
@@ -298,7 +642,7 @@ def install_learning(app, engine, cfg, database_session, current_actor):
         operation = f"POST /v1/students/{student_id}/knowledge/{knowledge_id}/diagnoses"
         if (replay := replay_idempotent(session, actor, student_id, operation, idempotency_key, payload.model_dump(mode="json"))) is not None:
             return replay
-        _, nodes = graph_nodes(session)
+        _, nodes = graph_nodes(session, student_id)
         if knowledge_id not in {n.id for n in nodes}:
             raise Problem(404, "not_found", "not_found", "知识点不存在。")
         valid = set(session.scalars(select(LearningEvidence.id).where(
@@ -351,8 +695,6 @@ def install_learning(app, engine, cfg, database_session, current_actor):
         _staff(actor)
         from .app import accessible_students
         students = accessible_students(actor).with_only_columns(Student.id)
-        _, nodes = graph_nodes(session)
-        names = {n.id: n.name for n in nodes}
         query = (select(Entity, Homework).join(Homework, Homework.id == Entity.homework_id)
                  .where(Entity.kind == "case", Homework.student_id.in_(students), Homework.processing_blocked.is_(False))
                  .order_by(Entity.id).limit(2000))
@@ -366,6 +708,8 @@ def install_learning(app, engine, cfg, database_session, current_actor):
             if any(l.status == "confirmed" for l in links.values()):
                 continue
             question = session.get(Entity, document["question_id"])
+            _, nodes = graph_nodes(session, homework.student_id)
+            names = {n.id: n.name for n in nodes}
             items.append({"case_id": case.id, "question_id": document["question_id"], "student_id": homework.student_id,
                           "homework_title": homework.title, "question_text": question.document["stem_text"] if question else None,
                           "verdict": decision["verdict"],

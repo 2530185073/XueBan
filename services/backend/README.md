@@ -2,7 +2,9 @@
 
 这里实现学生网页端和安卓共用的真实后端：授权学生 → 作业 → 私有照片上传 → 识别任务 → 逐题原作答 → 候选检查 → 分层提示 → 新订正 → 再检查；同时提供坐班求助与受权老师核实。全链路使用多模态模型，不接专用 OCR。模型输出始终是候选，只有受权老师复核能产生 `confirmed`；模型判断正确也不会自动关闭订正。
 
-纠错业务请求和返回按 `contracts/phase1/` 的现有 JSON Schema 校验；长期账号接口在服务端使用严格字段模型校验，见文末。未知题库 ID、知识点映射保留 `null`。此版本仍是本机联调基础，尚未实现契约中的人工布局补题/拆合、学生数据删除工作流，也未部署知识图谱、长期记忆或家长报告。未支持的操作没有“成功”替身。
+纠错业务请求和返回按 `contracts/phase1/` 的 JSON Schema 校验；长期账号接口在服务端使用严格字段模型校验，见文末。未知题库 ID、知识点映射保留 `null`。已实现人工布局修订、学生数据删除、证据驱动的个人图谱、记忆和家长报告；当前交付范围及真实验收证据见 [持续交付记录](../../docs/CONTINUOUS_DELIVERY.md)。工程测试和合成流程通过不代表所有真实整页识读、在校使用或安卓硬件验收通过。
+
+纠错可靠性边界另见 [无效对齐预检](../../docs/RECOGNITION_ALIGNMENT_DISPATCH.md)、[逐项格式隔离](../../docs/RECOGNITION_PARTIAL_OUTPUT_PLAN.md) 和 [多空作答范围检查](../../docs/RECOGNITION_SCOPE_GUARD.md)。服务或范围未完成不得写成学生薄弱点。
 
 ## 启动
 
@@ -37,8 +39,10 @@ PYTHONPATH=services/backend services/backend/.venv/bin/python -m xueban_backend.
 | `PUBLIC_BASE_URL` | 如 `http://127.0.0.1:8000`；必须与安卓配置的 API origin 一致，无额外路径/查询；本机 HTTP 仅用于受控联调 |
 | `UPLOAD_TICKET_TTL_SECONDS` | 默认900秒，服务端限定30—1800秒；读取票据固定120秒 |
 | `WORKER_LEASE_SECONDS` | 默认300秒；进程中断后到期可恢复 |
+| `READ_CHECKPOINT_ENABLED` | 默认 `0`；API 与 Worker 同时设 `1` 时，普通整页任务可保存及读取未核实首路草稿；不是结果、学习证据或中断续跑许可，学生网页另需构建期开关 |
+| `INITIAL_READ_RECOVERY_ENABLED` | 默认 `0`；新普通整页任务的完整首读可安全复用；要求首路草稿开启、answer_slot、结构导航关闭、各角色适配器单次请求。未知请求或已进入后续复核的任务不自动续跑，见 [恢复边界](../../docs/INITIAL_READ_RECOVERY.md) |
 | `CORS_ALLOWED_ORIGINS` | 精确来源列表，默认关闭；不允许 `*`，不启用 Cookie 凭证 |
-| `ARK_BASE_URL`、`ARK_API_KEY`、`ARK_MODEL` | 仅 Worker 使用；密钥不进入安卓/Web/响应/日志 |
+| `ARK_BASE_URL`、`ARK_API_KEY`、`ARK_MODEL`、`ARK_FALLBACK_MODEL` | 仅 Worker 使用；密钥不进入安卓/Web/响应/日志。兜底模型可选；配置 `gpt-6-astra` 时走 Responses API |
 
 模型字段与当前默认模型见 [providers](xueban_backend/providers/README.md)。没有模型凭据时，任务明确失败；不会产生演示答案。`scripts/ark_smoke.py` 与 `scripts/vision_benchmark.py` 是独立、显式付费的评测脚本，不是生产任务入口。
 
@@ -55,6 +59,7 @@ PYTHONPATH=services/backend services/backend/.venv/bin/python -m xueban_backend.
 | `POST /v1/homeworks/{id}/uploads` | 创建私有资产和上传票据 |
 | `GET /v1/assets/{id}`；`POST /v1/assets/{id}/upload-ticket`；`POST /v1/assets/{id}/complete`；`GET /v1/assets/{id}/access` | 状态、同资产续票、完整性确认、短时读取票据 |
 | `POST /v1/homeworks/{id}/recognitions`；`GET /v1/jobs/{id}` | 持久识别任务、真实执行状态 |
+| `GET /v1/jobs/{id}/recognition-progress` | 与任务相同授权；运行中的普通整页识读仅返回题号、题干、作答原文；终态隐藏草稿，旧任务不回填 |
 | `GET /v1/questions/{id}`；`GET /v1/attempts/{id}`；`GET /v1/cases/{id}` | 题目、原/新作答和纠错状态 |
 | `POST /v1/cases/{id}/checks`；`GET /v1/checks/{id}`；`GET /v1/decisions/{id}` | 发起检查、模型版本、候选依据 |
 | `POST /v1/cases/{id}/hints`；`GET /v1/hints/{id}`；`POST /v1/hints/{id}/views` | 分层提示、真实展示记录 |
@@ -70,7 +75,7 @@ PYTHONPATH=services/backend services/backend/.venv/bin/python -m xueban_backend.
 |---|---|
 | `GET /v1/curriculum/graph`；`GET/PUT /v1/students/{id}/learning-profile` | 已发布课程图谱；年级、学期与当前课次 |
 | `GET /v1/students/{id}/knowledge`；`GET /v1/students/{id}/knowledge/{kid}` | 个人知识状态（无百分比）、章节汇总、证据与前置知识 |
-| `GET/POST /v1/questions/{id}/knowledge-links`；`GET /v1/knowledge-link-queue` | 模型候选与老师确认的题目知识点链接 |
+| `GET/POST /v1/questions/{id}/knowledge-links`；`GET /v1/knowledge-link-queue` | 当前作答的机器归因与老师确认/驳回的本题关联 |
 | `POST /v1/attempts/{id}/condition`；`POST /v1/students/{id}/knowledge/{kid}/diagnoses`；`POST /v1/diagnoses/{id}/retract` | 老师记录帮助/独立条件与诊断 |
 | `GET/POST /v1/students/{id}/memories`；`POST /v1/memories/{id}/confirm`、`/retract` | 专属 AI 记忆：有证据、可确认、可撤回、证据撤销即失效 |
 | `GET /v1/cases/{id}/agent-context`；`POST/GET /v1/students/{id}/agent-runs` | 当前题“学伴记得”提醒；引用证据的坐班学情摘要 |
@@ -84,13 +89,25 @@ PYTHONPATH=services/backend services/backend/.venv/bin/python -m xueban_backend.
 
 上传/读取票据另外指向 `PUT/GET /v1/assets/{id}/content`，这是 `UploadTicket`/`AssetAccess` 中的对象传输地址。上传客户端只发送 `required_headers`，不把业务 Bearer 扩散到 URL。票据绑定资产、签发主体及有效期；每次传输重新核验主体、角色和学生授权。原图只写私有目录，文件0600、目录创建0700；原图不可覆盖。PUT 成功仍为 `awaiting_upload`，`complete` 验证真实 SHA256、大小、格式、完整解码和尺寸后才变为 `uploaded` 并撤销上传票据。同票据同内容可在完成前重传，过期通过原资产续票恢复。
 
-上传照片须先把 EXIF 方向归一到实际像素（安卓采集模块已处理）；每张最多4 MiB、2400万像素；每个模型任务最多4张、总计8 MiB。只接静态 JPEG/PNG/WebP，拒绝伪造格式、损坏图片和声明不一致。识别没有可靠题区时，内部保留候选和覆盖说明，不捏造全页题框；客户端需提示重拍或老师核实，不得把空题列表当作全对。
+上传照片须先把 EXIF 方向归一到实际像素（安卓采集模块已处理）；每张最多4 MiB、2400万像素；每个模型任务最多4张、总计8 MiB。只接静态 JPEG/PNG/WebP，拒绝伪造格式、损坏图片和声明不一致。未读出题目时保留覆盖说明，客户端提示重拍或核实，不得把空题列表当作全对。
+
+默认识别流程将完整照片一次交给模型，由同一次响应完成逻辑分题、实际印刷题干/选项和学生作答提取；不先定位题框、不叠加网格、不逐题裁图。发送前仅对完整照片做有上限的对比度、放大和锐化处理，原文件保持不变。题目关联的全页 `regions` 只表示来源照片，不表示已定位单题。`annotations.reading_order` 保存模型输出顺序，作业 API 按页序和该顺序返回题目、case ID，不能按随机 ID 或纸面题号重排。
+
+当前体验使用两路整页读图，再按差异进行有限复核，具体版本与模型路由以 [provider 文档](xueban_backend/providers/README.md) 为准；旧的逐题链路不再代表默认体验。只有表示差异可在证据绑定后合并，关键数值、条件、笔迹和划改冲突不能靠多数票判定。一处未完成与其他题目分别保存，模型服务失败不写成学生答错或字迹模糊。默认目标单位为 `answer_slot`，完整小题和结构导航均为默认关闭实验。
+
+模型返回的知识点标签先与学生已授权、已审核的教材图谱精确对应；无法明确对应时使用带原文依据的语义映射。只有可用的识读与判断可产生机器学习证据，所有证据保留 AI 来源。没有合适教材节点时累计原始作答，不伪造图谱归属。学生看到的掌握状态还取决于作答帮助条件、同题关系和独立迁移表现，单次订正不能证明独立掌握。
+
+逐空识别记录同时绑定题目和作答版本，任一版本变化即不复用；模型调用与失败保留计费尝试审计，截断不自动降级为无依据答案。整图识别一次不等于整份作业只调用模型一次，也不保证识别或判题准确率。真实照片仍需独立标注和重复验收；单次通过不能用于宣称商用准确率。
 
 ## 事务、版本与恢复边界
 
-所有业务写入要求 `Idempotency-Key`，作用域为真实主体、授权学生、实际操作路径；同键同载荷重放原响应，同键不同载荷409。聚合写入先锁作业，再核验 `expected_revision`；幂等记录、业务变动、任务及事件同一事务提交。客户端应在新的操作前读取最新 aggregate；重试旧操作保持原键和原载荷。
+纠错命令使用 `Idempotency-Key`，作用域为真实主体、授权学生、实际操作路径；同键同载荷重放原响应，同键不同载荷409。纠错、图谱和练习跨域保存先按学员串行，再锁任务/作业/题目并重新核验授权与版本；不在外部推理期间占用这些写锁。学习层追加接口另使用明确的行 ID、题目/图谱版本进行 CAS。客户端应在新的操作前读取最新状态；重试旧操作保持原键和原载荷。
 
-`0001_identity_homeworks → 0002_device_pairing → 0003_correction → 0004_password_accounts → 0005_deletion_requests → 0006_learning_graph → 0007_agent_memory → 0008_learning_reports → 0009_optional_practice → 0010_daily_feedback` 是显式迁移。0003新增私有资产、当前文档、不可变版本快照、任务和事件。应用不使用 `create_all` 绕过迁移。授权仍由服务层强制执行，数据库通过原作业归属外键组织业务记录；此切片没有宣称已部署 PostgreSQL RLS。
+数据库通过显式迁移演进，当前新增 `0015_observation_bindings`，前序覆盖账号、纠错、学习层、教材绑定与举一反三。应用不使用 `create_all` 绕过迁移。授权由服务层执行，数据库保留归属外键；这里没有宣称已部署 PostgreSQL RLS。
+
+机器知识关联的 `observation_bindings` 绑定 `attempt_id + attempt_recognition_revision + decision_id`；老师关联为 `null`，适用于本题。0015只从现有有效证据中回填可验证的旧机器作用域，并标为 `legacy_evidence`，不声明模型独立读取过这些历史作答。来源不可验证的旧关联继续留档，但不参与新证据，也不会因升级自动触发批量付费回填。新作答与新识读照常映射。R1仅撤回被替换观察的机器归因，其他作答的证据 ID 和原文保持不变。
+
+升级前停止写入并备份；0015降级要求全部待删除绑定都可由当前有效证据完整重建。已有新直接绑定、识读变更或撤回记录时会拒绝降级，不能通过强制删列回滚；应使用经验证的升级前备份进行隔离恢复，再审核切换。
 
 任务表是事务持久队列。PG通过 `FOR UPDATE SKIP LOCKED` 领取，提交租约后再执行模型，模型调用期间不持有数据库事务。进程崩溃、重启后可重新领取过期租约；完成时校验租约 token 和期限，旧 Worker 不能覆盖新结果。最多执行3次；429/5xx等暂时失败有限退避，超时保留费用未知并终止，等待用户明确重试。重启恢复可能重复一次已计费推理，不能保证外部模型恰好调用一次；每次执行的开始、元数据及费用未知记录持久保存，业务结果不会重复生成。
 

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "decided_at": "2026-10-17",
   "decided_by": "项目方（用户在对话中提供各年级各科出版社）",
-  "scope_note": "只收主科；音乐、体育与健康、美术不收。初中“政治”即统编《道德与法治》。",
+  "scope_note": "只收项目方明确提供出版社的年级学科；初中“政治”即统编《道德与法治》。官方目录暂无记录的艺体科目保留范围但不使用旧版替代。",
   "source": {
     "repository": "TapXWorld/ChinaTextbook",
     "commit": "5a80345f2043ba6f8db8d7be9cf3db82725ff1f7",
@@ -38,15 +38,18 @@
     {
       "grade": 5, "label": "五年级",
       "subjects": [
+        {"subject": "体育与健康", "publisher": "人民教育出版社", "path": "小学/体育与健康/人教版", "match": "五年级"},
+        {"subject": "艺术音乐", "publisher": "人民音乐出版社", "path": "小学/艺术音乐/人音版", "match": "五年级"},
         {"subject": "语文", "publisher": "人民教育出版社", "path": "小学/语文/统编版", "match": "五年级"},
         {"subject": "数学", "publisher": "人民教育出版社", "path": "小学/数学/人教版", "match": "五年级"},
         {"subject": "英语", "publisher": "陕西旅游出版社", "path": "小学/英语/陕旅版", "match": "五年级"},
-        {"subject": "科学", "publisher": "教育科学出版社", "path": "小学/科学/教科版", "match": "五年级"}
+        {"subject": "科学", "publisher": "科学教育出版社", "path": "小学/科学/教科版", "match": "五年级"}
       ]
     },
     {
       "grade": 6, "label": "六年级",
       "subjects": [
+        {"subject": "美术", "publisher": "人民美术出版社", "path": "小学/美术/人美版", "match": "六年级"},
         {"subject": "语文", "publisher": "人民教育出版社", "path": "小学/语文/统编版", "match": "六年级"},
         {"subject": "数学", "publisher": "人民教育出版社", "path": "小学/数学/人教版", "match": "六年级"},
         {"subject": "英语", "publisher": "陕西旅游出版社", "path": "小学/英语/陕旅版", "match": "六年级"},

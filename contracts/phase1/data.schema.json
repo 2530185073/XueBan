@@ -4,6 +4,67 @@
   "title": "Phase 1 persisted records and response resources",
   "description": "draft-0.1; contract only, not an implemented service.",
   "$defs": {
+    "AnswerCheck": {
+      "type": "object",
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600
+        },
+        "student_answer": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verdict": {
+          "enum": [
+            "correct",
+            "incorrect",
+            "unanswered",
+            "unable_to_judge"
+          ]
+        },
+        "correct_answer": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "explanation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600
+        }
+      },
+      "required": [
+        "index",
+        "prompt",
+        "student_answer",
+        "verdict",
+        "correct_answer",
+        "explanation"
+      ],
+      "additionalProperties": false
+    },
     "Scope": {
       "type": "object",
       "properties": {
@@ -31,16 +92,44 @@
       "type": "object",
       "properties": {
         "stage": {
-          "const": "junior_middle"
+          "anyOf": [
+            {
+              "enum": [
+                "primary",
+                "junior_middle"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "publisher_code": {
-          "const": "PEP"
+          "anyOf": [
+            {
+              "enum": [
+                "PEP",
+                "BNUP",
+                "PM",
+                "PFA",
+                "CSP",
+                "ECSP",
+                "JSFST",
+                "SSTP"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "grade": {
           "anyOf": [
             {
               "type": "integer",
               "enum": [
+                5,
+                6,
                 7,
                 8,
                 9
@@ -98,6 +187,53 @@
         "subject",
         "volume",
         "edition"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "grade": {
+                "enum": [
+                  5,
+                  6
+                ]
+              }
+            },
+            "required": [
+              "grade"
+            ]
+          },
+          "then": {
+            "properties": {
+              "stage": {
+                "const": "primary"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "grade": {
+                "enum": [
+                  7,
+                  8,
+                  9
+                ]
+              }
+            },
+            "required": [
+              "grade"
+            ]
+          },
+          "then": {
+            "properties": {
+              "stage": {
+                "const": "junior_middle"
+              }
+            }
+          }
+        }
       ],
       "additionalProperties": false
     },
@@ -477,6 +613,11 @@
           "type": "string",
           "pattern": "^[a-z][a-z0-9_-]{2,63}$"
         },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
         "stem_text": {
           "anyOf": [
             {
@@ -488,6 +629,69 @@
               "type": "null"
             }
           ]
+        },
+        "question_type": {
+          "type": "string",
+          "enum": [
+            "single_choice",
+            "multiple_choice",
+            "fill_blank",
+            "calculation",
+            "application",
+            "proof",
+            "unknown"
+          ]
+        },
+        "subject": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 20
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1200
+              }
+            },
+            "required": [
+              "label",
+              "text"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 12
+        },
+        "blank_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 32
+        },
+        "recognition_uncertainties": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 600
+          },
+          "maxItems": 20,
+          "uniqueItems": true
         },
         "regions": {
           "type": "array",
@@ -641,6 +845,24 @@
           "items": {
             "$ref": "data.schema.json#/$defs/Region"
           }
+        },
+        "answer_status": {
+          "type": "string",
+          "enum": [
+            "present",
+            "blank",
+            "unclear"
+          ]
+        },
+        "recognition_uncertainties": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 600
+          },
+          "maxItems": 20,
+          "uniqueItems": true
         },
         "recognition_status": {
           "type": "string",
@@ -836,6 +1058,57 @@
             }
           ]
         },
+        "knowledge_points": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "maxItems": 3,
+          "uniqueItems": true
+        },
+        "answer_checks": {
+          "type": "array",
+          "items": {
+            "$ref": "data.schema.json#/$defs/AnswerCheck"
+          },
+          "maxItems": 32
+        },
+        "correction_method": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "correct_answer": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "uncertainties": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 600
+          },
+          "maxItems": 20,
+          "uniqueItems": true
+        },
         "basis": {
           "type": "array",
           "items": {
@@ -913,6 +1186,44 @@
         "created_at": {
           "type": "string",
           "format": "date-time"
+        },
+        "verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "enum": [
+                "single",
+                "multimodel",
+                "two_model"
+              ]
+            },
+            "status": {
+              "enum": [
+                "matched",
+                "reviewed",
+                "conflict",
+                "degraded"
+              ]
+            },
+            "independent_readback": {
+              "type": "boolean"
+            },
+            "reason_codes": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "string",
+                "maxLength": 128
+              }
+            }
+          },
+          "required": [
+            "mode",
+            "status",
+            "independent_readback",
+            "reason_codes"
+          ]
         }
       },
       "required": [
@@ -1099,7 +1410,8 @@
             "check",
             "hint",
             "delete",
-            "repair_layout"
+            "repair_layout",
+            "recognition_recheck"
           ]
         },
         "status": {
@@ -2099,7 +2411,8 @@
             "login_rate_limited",
             "deletion_ledger_unconfigured",
             "storage_error",
-            "storage_unconfigured"
+            "storage_unconfigured",
+            "detail_bundle_limit"
           ]
         },
         "detail": {
@@ -2270,6 +2583,179 @@
       ],
       "additionalProperties": false,
       "description": "历史快照与当前有效性并列。历史曾确认的判断不可因此继续用于新检查。"
+    },
+    "RecognitionRecoveryStatus": {
+      "type": "object",
+      "properties": {
+        "case_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "attempt_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+        },
+        "limit": {
+          "type": "integer",
+          "const": 2
+        },
+        "used": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "remaining": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "active_job_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_job_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_outcome": {
+          "enum": [
+            null,
+            "applied",
+            "unchanged_pending",
+            "target_unconfirmed",
+            "scope_change_required",
+            "service_failed",
+            "stale_input",
+            "execution_unknown"
+          ]
+        },
+        "eligible": {
+          "type": "boolean"
+        },
+        "blocked_reason": {
+          "enum": [
+            null,
+            "active_recovery",
+            "budget_exhausted",
+            "already_resolved",
+            "staff_confirmed",
+            "inactive_case",
+            "initial_recognition_pending",
+            "multiple_source_pages"
+          ]
+        }
+      },
+      "required": [
+        "case_id",
+        "attempt_id",
+        "limit",
+        "used",
+        "remaining",
+        "active_job_id",
+        "last_job_id",
+        "last_outcome",
+        "eligible",
+        "blocked_reason"
+      ],
+      "additionalProperties": false
+    },
+    "RecognitionRecheckAccepted": {
+      "type": "object",
+      "properties": {
+        "job": {
+          "$ref": "data.schema.json#/$defs/Job"
+        },
+        "created_resource": {
+          "anyOf": [
+            {
+              "$ref": "data.schema.json#/$defs/ResultRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "recovery": {
+          "$ref": "data.schema.json#/$defs/RecognitionRecoveryStatus"
+        }
+      },
+      "required": [
+        "job",
+        "created_resource",
+        "recovery"
+      ],
+      "additionalProperties": false
+    },
+    "HomeworkDetailRead": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocol": {
+          "const": "homework-detail.v1"
+        },
+        "homework": {
+          "$ref": "data.schema.json#/$defs/HomeworkSession"
+        },
+        "case_records": {
+          "type": "array",
+          "items": {
+            "$ref": "data.schema.json#/$defs/CorrectionCase"
+          },
+          "maxItems": 300
+        },
+        "questions": {
+          "type": "array",
+          "items": {
+            "$ref": "data.schema.json#/$defs/QuestionRead"
+          },
+          "maxItems": 300
+        },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "$ref": "data.schema.json#/$defs/AttemptRead"
+          },
+          "maxItems": 300
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "data.schema.json#/$defs/CheckRun"
+          },
+          "maxItems": 2000
+        },
+        "jobs": {
+          "type": "array",
+          "items": {
+            "$ref": "data.schema.json#/$defs/Job"
+          },
+          "maxItems": 2000
+        }
+      },
+      "required": [
+        "protocol",
+        "homework",
+        "case_records",
+        "questions",
+        "attempts",
+        "checks",
+        "jobs"
+      ],
+      "description": "同一只读数据库快照中的完整作业详情；仅活动题目当前题干/作答，保留原版本wrapper与全部历史check。仅detail_bundle_limit可回退逐项读取。"
     }
   }
 }

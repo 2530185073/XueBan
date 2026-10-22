@@ -21,6 +21,8 @@ cp model.env.example model.env && chmod 600 model.env   # 填入 ARK_API_KEY
 sudo ./scripts/init-secrets.sh        # 生成数据库口令、连接串、会话签名密钥（不覆盖已有文件）
 export XUEBAN_DOMAIN=xueban.example.org
 docker compose up -d --build --wait
+# 仅全新实例：盘点无删除请求后显式建立独立空清单，已有实例须按恢复手册找回旧清单。
+docker compose run --rm --no-deps -T --entrypoint python api -m scripts.recovery_payload initialize-ledger
 curl -fsS https://$XUEBAN_DOMAIN/readyz
 ```
 
@@ -39,11 +41,13 @@ unset ADMIN_PASSWORD
 ## 升级与回滚
 
 ```sh
-git pull && docker compose build && ./scripts/backup.sh
+git pull && docker compose build
+docker compose stop api worker       # 明确维护窗口；其他写入者也须停止
+./scripts/backup.sh --writers-quiesced
 docker compose up -d --wait           # migrate 先执行，失败则 api/worker 不启动
 ```
 
-迁移只前进；回滚代码前先用升级前的备份恢复数据库（见 [备份与恢复](BACKUP_RESTORE.md)），不要对生产库执行 `alembic downgrade`。镜像可打标签 `XUEBAN_IMAGE=xueban-backend:<git-sha>` 以便回到上一版本。
+迁移只前进；回滚代码前先把升级前的备份恢复到新数据库和新资产卷，经核验后明确切换（见 [备份与恢复](BACKUP_RESTORE.md)），不要对生产库执行 `alembic downgrade`。镜像可打标签 `XUEBAN_IMAGE=xueban-backend:<git-sha>` 以便回到上一版本。
 
 ## 安全基线
 
@@ -53,4 +57,4 @@ docker compose up -d --wait           # migrate 先执行，失败则 api/worker
 - 登录有按 IP 与账号的失败限流；上传单张 4 MiB、请求体 6 MB 上限由应用与 Caddy 双重限制。
 - 学生数据删除依赖 `DELETION_LEDGER_PATH`（卷 `ledger`），该卷必须与数据库备份分开保存。
 
-部署冒烟由 GitHub Actions [Deployment smoke](../../.github/workflows/deploy-smoke.yml) 自动执行：构建镜像、启动、经代理检查就绪、初始化管理员并登录、备份并恢复后再次就绪。
+部署冒烟由 GitHub Actions [Deployment smoke](../../.github/workflows/deploy-smoke.yml) 自动执行：构建镜像、启动、经代理检查就绪、初始化管理员并登录、在维护窗口备份、恢复到独立副本，验证原服务仍就绪并清理测试副本。恢复命令默认不切换在线数据。

@@ -19,9 +19,9 @@ function bucketOf(d: Decision | null): CaseBucket {
 export function bucketOfCase(c: CorrectionCase): CaseBucket { return bucketOf(currentCaseDecision(c)) }
 /** Classification for an opened homework, where the attempt recognition revision is known too. */
 export function bucketOfRow(row: CaseDetail): CaseBucket {
-  if (row.attempt.recognition_status !== 'ready') return 'pending_review'
   const d = currentCaseDecision(row.case)
-  return bucketOf(d && d.input_versions.attempt_recognition_revision === row.attempt.recognition_revision ? d : null)
+  if (!d || d.input_versions.attempt_recognition_revision !== row.attempt.recognition_revision) return 'pending_review'
+  return bucketOf(d)
 }
 export const unresolved = (bucket: CaseBucket) => bucket === 'needs_correction' || bucket === 'pending_review'
 
@@ -47,6 +47,50 @@ export function orderActiveCases(caseIds: string[], records: Map<string, Correct
   }
   for (const id of sorted(caseIds)) visit(id, 0)
   return out
+}
+
+/**
+ * The server's case IDs are storage identifiers, so their lexical order is
+ * unrelated to where a question appears in the photographed page. Sort the
+ * fully read rows by the first question region after the original pages have
+ * been put in page order.
+ */
+export function orderRowsByPhoto(rows: CaseDetail[], assetIds: string[]): CaseDetail[] {
+  // Partial coordinates cannot establish the whole page order. Keep the
+  // provider creation order (including replacements) instead of moving
+  // every coordinate-free question behind the positioned ones.
+  if (rows.some(row => !row.question.regions.some(region => assetIds.includes(region.asset_id)))) return [...rows]
+  const pageOrder = new Map(assetIds.map((id, index) => [id, index]))
+  const positioned = rows.map((row, originalIndex) => {
+    const region = [...row.question.regions].sort((a, b) => {
+      const pageA = pageOrder.get(a.asset_id) ?? Number.MAX_SAFE_INTEGER
+      const pageB = pageOrder.get(b.asset_id) ?? Number.MAX_SAFE_INTEGER
+      return pageA - pageB || a.y - b.y || a.x - b.x
+    })[0]
+    return {
+      row,
+      originalIndex,
+      region,
+      position: region
+        ? [pageOrder.get(region.asset_id) ?? Number.MAX_SAFE_INTEGER, region.y, region.x]
+        : [Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER],
+    }
+  }).sort((a, b) => a.position[0] - b.position[0] || a.position[1] - b.position[1] || a.position[2] - b.position[2] || a.originalIndex - b.originalIndex)
+  // Anchor each row at its first box so a tilted two-column page stays in
+  // reading order without a non-transitive fuzzy sort comparator.
+  const lines: (typeof positioned)[] = []
+  for (const item of positioned) {
+    const box = item.region
+    const line = box && [...lines].reverse().find(line => {
+      const anchor = line[0]
+      return anchor.region && item.position[0] === anchor.position[0]
+        && Math.abs(box.y - anchor.region.y) <= Math.min(box.height, anchor.region.height) * 0.15
+        && line.every(other => other.region && (box.x >= other.region.x + other.region.width * 0.8 || other.region.x >= box.x + box.width * 0.8))
+    })
+    if (line) line.push(item)
+    else lines.push([item])
+  }
+  return lines.flatMap(line => line.sort((a, b) => a.position[2] - b.position[2] || a.originalIndex - b.originalIndex).map(item => item.row))
 }
 
 /** Keep the provider's creation order; backend case IDs are random, not page order. */

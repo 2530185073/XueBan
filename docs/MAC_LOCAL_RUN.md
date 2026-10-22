@@ -182,3 +182,9 @@ services/backend/.venv/bin/python services/backend/scripts/live_local_smoke.py -
 ```
 
 完整报告以0600权限保存在 runtime 中，提交意图和已受理任务立即原子保存。报告仅用于联调；真实费用以服务账单为准。单个任务失败不会冒充成功，也不会清理此前失败记录。
+
+## 删除清单与隔离恢复
+
+新建 runtime 会在数据库之外建立私有 `ledger/deletions.jsonl`；已有 runtime 不会静默补一个空清单。先运行 `audit-deletion-ledger` 盘点，再显式用 `configure-deletion-ledger --ledger-path <已有私有清单>` 绑定；缺失的历史删除记录必须先找回，不据空清单追认过去备份。
+
+完整备份需停止 API/Worker 等写入者但保留 PostgreSQL；恢复默认创建新数据库和新资产目录，校验后由运维明确切换。命令、维护窗口和历史边界见 [备份与恢复](runbooks/BACKUP_RESTORE.md)，真实本机验收见 [恢复演练](evidence/recovery-20261021/README.md)。

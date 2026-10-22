@@ -89,12 +89,13 @@ def test_text_and_image_requests_have_bounded_explicit_parameters_and_candidate_
     second = json.loads(requests[1].content)
     assert str(requests[0].url) == BASE + "/chat/completions"
     assert requests[0].headers["Authorization"] == "Bearer " + SECRET
-    assert set(first) == {"model", "messages", "stream", "max_tokens", "thinking", "response_format"}
+    assert set(first) == {"model", "messages", "stream", "max_tokens", "thinking", "response_format", "temperature"}
+    assert first["temperature"] == 0
     assert first["response_format"] == {"type": "json_object"}
     assert first["thinking"] == {"type": "disabled"}
     assert first["max_tokens"] == 128
     assert first["stream"] is False
-    assert first["messages"][1]["content"] == [{"type": "text", "text": PRIVATE_TEXT}, {"type": "image_url", "image_url": {"url": PNG}}]
+    assert first["messages"][1]["content"] == [{"type": "text", "text": PRIVATE_TEXT}, {"type": "image_url", "image_url": {"url": PNG, "detail": "high"}}]
     assert second["messages"][1]["content"] == PRIVATE_TEXT
     assert second["thinking"] == {"type": "enabled"}
     assert second["max_tokens"] == 4096
@@ -147,7 +148,7 @@ def test_optional_server_owned_instructions_extend_system_without_promoting_user
 
 @pytest.mark.parametrize("values", [
     {"role": "admin"}, {"text": ""}, {"text": "\ud800"}, {"thinking": "enabled"},
-    {"max_tokens": 9000}, {"max_tokens": True}, {"images": ("https://private.example.invalid/photo",)},
+    {"max_tokens": 16385}, {"max_tokens": True}, {"images": ("https://private.example.invalid/photo",)},
     {"images": ("data:image/png;base64,%%%",)}, {"images": ("data:image/png;base64," + base64.b64encode(b"not a png").decode(),)},
     {"images": (PNG,) * 5}, {"images": "not a collection"},
     {"instructions": ""}, {"instructions": "   "}, {"instructions": []},

@@ -42,6 +42,7 @@ export default function App() {
   const [tab, setTab] = useState<QueueTab>('help')
   const [help, setHelp] = useState<QueueState<HelpRequest>>(emptyQueue)
   const [review, setReview] = useState<QueueState<ReviewQueueItem>>(emptyQueue)
+  const [allCases, setAllCases] = useState<QueueState<ReviewQueueItem>>(emptyQueue)
   const [names, setNames] = useState<Map<string, string>>(new Map())
   const [selection, setSelection] = useState<Selection | null>(null)
   const [ws, setWs] = useState<CaseWorkspace | null>(null)
@@ -73,7 +74,7 @@ export default function App() {
     epoch.current += 1
     wsAbort.current?.abort(); pollAbort.current?.abort(); checkAbort.current?.abort(); dropImages()
     selectionRef.current = null
-    setPhase(next); setExpiresAt(null); setIdentity(null); setHelp(emptyQueue()); setReview(emptyQueue()); setNames(new Map())
+    setPhase(next); setExpiresAt(null); setIdentity(null); setHelp(emptyQueue()); setReview(emptyQueue()); setAllCases(emptyQueue()); setNames(new Map())
     setSelection(null); setWs(null); setAttemptId(''); setQueueLoading(false); setWsLoading(false); setBusy(false); setWriteUncertain(false); setRepair(null)
     setArea('desk'); setStudentId(null); setConditions(new Map())
     setNotice(null); setError(message)
@@ -112,9 +113,10 @@ export default function App() {
     const generation = epoch.current
     setQueueLoading(true)
     try {
-      const [helpPage, reviewPage] = await Promise.allSettled([
-        more === 'review' ? Promise.resolve(null) : api.helpQueue(more === 'help' ? help.cursor ?? undefined : undefined),
-        more === 'help' ? Promise.resolve(null) : api.reviewQueue(more === 'review' ? review.cursor ?? undefined : undefined),
+      const [helpPage, reviewPage, allPage] = await Promise.allSettled([
+        more && more !== 'help' ? Promise.resolve(null) : api.helpQueue(more === 'help' ? help.cursor ?? undefined : undefined),
+        more && more !== 'review' ? Promise.resolve(null) : api.reviewQueue(more === 'review' ? review.cursor ?? undefined : undefined),
+        more && more !== 'all' ? Promise.resolve(null) : api.reviewQueue(more === 'all' ? allCases.cursor ?? undefined : undefined, undefined, 'all'),
       ])
       if (generation !== epoch.current) return
       const known = new Set(names.keys())
@@ -129,10 +131,15 @@ export default function App() {
         setHelp(old => applyPage(old, page, helpId, more === 'help'))
         void enrichNames(page.items, known, people, generation)
       }
-      const rejected = [helpPage, reviewPage].find(result => result.status === 'rejected')
+      if (allPage.status === 'fulfilled' && allPage.value) {
+        const page = allPage.value
+        setAllCases(old => applyPage(old, page, reviewId, more === 'all'))
+        setNames(old => new Map([...old, ...page.items.map(item => [item.case_id, item.student_name] as const)]))
+      }
+      const rejected = [helpPage, reviewPage, allPage].find(result => result.status === 'rejected')
       if (rejected) fail((rejected as PromiseRejectedResult).reason)
     } finally { if (generation === epoch.current) setQueueLoading(false) }
-  }, [api, help.cursor, review.cursor, names, enrichNames])
+  }, [api, help.cursor, review.cursor, allCases.cursor, names, enrichNames])
 
   const loadCase = useCallback(async (caseId: string, keepView: boolean) => {
     if (phase === 'sample') { setWs(sampleWorkspace); if (!keepView) setAttemptId(sampleWorkspace.correction.current_attempt_id); return }
@@ -209,6 +216,7 @@ export default function App() {
     setIdentity(sampleIdentity)
     setHelp({ items: [sampleHelp], cursor: null, loaded: true })
     setReview({ items: [sampleReviewItem], cursor: null, loaded: true })
+    setAllCases({ items: [sampleReviewItem], cursor: null, loaded: true })
     setNames(new Map([[sampleCaseId, '合成学生 A']]))
     const first = { caseId: sampleCaseId, helpId: sampleHelp.id }
     selectionRef.current = first; setSelection(first); setWs(sampleWorkspace); setAttemptId(sampleWorkspace.correction.current_attempt_id)
@@ -352,13 +360,13 @@ export default function App() {
     {ready && <nav className="area-nav" aria-label="工作区">{areas.map(([value, text, Icon]) =>
       <button key={value} aria-current={area === value ? 'page' : undefined} className={area === value ? 'active' : ''} onClick={() => { setArea(value); setError(null); setNotice(null) }}><Icon size={15} />{text}</button>)}</nav>}
     {ready && area === 'links' ? <KnowledgeLinkArea ctx={ctx} onOpenCase={openCase} />
-    : ready && area === 'profile' ? <StudentProfileArea ctx={ctx} studentId={student} onStudent={setStudentId} />
+    : ready && area === 'profile' ? <StudentProfileArea ctx={ctx} studentId={student} onStudent={setStudentId} onOpenCase={openCase} />
     : ready && area === 'memory' ? <MemoryArea ctx={ctx} studentId={student} onStudent={setStudentId} />
     : ready && area === 'daily' ? <DailyFeedbackArea ctx={ctx} />
     : ready && area === 'reports' ? <ReportArea ctx={ctx} studentId={student} onStudent={setStudentId} />
     : ready && area === 'practice' ? <PracticeArea ctx={ctx} studentId={student} onStudent={setStudentId} />
     : <main id="main" className="workbench">
-      <QueuePanel tab={tab} onTab={setTab} help={help} review={review} names={names} selection={selection} onSelect={select} loading={queueLoading} busy={busy} sample={sample}
+      <QueuePanel tab={tab} onTab={setTab} help={help} review={review} allCases={allCases} names={names} selection={selection} onSelect={select} loading={queueLoading} busy={busy} sample={sample}
         onRefresh={() => { setError(null); void refreshAll() }} onMore={more => void loadQueues(identity, more)} />
       {ws ? <>
         <CaseDesk key={ws.correction.id} ws={ws} studentName={studentName} focus={focus} block={block} busy={busy || writeUncertain} sample={sample} attemptId={attemptId || ws.correction.current_attempt_id}

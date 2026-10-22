@@ -19,7 +19,8 @@ export class LearningApi {
   constructor(private readonly api: StaffApi) {}
 
   /** The published graph changes rarely; one read is shared until it fails. */
-  graph(): Promise<CurriculumGraph> {
+  graph(questionId?: string): Promise<CurriculumGraph> {
+    if (questionId) return this.api.call(`/v1/curriculum/graph?question_id=${segment(questionId)}`, isCurriculumGraph)
     this.graphRead ??= this.api.call('/v1/curriculum/graph', isCurriculumGraph).catch(error => { this.graphRead = null; throw error })
     return this.graphRead
   }
@@ -27,7 +28,7 @@ export class LearningApi {
   linkQueue(signal?: AbortSignal) { return this.api.call('/v1/knowledge-link-queue?limit=100', isLinkQueue, { signal }) }
   links(questionId: string, signal?: AbortSignal) { return this.api.call(`/v1/questions/${segment(questionId)}/knowledge-links`, isKnowledgeLinkList, { signal }) }
   decideLink(questionId: string, payload: LinkDecision) {
-    if (payload.rationale && payload.rationale.length > 500) throw invalid()
+    if ((payload.rationale && payload.rationale.length > 500) || !Number.isInteger(payload.expected_question_revision) || payload.expected_question_revision < 1 || !payload.expected_graph_version || payload.expected_graph_version.length > 64) throw invalid()
     return this.api.call(`/v1/questions/${segment(questionId)}/knowledge-links`, isKnowledgeLink, { payload })
   }
   condition(attemptId: string, signal?: AbortSignal) { return this.api.call(`/v1/attempts/${segment(attemptId)}/condition`, isConditionRead, { signal }) }

@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { BookOpenText, Coffee, LoaderCircle, Sprout } from 'lucide-react'
 import type { OptionalActivities, PracticeSession, StartPractice, VariantOffer } from '../core/learning'
 import { StudentError } from '../core/errors'
 import type { Workspace } from '../useStudentWorkspace'
+import type { DraftView, HomeworkDetail } from '../core/types'
 import { activityOffers, clampCount, isActiveConflict, practiceMessage, RESUME_NOTICE, variantDefault, variantMax, type ActivityOffers } from '../learning'
 
 type Choice = { kind: 'variant'; offer: VariantOffer; count: number } | { kind: 'preview'; withQuiz: boolean }
@@ -27,25 +28,76 @@ export function ActivityChooser({ offers, busy, onStart }: { offers: ActivityOff
   </section>
 }
 
+/**
+ * Whether the optional entry may sit under the current work page. It only widens where the
+ * card can appear; whether anything is offered is still decided by the server gate alone.
+ * Hidden while a photo is being prepared, uploaded, read or checked, while a correction
+ * draft is unsent, and while a historical evidence panel is open.
+ */
+export function optionalEntryVisible({ page, draft, detail, busy, evidenceActive }: { page: string; draft: Pick<DraftView, 'stage'> | null; detail: Pick<HomeworkDetail, 'cases'> | null; busy: string; evidenceActive: boolean }): boolean {
+  if (page !== 'work' || evidenceActive || busy) return false
+  if (!draft) return true
+  return draft.stage === 'complete' && detail != null
+}
+
+/** One view of the card: replaced on unmount or when the signed-in student/session object changes. */
+type Origin = object
+
+/**
+ * Starts the chosen activity. The server accepts a start exactly once, so a reply that arrives
+ * after the student left, switched account or re-logged in is dropped without navigating;
+ * the activity stays resumable from the practice page. A newer record version does not
+ * invalidate a start: the server already judged its own gate when it accepted the request.
+ */
+export async function startOptionalActivity(deps: {
+  client: Pick<PracticeClient, 'startPractice' | 'activePractice'>
+  request: StartPractice
+  current: () => boolean
+  onStarted: (session: PracticeSession, notice?: string) => void
+  onFailed: (message: string, error: unknown) => void
+  reload: () => Promise<void>
+}): Promise<void> {
+  const { client, request, current, onStarted, onFailed, reload } = deps
+  try {
+    const session = await client.startPractice(request)
+    if (current()) onStarted(session)
+  } catch (e) {
+    // An active session also answers an unconfirmed earlier start; resume it instead of starting another.
+    const resumable = isActiveConflict(e) || e instanceof StudentError && e.status === 0
+    const active = resumable ? await client.activePractice().catch(() => null) : null
+    if (!current()) return
+    if (active) onStarted(active, RESUME_NOTICE)
+    else { onFailed(isActiveConflict(e) ? '刚才的活动已经结束了，想做的话可以重新选。' : practiceMessage(e, '这次没有开始。休息一下也很好。'), e); await reload() }
+  }
+}
+type PracticeClient = { startPractice(request: StartPractice): Promise<PracticeSession>; activePractice(): Promise<PracticeSession | null> }
+
 /** Shown only when the server opens today's gate; otherwise renders nothing at all. */
 export function OptionalActivityCard({ workspace, onStarted }: { workspace: Workspace; onStarted: (session: PracticeSession, notice?: string) => void }) {
   const [activities, setActivities] = useState<OptionalActivities | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const { client, studentId, recordVersion } = workspace
-  const load = useCallback(() => client.optionalActivities().then(setActivities, (e: unknown) => { setActivities(null); workspace.report(e) }), [client])
-  useEffect(() => { setActivities(null); setMessage(''); void load() }, [load, studentId, recordVersion])
+  // evidenceScope changes with every session object, so a same-token restore is a new view too.
+  const scope = client.evidenceScope
+  const view = useRef<Origin>({})
+  const loadRun = useRef(0)
+  useEffect(() => { const origin = view.current = {}; return () => { if (view.current === origin) view.current = {} } }, [client, scope, studentId])
+  const load = () => {
+    const origin = view.current, run = ++loadRun.current
+    const live = () => origin === view.current && run === loadRun.current
+    return client.optionalActivities().then(next => { if (live()) setActivities(next) }, (e: unknown) => { if (live()) { setActivities(null); workspace.report(e) } })
+  }
+  useEffect(() => { setActivities(null); setMessage(''); setBusy(false); void load(); return () => { ++loadRun.current } }, [client, scope, studentId, recordVersion])
   const start = async (request: StartPractice) => {
     if (busy) return
+    const origin = view.current
+    const current = () => origin === view.current
     setBusy(true); setMessage('')
-    try { onStarted(await client.startPractice(request)) }
-    catch (e) {
-      // An active session also answers an unconfirmed earlier start; resume it instead of starting another.
-      const resumable = isActiveConflict(e) || e instanceof StudentError && e.status === 0
-      const active = resumable ? await client.activePractice().catch(() => null) : null
-      if (active) onStarted(active, RESUME_NOTICE)
-      else { setMessage(isActiveConflict(e) ? '刚才的活动已经结束了，想做的话可以重新选。' : practiceMessage(e, '这次没有开始。休息一下也很好。')); workspace.report(e); await load() }
-    } finally { setBusy(false) }
+    try {
+      await startOptionalActivity({ client, request, current, onStarted, reload: load,
+        onFailed: (text, error) => { setMessage(text); workspace.report(error) } })
+    } finally { if (current()) setBusy(false) }
   }
   const offers = activityOffers(activities)
   return <>

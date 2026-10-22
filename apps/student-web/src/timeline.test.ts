@@ -47,6 +47,14 @@ describe('per-case version timeline', () => {
     expect(buildTimeline(replaced).find(e => e.key === 'decision:decision_reviewed')?.title).toBe('老师改判 · 正确')
     expect(entries.find(e => e.kind === 'hint')?.badges.map(b => b.label)).toEqual(['未给出答案', '已失效'])
   })
+  it('does not label every unresolved model result as waiting for a teacher', () => {
+    const r = record(), decision = r.decisions[0].record
+    decision.validity = 'needs_review'; decision.verdict = 'unable_to_judge'; decision.origin = 'model'
+    r.case.current_decision = decision
+    const entry = buildTimeline(r).find(item => item.key === `decision:${decision.id}`)!
+    expect(entry.badges.map(badge => badge.label)).toContain('尚待核实')
+    expect(entry.badges.map(badge => badge.label)).not.toContain('待老师核实')
+  })
   it('a refresh with currently_effective=false or a cleared case decision cannot revive a result', () => {
     const notEffective = record(); notEffective.decisions[0].currently_effective = false
     expect(buildTimeline(notEffective).some(e => e.kind === 'decision' && e.state === 'current')).toBe(false)

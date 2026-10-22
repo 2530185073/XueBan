@@ -133,6 +133,29 @@ def main() -> None:
     reject("technical_failure", lambda value: value.update(result={"resource_type": "check", "resource_id": "check_fake"}), "Failed jobs cannot have successful output")
     reject("successful_check_job", lambda value: value.update(failure={"code": "worker_failure", "message": "failed", "retryable": False}), "Succeeded jobs cannot also fail")
     reject("request_StartCheck", lambda value: value.pop("expected_revision"), "Checks require optimistic concurrency")
+    for field in ("expected_revision", "attempt_id", "question_revision", "attempt_recognition_revision"):
+        reject("request_StartRecognitionRecheck", lambda value, field=field: value.pop(field),
+               "Recognition recovery requires all optimistic concurrency inputs")
+    reject("request_StartRecognitionRecheck", lambda value: value.update(remaining=2),
+           "Clients cannot supply or reset the recovery budget")
+    reject("request_StartRecognitionRecheck", lambda value: value.update(question_revision=0),
+           "Recognition recovery requires a real question revision")
+    reject("recognition_recovery_available", lambda value: value.update(limit=3), "Recovery limit is fixed at two")
+    reject("recognition_recovery_available", lambda value: value.update(used=3), "Used recovery count is bounded")
+    reject("recognition_recovery_available", lambda value: value.update(remaining=-1), "Remaining recovery count cannot be negative")
+    reject("recognition_recovery_available", lambda value: value.update(used=True), "Boolean is not a recovery counter")
+    reject("recognition_recovery_available", lambda value: value.update(last_outcome="correct"),
+           "Recovery completion is not a correctness verdict")
+    reject("recognition_recovery_available", lambda value: value.update(blocked_reason="unknown"),
+           "Recovery blocking reason must be explicit")
+    reject("recognition_recovery_available", lambda value: value.pop("active_job_id"),
+           "Recovery state explicitly includes nullable active job identity")
+    reject("recognition_recovery_available", lambda value: value.update(student_id="student_other"),
+           "Recovery response has a fixed ownership-safe shape")
+    reject("accepted_recognition_recheck", lambda value: value.pop("recovery"),
+           "Accepted recovery must expose its bounded status")
+    reject("successful_recognition_recheck_job", lambda value: value.update(kind="recognition_recheck_unbounded"),
+           "Only the declared recognition recovery job is supported")
     reject("request_CreateHomework", lambda value: value.update(student_id="student_other"), "Command cannot inject another student's ownership")
     reject("request_SubmitReview", lambda value: value.update(confirmed_by="staff_forged"), "Client cannot choose reviewer identity")
     reject("request_SetProgress", lambda value: value.update(action="complete"), "Clicking done cannot assert correctness")
@@ -157,6 +180,26 @@ def main() -> None:
     require(correction["captured_question_revision"] != original["captured_question_revision"], "Cross-revision correction not exercised")
     require(by_name["question_revision_1"]["value"]["bank_question_id"] is None, "No-bank fixture missing")
     require(by_name["question_revision_1"]["value"]["knowledge_point_ids"] is None, "No-knowledge-map fixture missing")
+
+    recovery_post = api["paths"]["/v1/cases/{case_id}/recognition-rechecks"]["post"]
+    recovery_get = api["paths"]["/v1/cases/{case_id}/recognition-rechecks/status"]["get"]
+    check_post = api["paths"]["/v1/cases/{case_id}/checks"]["post"]
+    require(recovery_post["x-allowed-roles"] == recovery_get["x-allowed-roles"] == check_post["x-allowed-roles"],
+            "Recognition recovery uses the same actor boundary as checks")
+    require(recovery_post["operationId"] == "startRecognitionRecheck"
+            and recovery_get["operationId"] == "getRecognitionRecheckStatus", "Stable recovery operations required")
+    require(recovery_post["responses"]["202"]["content"]["application/json"]["schema"]["$ref"]
+            == "data.schema.json#/$defs/RecognitionRecheckAccepted", "Recovery acceptance must include its state")
+    require(recovery_get["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
+            == "data.schema.json#/$defs/RecognitionRecoveryStatus", "Recovery state endpoint must use the shared shape")
+    accepted = by_name["accepted_recognition_recheck"]["value"]
+    require(accepted["job"]["kind"] == "recognition_recheck"
+            and accepted["job"]["id"] == accepted["recovery"]["active_job_id"], "Broken recovery task example")
+    require(accepted["recovery"]["attempt_id"] == by_name["request_StartRecognitionRecheck"]["value"]["attempt_id"],
+            "Recovery request and acceptance must refer to the same attempt")
+    for name in ("recognition_recovery_available", "recognition_recovery_running", "recognition_recovery_exhausted"):
+        state = by_name[name]["value"]
+        require(state["used"] + state["remaining"] == state["limit"] == 2, "Inconsistent synthetic recovery budget")
 
     print(f"PASS: {len(SCHEMA_FILES)} JSON Schemas, {ref_count} local references, {len(operation_ids)} API operations")
     print(f"PASS: {len(fixtures)} synthetic fixtures and {negative_count} negative contract checks")

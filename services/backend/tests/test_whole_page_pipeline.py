@@ -244,6 +244,7 @@ def test_empty_present_answers_do_not_become_matched(answer):
     ("a²", "a^2"), ("(-2)²", "(-2)^2"), ("x⁻²", "x^-2"),
     ("4 a", "4a"), ("4 a + 2", "4a+2"), ("m / a", "m/a"),
     ("x²⁺¹", "x^{2+1}"), ("学生作答：4 a", "4a"),
+    ("½ah", "1/2 ah"), ("1/2ah", "1/2 ah"), ("½", "1/2"), ("½ a", "1/2a"),
 ])
 def test_multimodel_literal_typography_comparison_preserves_visible_math(left, right):
     assert normalize_literal_math(left, "answer_text") == normalize_literal_math(right, "answer_text")
@@ -254,6 +255,11 @@ def test_multimodel_literal_typography_comparison_preserves_visible_math(left, r
     ("-4", "4"), ("x²⁺¹", "x^2+1"), ("(x+1)²", "x+1²"),
     ("2½n", "2又1/2 n"), ("4 apples", "4apples"), ("12x", "2a+10"),
     ("2+2", "4"), ("1/2", "0.5"), ("a²", "a*a"),
+    ("2½ah", "21/2ah"), ("2 ½ah", "21/2ah"), ("½ah", "1/(2ah)"),
+    ("½ah", "1/3ah"), ("1/2a h", "1/2ah"), ("1/2 apples", "1/2apples"),
+    ("x^½ah", "x^1/2ah"), ("a/½ah", "a/1/2ah"), ("(½)^2", "1/2^2"),
+    ("x^ ½a", "x^1/2a"), ("a / ½b", "a/1/2b"),
+    ("x^-½a", "x^-1/2a"), ("a/-½b", "a/-1/2b"), ("2÷½a", "2÷1/2a"),
 ])
 def test_literal_comparison_never_solves_or_erases_distinguishing_symbols(left, right):
     assert normalize_literal_math(left, "answer_text") != normalize_literal_math(right, "answer_text")
@@ -275,6 +281,9 @@ def test_multimodel_typography_does_not_change_raw_archived_student_answer():
     ("3(6)#2", "用代数式表示：其余两个数分别为____、____。本空为第二个数。", "用代数式表示：其余两个数分别为____、____"),
     ("2", "第2题：填写__ __。", "填写________"),
     ("1", "求x²，填写____。", "求x^2,填写____"),
+    ("3(1)#1", "若正方形的边长为 a，则正方形的面积是____", "若正方形的边长为a，则正方形的面积是____。"),
+    ("3(6)#1", "三个连续偶数的中间一个数为 2n，则其余两个数为____、____", "三个连续偶数的中间一个数为2n，则其余两个数为____、____。"),
+    ("4(1)", "根据下列 x 的值，求代数式 −5x+9 的值：x=0.5", "根据下列x的值，求代数式－5x＋9的值：x＝0.5。"),
 ])
 def test_full_stem_normalization_removes_only_matching_label_and_layout(label, left, right):
     assert normalize_page_stem({"label": label, "stem_text": left}) == normalize_page_stem({"label": label, "stem_text": right})
@@ -294,10 +303,22 @@ def test_full_stem_normalization_removes_only_matching_label_and_layout(label, l
     ("1", "求数列1,2的和", "求数列12的和"),
     ("1", "求数列1,2,3,...", "求数列1,2,3,"),
     ("1", "求1 2的值", "求12的值"),
+    ("1", "求 1 2 的值", "求12的值"),
+    ("1", "已知 a b，求积", "已知ab，求积"),
+    ("1", "已知 x 2，求值", "已知x2，求值"),
     ("3(6)#1", "填____（后一空）", "填____"),
 ])
 def test_full_stem_normalization_preserves_math_conditions_and_unmatched_labels(label, left, right):
     assert normalize_page_stem({"label": label, "stem_text": left}) != normalize_page_stem({"label": label, "stem_text": right})
+
+
+def test_only_choice_terminal_empty_answer_slot_is_layout():
+    item = {"label": "2", "stem_text": "下列例子中错误的是（ ）。", "question_type": "single_choice"}
+    assert normalize_page_stem(item) == normalize_page_stem({**item, "stem_text": "下列例子中错误的是"})
+    for other in ("下列例子中错误的是（A）。", "下列例子中错误的是（1+2）。",
+                  "下列例子中错误的是f()。", "下列例子中（ ）错误的是。"):
+        assert normalize_page_stem({**item, "stem_text": other}) != normalize_page_stem({**item, "stem_text": "下列例子中错误的是"})
+    assert normalize_page_stem({**item, "question_type": "calculation"}) != normalize_page_stem({**item, "stem_text": "下列例子中错误的是"})
 
 
 def test_correct_math_after_label_cleanup_does_not_erase_uncertainty_or_actual_answer_conflict():

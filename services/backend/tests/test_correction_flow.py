@@ -17,7 +17,8 @@ from sqlalchemy.orm import Session
 from xueban_backend.app import create_app
 from xueban_backend.correction_core import now
 from xueban_backend.correction_models import Asset, Entity, Task
-from xueban_backend.models import PrincipalRole, StudentGrant
+from xueban_backend.learning_models import StudentLearningProfile
+from xueban_backend.models import Homework, PrincipalRole, StudentGrant
 from xueban_backend.providers import ProviderError
 from xueban_backend.providers.ark import Metadata, Usage
 from xueban_backend.providers.correction_pipeline import PipelineResult
@@ -129,6 +130,26 @@ def flow(settings, database, signing, tmp_path, payload):
     app.state.engine.dispose()
 
 
+def test_whole_page_reading_order_survives_persistence_and_repeated_api_reads(flow):
+    flow.pipeline.label = '九'
+    flow.pipeline.extra_item_label = '1'
+    flow.recognize()
+    assert flow.worker.run_once()
+    with Session(flow.database.engine) as session, session.begin():
+        questions = list(session.scalars(select(Entity).where(Entity.homework_id == flow.homework_id, Entity.kind == 'question')))
+        assert sorted(q.annotations['reading_order'] for q in questions) == [0, 1]
+        # Force the expected sequence opposite the UUID order; identical full
+        # page sources cannot accidentally sort correctly by coordinates.
+        for index, question in enumerate(sorted(questions, key=lambda q: q.id, reverse=True)):
+            question.annotations = {**question.annotations, 'reading_order': index}
+        expected = [q.id for q in sorted(questions, key=lambda q: q.annotations['reading_order'])]
+    for _ in range(2):
+        homework = flow.homework()
+        assert homework['question_ids'] == expected
+        cases = [flow.client.get('/v1/cases/' + cid).json() for cid in homework['case_ids']]
+        assert [case['question_id'] for case in cases] == expected
+
+
 def test_real_image_upload_job_check_candidate_and_history(flow):
     case = flow.ready()
     job = flow.start_check(case)
@@ -144,6 +165,68 @@ def test_real_image_upload_job_check_candidate_and_history(flow):
     history = flow.client.get("/v1/students/student_a/homeworks").json()["items"]
     assert history[0]["case_ids"] == [case["id"]]
     assert len(history[0]["job_ids"]) == 2
+
+
+def test_auto_check_after_recognition_schedules_every_question_once(flow):
+    flow.worker.settings = replace(flow.worker.settings, auto_check_after_recognition=True)
+    flow.pipeline.extra_item_label = "2"
+
+    flow.recognize()
+    assert flow.worker.run_once()
+
+    homework = flow.homework()
+    assert len(homework["case_ids"]) == 2
+    with Session(flow.database.engine) as session:
+        checks = list(session.scalars(select(Entity).where(
+            Entity.homework_id == flow.homework_id,
+            Entity.kind == "check",
+        )))
+        tasks = list(session.scalars(select(Task).where(
+            Task.homework_id == flow.homework_id,
+            Task.kind == "check",
+        )))
+        cases = list(session.scalars(select(Entity).where(
+            Entity.homework_id == flow.homework_id,
+            Entity.kind == "case",
+        )))
+        assert len(checks) == len(tasks) == 2
+        assert all(len(case.document["check_ids"]) == 1 for case in cases)
+        assert {check.document["job_id"] for check in checks} == {task.id for task in tasks}
+
+    assert flow.worker.run_once()
+    assert flow.worker.run_once()
+    assert all(flow.client.get(f"/v1/jobs/{job_id}").json()["status"] == "succeeded" for job_id in flow.homework()["job_ids"] if job_id.startswith("job_"))
+    for case_id in flow.homework()["case_ids"]:
+        case = flow.client.get(f"/v1/cases/{case_id}").json()
+        assert case["current_decision"]["verdict"] == "incorrect"
+        assert case["current_decision"]["validity"] == "candidate"
+
+
+@pytest.mark.parametrize(
+    ("profile_grade", "homework_grade", "subject"),
+    [(7, None, "math"), (None, 7, "math"), (6, 7, "math"),
+     (6, None, "math"), (8, None, "science"), (7, None, None)],
+)
+def test_worker_does_not_offer_unreviewed_graph_tags(flow, profile_grade, homework_grade, subject):
+    case = flow.ready()
+    with Session(flow.database.engine) as session:
+        homework = session.get(Homework, flow.homework_id)
+        homework.curriculum = {**homework.curriculum, "grade": homework_grade, "subject": subject}
+        session.add(StudentLearningProfile(
+            student_id="student_a", tenant_id="tenant_a", revision=1,
+            document={"grade": profile_grade, "term": None, "textbook_revision": None,
+                      "current_knowledge_ids": [], "note": None},
+            updated_by="actor_a", updated_at=now(),
+        ))
+        session.commit()
+
+    flow.start_check(case)
+    claim = flow.worker.claim()
+    _, context = flow.worker._load(*claim)
+    # The student's profile is authoritative. A homework's captured course
+    # field must not silently change the learning scope.
+    assert context["student_grade"] == profile_grade
+    assert context["knowledge_point_candidates"] == []
 
 
 def test_upload_requires_ticket_and_decodable_verified_bytes(flow):
@@ -695,3 +778,101 @@ def test_check_cannot_reference_attempt_from_another_case(flow):
     other = flow.client.get(f"/v1/cases/{other_id}").json()
     response = flow.post(f"/v1/cases/{first['id']}/checks", {"expected_revision": first["revision"], "attempt_id": other["current_attempt_id"], "question_revision": 1, "attempt_recognition_revision": 1})
     assert response.status_code == 404
+
+
+def test_lease_renewal_cannot_revive_expired_execution_or_steal_another_token(flow):
+    _, job = flow.recognize()
+    identifier, token = flow.worker.claim()
+    assert not flow.worker.renew_lease(identifier, 'lease_wrong_owner')
+    assert flow.worker.renew_lease(identifier, token)
+    with Session(flow.database.engine) as session:
+        task = session.get(Task, job['id'])
+        task.lease_expires_at = now() - timedelta(seconds=1)
+        session.commit()
+    assert not flow.worker.renew_lease(identifier, token)
+    assert not flow.worker.finish(identifier, token, error=ProviderError('worker_failure'))
+
+
+def test_worker_renews_during_inference_and_stops_after_finish(flow, monkeypatch):
+    from threading import Event
+    import xueban_backend.worker as worker_module
+    class FastEvent(Event):
+        def wait(self, timeout=None):
+            return super().wait(0.01)
+    monkeypatch.setattr(worker_module, 'Event', FastEvent)
+    renewed = Event()
+    original = flow.worker.renew_lease
+    def renew(identifier, token):
+        result = original(identifier, token)
+        if result:
+            renewed.set()
+        return result
+    monkeypatch.setattr(flow.worker, 'renew_lease', renew)
+    case = flow.ready()
+    renewed.clear()
+    job = flow.start_check(case)
+    flow.pipeline.callback = lambda: renewed.wait(2) or pytest.fail('inference lease was not renewed')
+    assert flow.worker.run_once()
+    assert renewed.is_set()
+    with Session(flow.database.engine) as session:
+        task = session.get(Task, job['id'])
+        assert task.status == 'succeeded'
+        assert task.lease_token is None and task.lease_expires_at is None
+
+
+def test_graph_observation_is_persisted_and_loaded_only_for_matching_revision(flow):
+    original = flow.pipeline.recognize
+    graph = {'kind': 'bar_model', 'description': '整体120页，部分3/5。'}
+    def recognize(**context):
+        result = original(**context)
+        result.data['items'][0]['diagram'] = deepcopy(graph)
+        return result
+    flow.pipeline.recognize = recognize
+    case = flow.ready()
+    flow.start_check(case)
+    claim = flow.worker.claim()
+    _, context = flow.worker._load(*claim)
+    assert context['question']['diagram'] == graph
+    with Session(flow.database.engine) as session:
+        question = session.get(Entity, case['question_id'])
+        question.annotations = {**question.annotations, 'diagram_revision': 2}
+        session.commit()
+    _, context = flow.worker._load(*claim)
+    assert 'diagram' not in context['question']
+
+
+def test_slot_transcription_is_persisted_but_not_reused_after_revision(flow):
+    original = flow.pipeline.recognize
+    slots = [{'index': 1, 'prompt': '用____法', 'answer_text': '加', 'answer_status': 'present'}]
+    def recognize(**context):
+        result = original(**context)
+        result.data['items'][0]['answer_slots'] = slots
+        return result
+    flow.pipeline.recognize = recognize
+    case = flow.ready()
+    flow.start_check(case)
+    claim = flow.worker.claim()
+    _, context = flow.worker._load(*claim)
+    assert context['attempt']['answer_slots'] == slots
+    with Session(flow.database.engine) as session, session.begin():
+        attempt = session.get(Entity, case['current_attempt_id'])
+        attempt.annotations = {**attempt.annotations, 'slots_recognition_revision': 0}
+    _, context = flow.worker._load(*claim)
+    assert 'answer_slots' not in context['attempt']
+
+
+def test_slot_decisions_survive_api_read_and_do_not_change_staff_confirmation(flow):
+    case = flow.ready()
+    original = flow.pipeline.check
+    checks = [{'index': 1, 'prompt': '用____法', 'student_answer': '加', 'verdict': 'incorrect',
+               'correct_answer': '除', 'explanation': '单位1未知，求整体。'}]
+    def check(**context):
+        result = original(**context)
+        result.data['answer_checks'] = checks
+        return result
+    flow.pipeline.check = check
+    flow.start_check(case)
+    assert flow.worker.run_once()
+    case = flow.client.get('/v1/cases/' + case['id']).json()
+    assert case['current_decision']['answer_checks'] == checks
+    assert case['current_decision']['validity'] == 'candidate'

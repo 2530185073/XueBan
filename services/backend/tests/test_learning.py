@@ -1,4 +1,6 @@
 """Personal knowledge graph end to end: reviewed corrections -> evidence -> state."""
+from copy import deepcopy
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from sqlalchemy import func, select
@@ -7,8 +9,12 @@ from sqlalchemy.orm import Session
 from test_correction_flow import flow, teacher  # noqa: F401  (pytest fixture reuse)
 from xueban_backend.governance import purge_student
 from xueban_backend.asset_store import LocalAssetStore
+from xueban_backend.correction_models import Entity
 from xueban_backend.learning_jobs import LearningWorker
-from xueban_backend.learning_models import LearningEvidence, LearningOutbox, QuestionKnowledgeLink, StudentKnowledgeState
+from xueban_backend.learning_models import (CurriculumGraph, KnowledgeEdge, KnowledgeNode, LearningEvidence,
+                                             LearningOutbox, QuestionKnowledgeLink, StudentKnowledgeState,
+                                             StudentLearningProfile)
+from xueban_backend.models import Homework
 from xueban_backend.providers.ark import Metadata
 
 
@@ -16,8 +22,76 @@ def learning(flow, client=None):
     return LearningWorker(flow.database.engine, client=client)
 
 
+def prepare_latest_math_curriculum(flow):
+    """Give learning behavior tests an explicitly reviewed latest-edition graph.
+
+    Production still ships the pilot graph as unreviewed. These tests exercise
+    projection and mapping behavior, so they use a separate synthetic graph
+    whose refs match the configured Grade 7 BNUP scope.
+    """
+    graph_version = "test-bnup-math-g7-latest"
+    with Session(flow.database.engine) as session:
+        source = session.get(CurriculumGraph, "pep-math-junior-pilot-1")
+        if session.get(CurriculumGraph, graph_version) is None:
+            graph = CurriculumGraph(
+                version=graph_version, subject="数学", title="测试：北师大版七年级数学最新版",
+                status="published", review_status="publisher_latest_reviewed",
+                source_note="仅供自动化测试使用，不代表生产教材图谱。",
+                published_at=datetime(2026, 10, 19, tzinfo=timezone.utc),
+            )
+            session.add(graph)
+            session.flush()
+            for item in session.scalars(select(KnowledgeNode).where(
+                    KnowledgeNode.graph_version == source.version)).all():
+                refs = [] if item.node_type == "subject" else [{
+                    "stage": "junior_middle", "publisher": "北京师范大学出版社", "grade": 7,
+                    "subject": "数学", "term": "upper", "textbook_revision": "publisher_latest",
+                }]
+                session.add(KnowledgeNode(
+                    graph_version=graph_version, id=item.id, node_type=item.node_type,
+                    parent_id=item.parent_id, name=item.name, definition=item.definition,
+                    observable_objective=item.observable_objective, curriculum_refs=refs,
+                    coverage_facets=deepcopy(item.coverage_facets),
+                    misconception_codes=deepcopy(item.misconception_codes), sort_order=item.sort_order,
+                ))
+            for item in session.scalars(select(KnowledgeEdge).where(
+                    KnowledgeEdge.graph_version == source.version)).all():
+                session.add(KnowledgeEdge(
+                    graph_version=graph_version, id=item.id, from_id=item.from_id, to_id=item.to_id,
+                    relation_type=item.relation_type, scope=item.scope, rationale=item.rationale,
+                ))
+        profile = session.get(StudentLearningProfile, "student_a")
+        profile_document = {
+            **(profile.document if profile else {}),
+            "grade": 7,
+            "textbook_revision": "publisher_latest",
+            "term": "upper",
+            "current_knowledge_ids": [],
+            "note": None,
+        }
+        if profile is None:
+            session.add(StudentLearningProfile(
+                student_id="student_a", tenant_id="tenant_a", revision=0,
+                document=profile_document, updated_by="actor_a", updated_at=datetime.now(timezone.utc),
+            ))
+        else:
+            profile.document = profile_document
+        homework = session.get(Homework, flow.homework_id)
+        homework.curriculum = {
+            **homework.curriculum,
+            "stage": "junior_middle", "grade": 7, "subject": "数学",
+            "publisher_code": "BNUP", "edition": "publisher_latest",
+        }
+        session.commit()
+
+
 def reviewed(flow, verdict="incorrect"):
+    prepare_latest_math_curriculum(flow)
     case = flow.ready()
+    with Session(flow.database.engine) as session:
+        question = session.get(Entity, case["question_id"])
+        question.document = {**question.document, "subject": "数学"}
+        session.commit()
     flow.pipeline.verdict = verdict
     flow.start_check(case)
     assert flow.worker.run_once()
@@ -64,13 +138,15 @@ def test_published_graph_is_readable(flow):
     assert all(e["from_id"] in ids and e["to_id"] in ids for e in graph["edges"])
 
 
-def test_model_candidate_never_becomes_evidence(flow):
+def test_model_candidate_can_seed_student_evidence_without_teacher_confirmation(flow):
     case = reviewed(flow)
     teacher(flow)
     link(flow, case)
     learning(flow).drain()
-    assert evidence_count(flow) == 0
-    assert knowledge(flow)["states"] == []
+    assert evidence_count(flow) == 1
+    [state] = knowledge(flow)["states"]
+    assert state["knowledge_id"] == "kp-rational-add-sub"
+    assert state["learning_status"] == "needs_help_now"
 
 
 def test_staff_confirmed_error_with_confirmed_link_is_evidence_once(flow):
@@ -198,11 +274,11 @@ class FakeClient:
         return SimpleNamespace(data={"links": self.links}, metadata=Metadata("m", "m", None, None, None, 1, ()))
 
 
-def test_model_proposes_candidate_links_only_after_staff_decision(flow):
+def test_staff_reviewed_question_retains_candidate_only_suggestion_path(flow):
     case = reviewed(flow)
     client = FakeClient([{"knowledge_id": "kp-rational-add-sub", "role": "primary", "rationale": "整数加法"},
                          {"knowledge_id": "kp-rational-compare", "role": "primary", "rationale": "比较"}])
-    learning(flow, client).drain()
+    learning(flow).drain()
     assert client.calls == []
     teacher(flow)
     review(flow, case)

@@ -22,6 +22,8 @@ from .contracts import Contracts
 from .db import create_database_engine
 from .errors import Problem, problem_response
 from .models import Homework, IdempotencyRecord, Student, StudentGrant
+from .curriculum_catalog import supported_scope
+from .learning_models import StudentLearningProfile
 
 ID_PATTERN = r"^[a-z][a-z0-9_-]{2,63}$"
 ResourceId = Annotated[str, Path(pattern=ID_PATTERN)]
@@ -44,10 +46,34 @@ def parse_time(value: str) -> datetime:
         raise Problem(422, "validation", "invalid_request", "时间必须是带时区的 RFC3339 日期时间。") from None
 
 
-def homework_json(row: Homework) -> dict:
+def homework_json(row: Homework, *, entities=None, assets=None, job_ids=None) -> dict:
     from .correction_models import Asset, Entity, Task
     session = object_session(row)
-    entities = session.scalars(select(Entity).where(Entity.homework_id == row.id).order_by(Entity.id)).all() if session else []
+    if entities is None:
+        entities = session.scalars(select(Entity).where(Entity.homework_id == row.id).order_by(Entity.id)).all() if session else []
+    if assets is None:
+        assets = session.scalars(select(Asset).where(Asset.homework_id == row.id)).all() if session else []
+    assets = list(assets)
+    assets.sort(key=lambda asset: (
+        asset.document.get("page_index", 0),
+        asset.document.get("created_at", ""),
+        asset.id,
+    ))
+    page_order = {asset.id: index for index, asset in enumerate(assets)}
+    questions = {entity.id: entity for entity in entities if entity.kind == "question"}
+
+    def question_order(question):
+        regions = question.document.get("regions", [])
+        page = min((page_order.get(region["asset_id"], len(assets)) for region in regions), default=len(assets))
+        order = (question.annotations or {}).get("reading_order")
+        # Whole-page recognition has no per-question coordinates. Persisted
+        # array order must survive UUID generation, API reads and reloads.
+        return (page, order if isinstance(order, int) else float("inf"), question.document["created_at"], question.id)
+
+    ordered_questions = sorted(questions.values(), key=question_order)
+    question_ranks = {question.id: index for index, question in enumerate(ordered_questions)}
+    cases = sorted((entity for entity in entities if entity.kind == "case"),
+                   key=lambda entity: (question_ranks.get(entity.document["question_id"], len(questions)), entity.id))
     return {
         "id": row.id,
         "revision": row.revision,
@@ -57,10 +83,10 @@ def homework_json(row: Homework) -> dict:
         "created_at": utc_string(row.created_at),
         "occurred_at": utc_string(row.occurred_at),
         "coverage": row.coverage_json or {"collection_scope": row.collection_scope, "unrecognized_regions": [], "note": None},
-        "asset_ids": list(session.scalars(select(Asset.id).where(Asset.homework_id == row.id).order_by(Asset.id))) if session else [],
-        "question_ids": [entity.id for entity in entities if entity.kind == "question"],
-        "case_ids": [entity.id for entity in entities if entity.kind == "case"],
-        "job_ids": list(session.scalars(select(Task.id).where(Task.homework_id == row.id).order_by(Task.id))) if session else [],
+        "asset_ids": [asset.id for asset in assets],
+        "question_ids": [entity.id for entity in ordered_questions],
+        "case_ids": [entity.id for entity in cases],
+        "job_ids": job_ids if job_ids is not None else list(session.scalars(select(Task.id).where(Task.homework_id == row.id).order_by(Task.id))) if session else [],
         "processing_blocked": row.processing_blocked,
     }
 
@@ -148,6 +174,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ActorDep = Annotated[Actor, Depends(current_actor)]
     SessionDep = Annotated[Session, Depends(database_session)]
 
+    # Unlike ordinary READ COMMITTED reads, this aggregate must authenticate
+    # and load every resource in one snapshot. Configure BEFORE the first SQL.
+    def detail_session():
+        from .homework_detail import readonly_session
+        with readonly_session(engine) as session:
+            yield session
+
+    def detail_actor(
+        credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
+        session: Annotated[Session, Depends(detail_session)],
+    ) -> Actor:
+        return verifier.actor(credentials.credentials if credentials else None, session)
+
+    DetailActorDep = Annotated[Actor, Depends(detail_actor)]
+    DetailSessionDep = Annotated[Session, Depends(detail_session)]
+
     def checked(name: str, value: dict) -> dict:
         contracts.validate(name, value)
         return value
@@ -171,6 +213,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ):
         student = require_student(session, actor, student_id)
         contracts.validate("CreateHomework", payload, kind="requests")
+        curriculum = payload["curriculum"]
+        profile = session.get(StudentLearningProfile, student.id)
+        profile_grade = profile.document.get("grade") if profile else None
+        if type(profile_grade) is int and profile_grade in {5, 6, 7, 8}:
+            if curriculum.get("grade") is not None and curriculum.get("grade") != profile_grade:
+                raise Problem(409, "conflict", "course_unknown", "作业年级与学生档案不一致，请先更新学生年级。")
+            curriculum = {**curriculum, "grade": profile_grade,
+                          "stage": "primary" if profile_grade <= 6 else "junior_middle",
+                          "edition": "publisher_latest"}
+        # The client may omit course details during capture, but once it sends
+        # a grade/subject/publisher they must be one of the product-approved
+        # textbook combinations. Unknown combinations stay unscoped.
+        if curriculum.get("grade") is not None and curriculum.get("subject") is not None:
+            scope = supported_scope(curriculum["grade"], curriculum["subject"], curriculum.get("publisher_code"))
+            if scope is None:
+                raise Problem(422, "validation", "invalid_request", "当前年级、学科和出版社组合暂未纳入知识图谱。")
+            # ``publisher_latest`` is deliberately a value of the existing
+            # contract's edition field.  Do not add an ad-hoc revision key to
+            # Homework.curriculum: the phase-one resource is strict and the
+            # official catalogue is the source of truth for the actual print
+            # edition.
+            curriculum = {**curriculum, "subject": scope.subject,
+                          "publisher_code": scope.publisher_code,
+                          "edition": curriculum.get("edition") or "publisher_latest"}
+        elif curriculum.get("grade") is not None:
+            grade = curriculum["grade"]
+            if type(grade) is int and grade in {5, 6, 7, 8}:
+                curriculum = {**curriculum, "stage": "primary" if grade <= 6 else "junior_middle",
+                              "edition": "publisher_latest"}
+        binding = (profile.document.get("curriculum_binding") or {}) if profile else {}
+        if binding and (curriculum.get("subject") is None or curriculum.get("subject") == binding.get("subject")):
+            if curriculum.get("subject") is not None and curriculum.get("publisher_code") != binding["publisher_code"]:
+                raise Problem(409, "conflict", "course_unknown", "作业教材与当前所选教材不一致，请先确认教材。")
+            curriculum = {**curriculum, "publisher_code": binding["publisher_code"],
+                          "edition": "isbn:" + binding["isbn"],
+                          "volume": {"up": "first", "down": "second", "full": "full_year"}[binding["term"]]}
         occurred_at = parse_time(payload["occurred_at"])
         payload_hash = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
         operation = "POST /v1/students/{student_id}/homeworks"
@@ -209,7 +287,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             campus_id=student.campus_id,
             student_id=student.id,
             revision=1,
-            curriculum=payload["curriculum"],
+            curriculum=curriculum,
             title=payload["title"],
             collection_scope=payload["collection_scope"],
             created_at=now,
@@ -230,6 +308,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise Problem(404, "not_found", "not_found", "资源不存在或不可访问。")
         require_student(session, actor, homework.student_id)
         return checked("HomeworkSession", homework_json(homework))
+
+    @app.get("/v1/homeworks/{homework_id}/detail", operation_id="getHomeworkDetail")
+    def get_homework_detail(homework_id: ResourceId, actor: DetailActorDep, session: DetailSessionDep):
+        from .homework_detail import detail_response
+        homework = session.scalar(select(Homework).where(Homework.id == homework_id, Homework.tenant_id == actor.tenant_id))
+        if homework is None:
+            raise Problem(404, "not_found", "not_found", "资源不存在或不可访问。")
+        require_student(session, actor, homework.student_id)
+        if homework.processing_blocked:
+            raise Problem(409, "conflict", "processing_blocked", "该作业已停止处理。")
+        return detail_response(session, contracts, homework)
 
     @app.get("/v1/students/{student_id}/homeworks", operation_id="listHomeworks")
     def list_homeworks(

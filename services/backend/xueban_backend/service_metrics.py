@@ -61,10 +61,12 @@ def ratio(numerator, denominator):
 def backlog(entities):
     """Work waiting for a person right now, regardless of the reporting window."""
     attempts = {e.id: e.document for e in entities if e.kind == "attempt"}
+    questions = {e.id: e.document for e in entities if e.kind == "question"}
     queue = Counter()
     for entity in entities:
         if entity.kind == "case":
-            reason = needs_staff(entity.document, attempts.get(entity.document["current_attempt_id"]))
+            reason = needs_staff(entity.document, attempts.get(entity.document["current_attempt_id"]),
+                                 questions.get(entity.document["question_id"]))
             if reason:
                 queue[reason] += 1
     return {"open_help_requests": sum(1 for e in entities if e.kind == "help" and e.document["status"] in {"waiting", "claimed"}),
@@ -153,7 +155,7 @@ def install_service_metrics(app, engine, cfg):
                 Entity.homework_id.in_(homeworks), Entity.kind.in_(("decision", "review", "help")))))
             live = select(Homework.id).where(*campus, Homework.processing_blocked.is_(False))
             waiting = list(session.scalars(select(Entity).where(
-                Entity.homework_id.in_(live), Entity.kind.in_(("help", "case", "attempt")))))
+                Entity.homework_id.in_(live), Entity.kind.in_(("help", "case", "attempt", "question")))))
             body = summarize(tasks, entities, start, end)
             body["current_backlog"] = backlog(waiting)
         return {"campus_id": campus_id, "window": {"from": start.isoformat(), "to": end.isoformat(),

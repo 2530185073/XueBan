@@ -2,6 +2,72 @@
 
 本包提供同步 Worker 调用组件；公开 API、授权、作业状态机和数据落库由后端 Worker 负责。导入不启用模型；无凭据或无明确 base URL 时拒绝调用。部署端负责注入已核实的服务域名与凭据，不从学生客户端接受这些配置。
 
+## 当前整页双模型路径（v5.2）
+
+`CORRECTION_MODE=two_model` 使用 `TwoModelWholePagePipeline`。默认按 `answer_slot`
+记录，`CORRECTION_TARGET_UNIT=question` 是尚未通过原图验收的实验选项。
+首轮每张完整原图并行交给两路模型；每路都独立读取题面、学生笔迹并判断，
+没有先做像素切题。主路使用 `ARK_*`；第二路使用 `REVIEW_API`、`REVIEW_MODEL`、
+`REVIEW_THINKING` 和 `ZYAI_*`（缺省凭据可回退 ARK），不能仅据默认值推断部署型号。
+
+完整题面、选项、作答和判定一致且无实质疑点时，形成明确的 AI 候选；不升级为老师核实。
+格式、表述和判定差异可进入批量图像复核。每批最多六个目标，单批失败不使整页失效。
+真实笔迹或必要条件分歧另作独立原图核读；实际判题分歧由 `VISUAL_REVIEW_MODEL`
+指定的模型裁决。它不是简单多数票，也不能用相同答案补写原笔迹。
+
+v5.2 允许明确的计算指令翻译及完整计算题头差异由 AI 核对；必须保留完整相同算式，
+不消除数字、正负号、变量、单位、声调、运算要求或题号冲突。复核选源绑定原始题面、
+作答、引文和来源哈希；选第三路观察时还需与实际原题绑定。未知、超时和看不清分别记录，
+不会据此形成确定薄弱点，也不自动创建老师求助。
+
+`items[].assessment.verification` 记录 matched / reviewed / conflict / degraded 等状态、
+实际原因及独立核读依据。完整观察和调用账本保留在内部审计中，公开接口不泄露模型配置。
+图像与同题订正仍由持久化层的资产、版本、权限和当前作答指针约束。
+
+同一作答的原图重核由 `original_recheck.py` 限定一个原有目标，只传题号、位置与单元提示，
+不传旧答案或旧判定。服务层每组作答原图最多派发两次；恢复成功修订识读版本，
+保留原作答 ID、照片、时间、帮助记录及历史快照。任务完成不等于恢复已应用，
+客户端必须读取真实 `last_outcome`。学生重新作答仍走新照片订正流程。
+
+整页初读每方最多一次实际供应商请求，不隐式重试。主路总截止配置为 200 秒，
+第二路和独立视觉客户端为 118 秒；后续复核另有调度预算，因此这些数值不是整页 SLA。
+Responses 默认 SSE，须收到完整终结响应。服务失败与已经派发的计费状态分别审计，
+不能推断超时免费。线上效果与工程测试分别验收，现有原图质量和时延阻断见
+[持续交付记录](../../../../docs/CONTINUOUS_DELIVERY.md)。
+
+### 结构导航实验（默认关闭）
+
+只有显式设置 `STRUCTURE_NAVIGATION_ENABLED=1` 才启用。每页第一路完成后，第二路接收
+仅含 `label + target_unit` 的导航并重新通读原图；多页按各自完成顺序派发，不等最慢页。
+不传题干、选项、学生答案、判定、空数或内容锚点。导航不合法或第一路失败时，第二路
+只执行一次普通整页请求；已派发的第二路失败不会再收费重试。R1 原图重核始终不用此模式。
+
+额外返回题目保留，找不到的导航另存报告，不按清单删除、补题或声称覆盖完整。
+模型仍需通过原有内容和题源检查。审计记录导航/来源哈希、结构共享和内容未共享；
+实际共享导航时 `independent_before_comparison=false`。实验结果增加独立协议后缀。
+
+已有缓存显示 P07 的结构对应改善；P19 完整小题实验仍有真实内容和范围分歧。
+一次新的覆盖探针（删真实题号、加假题号并反转顺序）成功找回真实题且拒绝虚构题，
+但单路耗时 116.094 秒。未证明整体提速、保留集准确率或真实双栏/重复题号的覆盖，
+不得默认启用到学生体验环境。
+
+### 整页格式坏项隔离（默认关闭）
+
+`PARTIAL_PAGE_OUTPUT_ENABLED=1` 只作用于非 R1、未启用结构导航的 `answer_slot`
+初读。完整 JSON 中的坏项按原 schema 隔离，有效项仍须两路实际观察一致才可使用。
+坏项不修补、不补第二票；部分页不再追加对齐或付费复核，服务未完成不会显示成字迹模糊。
+页壳、截断、传输、密钥和 JSON 错误仍整路拒绝；Responses 失败尚不支持逐项保全。
+
+原请求账本仍保留 `invalid_output` 与实际用量，不增加尝试。开关只接受 `0/1`，
+不影响已有记录；回退设置为 `0` 并在队列空闲时重启 Worker。实现及证据边界见
+[逐项输出隔离](../../../../docs/RECOGNITION_PARTIAL_OUTPUT_PLAN.md)。
+
+## 旧单路与三模型适配器
+
+`CORRECTION_MODE=multimodel` 和 `single` 保留兼容路径。下方逐题 API、默认提示版本和
+重试参数属于旧适配器，不能据此推断上面的整页模式行为。底层工厂未设置模式时仍为
+`single`；运行脚本必须显式选择。
+
 ```python
 from xueban_backend.providers import ArkClient, ArkSettings
 
@@ -22,7 +88,11 @@ with ArkClient(ArkSettings(base_url=verified_base_url, api_key=server_api_key)) 
     )
 ```
 
-固定使用调用配置中的同一个模型，默认精确 ID 为 `deepseek-v4-1-flash-260910`。`recognition / check / hint / recheck / knowledge_extract` 各有独立系统提示；知识点角色只是接口能力，不会部署或更新知识图谱。默认思考开启、`max_tokens=4096`，可单次显式覆盖，最大8192（包含该模型思考 token）。不发送未经确认的温度或 top-p 参数。
+默认主模型为 `deepseek-v4-1-flash-260910`，使用 Chat Completions。Worker 可配置 `ARK_FALLBACK_MODEL=gpt-6-astra`，通过 Responses API 复核。提示版本为 `photo-correction.v19-two-stage-review`：DS 判为 `correct` 必须交 GPT 核对；主模型判为无法判断、有实质疑点、缺少错题答案/改法，以及图形、应用、证明、多空题均升级。上游失败、格式不合法或逐空绑定失效也进入有限兜底，所有实际调用保留审计。
+
+DS 与 GPT 的有效结论分歧时不得放行 `correct`。GPT 无法确认、缺少正确答案或改法、服务失败或审核未完成时，返回 `unable_to_judge`/`needs_review`，不猜测为错题、不生成未经依据支持的纠正内容，并保留重试路径。只有 GPT 明确判错且证据充分时，才允许带红色 `*` 输出错误。系统不依赖或展示模型概率估计。所有凭证仅传给 Worker。商用教材范围由服务端学生档案和授权出版社确定；范围未命中先补充信息，已确定范围但无已审核知识点候选时严格返回空标签。
+
+`recognition / check / hint / recheck / knowledge_extract` 各有独立系统提示；知识点角色只是接口能力，不会部署或更新知识图谱。旧 Ark 适配器默认思考开启、`max_tokens=4096`，可单次显式覆盖，最大16384（包含该模型思考 token）；整页有界适配器上限32768，本路径每方配置24576。Astra 使用 Responses API、`store=false`、结构化 JSON Schema 输出；因 Responses strict 子集限制，服务端会在解析后用原始业务 Schema 再校验。两类接口都不发送未经确认的温度或 top-p 参数。
 
 使用 Chat Completions 的 `response_format={"type":"json_object"}`，另在服务端做 JSON Schema 校验；不依赖上游严格 schema 输出。只接受一个完整 JSON 对象，拒绝重复键、NaN/Infinity、Markdown 包装、输出截断、工具调用、额外未允许字段和不匹配的数据类型。Schema 仅接受内联定义和本地引用，不检索远程 Schema。
 
@@ -42,7 +112,7 @@ with ArkClient(ArkSettings(base_url=verified_base_url, api_key=server_api_key)) 
 
 ## 纯模型照片纠错流水线
 
-`correction_pipeline.py` 复用上述 Ark 适配器，当前不调用腾讯或百度 OCR。四个方法均使用同一服务端配置的模型，默认 `deepseek-v4-1-flash-260910`；不同角色调用不构成独立模型验证。
+`correction_pipeline.py` 复用上述 Ark 适配器，当前不调用腾讯或百度 OCR。识别及首轮判题使用主模型，符合复核门禁时由 GPT 复核；不同角色调用不构成独立模型验证。
 
 ```python
 from xueban_backend.providers.correction_pipeline import CorrectionPipeline, PipelineImage
@@ -57,7 +127,7 @@ with CorrectionPipeline.from_env() as pipeline:
     # pipeline.recheck(images=(original_image, corrected_image), ...)
 ```
 
-`from_env()` 只读取 `ARK_BASE_URL`、`ARK_API_KEY`、`ARK_MODEL` 环境变量，不查找或打开 `.env` 文件；未配置前两项时保持禁用。默认最多一次付费尝试、单 I/O 60 秒、总调用预算 90 秒；Worker 也可注入自行配置的 `ArkClient`。识别最多输出 80 个独立空位，识别输出预算 8192，其余角色 4096。整页逐题调用的总次数、总费用与任务期限由 Worker 控制；单次限制不是整页预算。
+`from_env()` 只读取显式环境配置，不查找或打开 `.env` 文件；未配置 base URL/key 时保持禁用。生产主/兜底客户端默认最多一次尝试、单 I/O 180 秒、total 200 秒。Worker 也可注入自行配置的客户端。识别最多输出 80 个独立空位，识别输出预算 16384，判题/再检 8192，其余角色 4096。整页逐题调用的总次数、总费用与任务期限由 Worker 控制；单次限制不是整页预算。
 
 稳定接口：
 
@@ -80,7 +150,7 @@ with CorrectionPipeline.from_env() as pipeline:
 
 区域严格使用对应资产的 `original_pixels`，拒绝未知资产、负数、零尺寸、越界、把旧作答图位置用于新作答等情况。图片尺寸必须与实际发送的图像像素一致；旋转或缩放需要由上游维护资产版本与坐标关系。
 
-检查和再检必须同时读取原图与识别候选，返回独立 `readback`。只做保守字符规范化，不把上标消成普通数字、不删去内部数字间隔、不做数学等价转换；读回的题干／答案不一致、字迹不确定或识别未就绪时，结果强制为 `unable_to_judge`、`validity=needs_review`。否则也只得到候选；`origin=model`、确认字段恒为 null，依据类型为 `model_hypothesis`。`readback` 和 `uncertainties` 是内部审计扩展，不能原样塞入禁止额外字段的公共 Decision；由 Worker 分开保存。模型摘要也不应直接展示为给孩子的答案或长篇解释。
+检查和再检使用首轮保存的题干和学生作答；原图用于核对图形、表格和明确缺失条件，不允许用推导答案覆盖学生笔迹。逐空结果绑定保存的原始作答，顶层与逐空正确性矛盾时不能放行全对。`readback` 保留原输入供内部审计；`origin=model`、确认字段恒为 null，依据类型为 `model_hypothesis`。原始审核记录不直接进入公共 Decision；Worker 只选择公共字段，前端仅显示受控审核摘要。
 
 提示不依赖模型自报“没有泄露答案”。模型只能选择符号、分数、分配律、单位、代入等有限提示类型和可选关注区域，服务端用固定模板形成学生可见内容。自由文本、标准答案字段被 Schema 拒绝；不确定则转为坐班核实。正确候选的提示请求只返回读题自检，不人为制造教师任务。这个版本的提示表达能力受模板限制，后续扩充模板需单独评测。
 
@@ -118,3 +188,21 @@ with EmbeddingClient(EmbeddingSettings(
 向量不自动重试，错误只含安全错误码/请求元数据，默认I/O20秒、总预算30秒。与聊天组件相同，同步HTTPX预算不是生产Worker的硬中断保证。费用保持未知。没有创建索引、数据库或更新掌握度；相关性分数只是资料召回依据。知识库Rerank是另一服务及权限体系，本轮未接入。
 
 2026-10-16在同一有效账号下完成中文语料/查询两次真实调用，均2048维；聊天五角色也完成合成图片实调。见 [实测证据](../../../../docs/evidence/ark-20261016/README.md) 和 [服务选型](../../../../MODEL_SERVICE_PLAN.md)。复验优先使用离线测试；真实调用必须显式选择、保存请求及费用证据，不能在CI中自动消耗配额。
+
+## 语义对齐派发预检
+
+两路未配对来源仅在所有跨路候选均被既有印刷条件/完整选项规则排除时跳过对齐请求。任一兼容边存在就发送完整原输入；异常保留原路径。`multimodel_audit.alignment_dispatches` 只记调度原因、数量及来源哈希，没有虚构调用或用量。兼容只是必要条件，不能代替模型对齐和后续核验。当前 provisional/split 仅审计；未来消费这些结果时须重新评估预检。见 [证据与边界](../../../../docs/RECOGNITION_ALIGNMENT_DISPATCH.md)。
+
+## 可选主机调用记录
+
+`HOST_CALL_JOURNAL_ENABLED=1` 为 `two_model` 的首次整页任务启用主机侧记录，默认 `0`；
+只接受 `0` 或 `1`。它不新增请求、不改变模型输入和纠错结论，也不启用逐空恢复。
+记录来自本次执行的 `generate` 调用边界，包含阶段、图片 ID、目标和输入摘要、起止
+时间及对应 `Metadata`，单独保存在该次 Task execution 的 `host_call_journal`。
+不从模型候选字段提取记录，不保存图片 base64、提示正文或模型密钥。
+
+一次 `generate` 调用不一定发送一次 HTTP：返回的 attempts 单独统计；没有尝试元数据
+或调用中断时用量仍未知。该记录仅在内存收集、结束时保存，进程崩溃可能丢失，
+不能证明请求字节、费用、完整派发历史或图像真值。字段始终为
+`wire_verified=false`、`scope_admission_eligible=false`，不能授权自动重派或收费恢复。
+R1、订正识读、check/hint 和旧任务不补造此记录。生产启用前仍须单独验证实际运行配置。

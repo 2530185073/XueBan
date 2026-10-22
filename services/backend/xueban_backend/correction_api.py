@@ -20,6 +20,84 @@ from .correction_core import (assets_for, conflict, create_task, event, expect, 
 from .correction_models import Asset, Entity, EntitySnapshot, Task
 from .errors import Problem
 from .models import Homework, Principal, PrincipalRole, Student
+from . import recognition_recheck
+
+
+def public_entity_read(row, resource, *, document=None, case=None, current=True):
+    """The existing public version wrapper, shared by single and bundle reads."""
+    document = row.document if document is None else document
+    if resource == "question" and current and row.annotations and row.annotations.get("subject_override"):
+        document = {**document, "subject": row.annotations["subject_override"]}
+    effective = (document.get("revision") == row.revision
+                 and row.document.get("lifecycle", "active") == "active"
+                 and row.document.get("validity") not in {"stale", "retracted"})
+    if resource in {"attempt", "decision"}:
+        if case is None:
+            raise ValueError("Versioned observation reads require their case")
+        effective = effective and case.document["lifecycle"] == "active"
+        if resource == "attempt":
+            effective = effective and case.document["current_attempt_id"] == row.id
+        else:
+            effective = effective and (case.document["current_decision"] or {}).get("id") == row.id
+    return {"record": document, "current_revision": row.revision, "currently_effective": effective}
+
+
+def enqueue_check_task(session, contracts, homework, case, question, attempt, *, assets=None):
+    """Create or reuse one current check inside the caller's transaction."""
+    recognition_recheck.assert_no_active(session, case)
+    asset_ids = list(dict.fromkeys(
+        [region["asset_id"] for region in question.document["regions"]]
+        + list(attempt.document["asset_ids"])
+    ))
+    assets = assets if assets is not None else assets_for(session, homework.id, asset_ids)
+    versions = input_versions(case, question, attempt, assets)
+    decision_id = (case.document["current_decision"] or {}).get("id")
+    current_check_id = (case.document.get("check_ids") or [None])[-1]
+    reusable_statuses = {"queued", "running", "retryable_failed", "succeeded"}
+    for task in session.scalars(select(Task).where(
+        Task.homework_id == homework.id,
+        Task.kind == "check",
+        Task.status.in_(reusable_statuses),
+    )):
+        inputs = task.inputs
+        decision_matches = (
+            (case.document.get("current_decision") or {}).get("check_id") == inputs.get("check_id")
+            if task.status == "succeeded"
+            else inputs.get("decision_id_at_submission") == decision_id
+        )
+        if (inputs.get("case_id") == case.id
+                and inputs.get("recovery_epoch", 0) == recognition_recheck.epoch(case)
+                and inputs.get("check_id") == current_check_id
+                and decision_matches
+                and inputs.get("input_versions", {}).get("fingerprint") == versions["fingerprint"]):
+            return {"job": task.document, "created_resource": task.document.get("result")}
+
+    identifier = new_id("check")
+    resource = {"resource_type": "check", "resource_id": identifier}
+    task, accepted = create_task(session, contracts, homework, "check", {
+        "case_id": case.id,
+        "check_id": identifier,
+        "input_versions": versions,
+        "asset_ids": [asset.id for asset in assets],
+        "decision_id_at_submission": decision_id,
+        "recovery_epoch": recognition_recheck.epoch(case),
+    }, resource)
+    save_entity(session, contracts, homework.id, "check", {
+        "id": identifier,
+        "revision": 1,
+        "job_id": task.id,
+        "case_id": case.id,
+        "input_versions": versions,
+        "model_version": None,
+        "rule_version": None,
+        "prompt_version": None,
+        "decision_ids": [],
+        "created_at": iso(),
+    })
+    update_case(session, contracts, case,
+                check_ids=case.document["check_ids"] + [identifier],
+                progress="rechecking")
+    return accepted
 
 
 def install_correction(app, engine, cfg, database_session, current_actor):
@@ -37,12 +115,20 @@ def install_correction(app, engine, cfg, database_session, current_actor):
 
     def authorize(session, actor, homework_id, *, lock=False):
         query = select(Homework).where(Homework.id == homework_id, Homework.tenant_id == actor.tenant_id)
-        if lock:
-            query = query.with_for_update()
         homework = session.scalar(query.execution_options(populate_existing=True))
         if homework is None:
             raise Problem(404, "not_found", "not_found", "资源不存在或不可访问。")
         require_student(session, actor, homework.student_id)
+        if lock:
+            from .student_locks import lock_student
+            student_id = homework.student_id
+            lock_student(session, student_id, tenant_id=actor.tenant_id)
+            homework = session.scalar(query.with_for_update().execution_options(populate_existing=True))
+            if homework is None or homework.student_id != student_id:
+                raise Problem(404, "not_found", "not_found", "资源不存在或不可访问。")
+            # Deletion/access may have changed while this transaction waited
+            # for the student. The initial read only located its lock scope.
+            require_student(session, actor, student_id)
         if homework.processing_blocked:
             raise Problem(409, "conflict", "processing_blocked", "该作业已停止处理。")
         return homework
@@ -92,17 +178,17 @@ def install_correction(app, engine, cfg, database_session, current_actor):
                     raise Problem(404, "not_found", "not_found", "该历史版本不存在。")
                 document = snapshot.document
             if wrapper:
-                effective = document.get("revision") == row.revision and row.document.get("lifecycle", "active") == "active" and row.document.get("validity") not in {"stale", "retracted"}
-                if resource in {"attempt", "decision"}:
-                    case = get_entity(session, document["case_id"], "case")
-                    effective = effective and case.document["lifecycle"] == "active"
-                    if resource == "attempt":
-                        effective = effective and case.document["current_attempt_id"] == row.id
-                    else:
-                        effective = effective and (case.document["current_decision"] or {}).get("id") == row.id
-                document = {"record": document, "current_revision": row.revision, "currently_effective": effective}
+                case = get_entity(session, document["case_id"], "case") if resource in {"attempt", "decision"} else None
+                document = public_entity_read(row, resource, document=document, case=case, current=revision is None)
             return checked(schema, document)
         app.add_api_route(path, endpoint, methods=["GET"], operation_id=operation)
+
+    @app.get("/v1/jobs/{job_id}/recognition-progress")
+    def recognition_progress(job_id: str, actor: ActorDep, session: SessionDep):
+        from .recognition_checkpoint import public_progress
+        task, homework = locate(session, actor, job_id, "job")
+        # Independent, white-listed DTO: raw Task.audit is never public.
+        return public_progress(session, task, homework)
 
     def base_url():
         parts = urlsplit(cfg.public_base_url)
@@ -267,18 +353,12 @@ def install_correction(app, engine, cfg, database_session, current_actor):
         return question, attempt, assets, input_versions(case, question, attempt, assets)
 
     def check(session, actor, homework, case, payload):
-        question, attempt, assets, versions = context(session, homework, case, payload)
-        for task in session.scalars(select(Task).where(Task.homework_id == homework.id, Task.kind == "check", Task.status.in_(["queued", "running", "retryable_failed"]))):
-            if task.inputs.get("case_id") == case.id and task.inputs.get("input_versions", {}).get("fingerprint") == versions["fingerprint"]:
-                conflict(case.revision, "check_already_started")
-        identifier = new_id("check")
-        task, accepted = create_task(session, contracts, homework, "check", {"case_id": case.id, "check_id": identifier, "input_versions": versions, "asset_ids": [a.id for a in assets], "decision_id_at_submission": (case.document["current_decision"] or {}).get("id")}, {"resource_type": "check", "resource_id": identifier})
-        save_entity(session, contracts, homework.id, "check", {"id": identifier, "revision": 1, "job_id": task.id, "case_id": case.id, "input_versions": versions, "model_version": None, "rule_version": None, "prompt_version": None, "decision_ids": [], "created_at": iso()})
-        update_case(session, contracts, case, check_ids=case.document["check_ids"] + [identifier], progress="rechecking")
-        return accepted
+        question, attempt, assets, _ = context(session, homework, case, payload)
+        return enqueue_check_task(session, contracts, homework, case, question, attempt, assets=assets)
 
     def hint(session, actor, homework, case, payload):
         active_case(case)
+        recognition_recheck.assert_no_active(session, case)
         source = case.document["current_decision"]
         if source is None or source["id"] != payload["source_decision_id"] or source["revision"] != payload["source_decision_revision"] or source["validity"] not in {"candidate", "needs_review", "confirmed"} or payload["attempt_id"] != case.document["current_attempt_id"]:
             conflict(case.revision, "hint_source_stale")
@@ -290,9 +370,9 @@ def install_correction(app, engine, cfg, database_session, current_actor):
         tasks = session.scalars(select(Task).where(Task.homework_id == homework.id, Task.kind == "hint", Task.status.in_(["queued", "running", "retryable_failed", "succeeded"])))
         for task in tasks:
             inputs = task.inputs
-            if inputs.get("case_id") == case.id and inputs.get("source_decision_id") == source["id"] and inputs.get("source_decision_revision") == source["revision"] and inputs.get("level") == payload["level"] and inputs.get("input_versions", {}).get("fingerprint") == versions["fingerprint"]:
+            if inputs.get("case_id") == case.id and inputs.get("recovery_epoch", 0) == recognition_recheck.epoch(case) and inputs.get("source_decision_id") == source["id"] and inputs.get("source_decision_revision") == source["revision"] and inputs.get("level") == payload["level"] and inputs.get("input_versions", {}).get("fingerprint") == versions["fingerprint"]:
                 return {"job": task.document, "created_resource": task.document["result"]}
-        _, accepted = create_task(session, contracts, homework, "hint", {"case_id": case.id, "input_versions": versions, "asset_ids": ids, "source_decision_id": source["id"], "source_decision_revision": source["revision"], "level": payload["level"]})
+        _, accepted = create_task(session, contracts, homework, "hint", {"case_id": case.id, "input_versions": versions, "asset_ids": ids, "source_decision_id": source["id"], "source_decision_revision": source["revision"], "level": payload["level"], "recovery_epoch": recognition_recheck.epoch(case)})
         update_case(session, contracts, case)
         return accepted
 
@@ -342,7 +422,7 @@ def install_correction(app, engine, cfg, database_session, current_actor):
         invalidate(session, contracts, case, "staff_review")
         new_decision = None
         if payload["action"] in {"confirm", "replace", "manual_initial"}:
-            new_decision = {"id": new_id("decision"), "revision": 1, "case_id": case.id, "check_id": None, "input_versions": versions, "origin": "staff", "validity": "confirmed", "verdict": payload["verdict"], "reason_code": None, "basis": payload["basis"], "first_error_region": None, "confirmation_source": "staff_review", "confirmed_by": actor.id, "confirmed_at": iso(), "replaces_decision_id": current["id"] if current else None, "invalidated_by_event_id": None, "created_at": iso()}
+            new_decision = {"id": new_id("decision"), "revision": 1, "case_id": case.id, "check_id": None, "input_versions": versions, "origin": "staff", "validity": "confirmed", "verdict": payload["verdict"], "reason_code": None, "basis": payload["basis"], "knowledge_points": list(current.get("knowledge_points", [])) if current else [], "correction_method": current.get("correction_method") if current else None, "correct_answer": current.get("correct_answer") if current else None, "uncertainties": list(current.get("uncertainties", [])) if current else [], "first_error_region": None, "confirmation_source": "staff_review", "confirmed_by": actor.id, "confirmed_at": iso(), "replaces_decision_id": current["id"] if current else None, "invalidated_by_event_id": None, "created_at": iso()}
             save_entity(session, contracts, homework.id, "decision", new_decision)
         doc = {"id": new_id("review"), "case_id": case.id, "target_decision_id": payload["target_decision_id"], "target_decision_revision": payload["target_decision_revision"], "action": payload["action"], "new_decision_id": new_decision["id"] if new_decision else None, "reason": payload["reason"], "reviewer_id": actor.id, "created_at": iso()}
         save_entity(session, contracts, homework.id, "review", doc)
@@ -371,7 +451,7 @@ def install_correction(app, engine, cfg, database_session, current_actor):
         validate_regions(session, homework, payload["answer_regions"])
         if any(r["asset_id"] not in attempt.document["asset_ids"] for r in payload["answer_regions"]):
             raise Problem(422, "validation", "invalid_region", "答案区域必须属于该次作答图片。")
-        doc = {**attempt.document, "revision": attempt.revision + 1, "recognition_revision": attempt.document["recognition_revision"] + 1, "answer_text": payload["answer_text"], "answer_regions": payload["answer_regions"], "recognition_status": "ready"}
+        doc = {**attempt.document, "revision": attempt.revision + 1, "recognition_revision": attempt.document["recognition_revision"] + 1, "answer_text": payload["answer_text"], "answer_regions": payload["answer_regions"], "answer_status": "present" if payload["answer_text"] else "unclear", "recognition_uncertainties": [], "recognition_status": "ready"}
         save_entity(session, contracts, homework.id, "attempt", doc, row=attempt)
         attempt.annotations = {"answer_status": "present" if payload["answer_text"] else "unclear"}
         case = get_entity(session, attempt.document["case_id"], "case")
@@ -437,6 +517,16 @@ def install_correction(app, engine, cfg, database_session, current_actor):
     mutate("/v1/assets/{asset_id}/complete", "completeUpload", "asset", "CompleteUpload", "ImageAsset", complete)
     mutate("/v1/homeworks/{homework_id}/recognitions", "startRecognition", "homework", "StartRecognition", "Accepted", recognize, 202)
     mutate("/v1/cases/{case_id}/checks", "startCheck", "case", "StartCheck", "Accepted", check, 202)
+    def recheck_original(session, actor, homework, case, payload):
+        return recognition_recheck.accept(session, contracts, homework, case, payload)
+
+    mutate("/v1/cases/{case_id}/recognition-rechecks", "startRecognitionRecheck", "case",
+           "StartRecognitionRecheck", "RecognitionRecheckAccepted", recheck_original, 202)
+
+    @app.get("/v1/cases/{case_id}/recognition-rechecks/status", operation_id="getRecognitionRecheckStatus")
+    def recheck_status(case_id: str, actor: ActorDep, session: SessionDep):
+        case, _ = locate(session, actor, case_id, "case")
+        return checked("RecognitionRecoveryStatus", recognition_recheck.status(session, case))
     mutate("/v1/cases/{case_id}/hints", "requestHint", "case", "RequestHint", "Accepted", hint, 202)
     mutate("/v1/cases/{case_id}/attempts", "createCorrection", "case", "CreateCorrection", "Accepted", correction, 202)
     mutate("/v1/hints/{hint_id}/views", "recordHintView", "hint", "ShowHint", "Hint", show_hint)

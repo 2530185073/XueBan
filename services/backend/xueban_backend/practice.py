@@ -1,16 +1,18 @@
-"""Voluntary practice: one-step variants and next-lesson preview with an optional mini quiz.
+"""Student practice: one-step variants and next-lesson preview with an optional mini quiz.
 
 Extra work defaults to zero. The server starts an activity only when school
 tasks are complete (photographed homework all resolved, or a staff
 confirmation), staff observed capacity and opened an extra-minute budget for
-today, and the child says yes for this activity. Unknown counts as not met and
-everything is re-checked at start. Leaving early or never starting creates no
-debt. Items come from a reviewed bank tagged by knowledge point; the model only
-drafts candidates. Answers are rule-graded and kept apart from knowledge state,
-so taking part can never make a child look weaker.
+today, and the child says yes for this activity. A student launched directly
+from an AI-identified mistake can start its variant immediately. Unknown counts
+as not met and everything is re-checked at start. Leaving early or never
+starting creates no debt. Items come from a reviewed bank tagged by knowledge
+point; answers are rule-graded and kept apart from knowledge state, so taking
+part can never make a child look weaker.
 """
 from datetime import datetime, timedelta, timezone
 from fractions import Fraction
+import hashlib
 import json
 import re
 from typing import Annotated, Literal
@@ -18,19 +20,25 @@ import unicodedata
 from uuid import uuid4
 
 from fastapi import Depends
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from .auth import Actor
 from .correction_models import Entity
+from .curriculum_catalog import canonical_subject, curriculum_matches_scope, graph_is_usable, scope_for_profile
 from .device_auth import utc
 from .errors import Problem
 from .governance import register_downstream_purger
-from .learning_models import (KnowledgeEdge, KnowledgeNode, LearningOutbox, OptionalWindow, PracticeItem, PracticeResponse, PracticeSession,
-                              StudentKnowledgeState, StudentLearningProfile)
+from .learning_models import (CurriculumGraph, KnowledgeEdge, KnowledgeNode, LearningOutbox, LearningProjection, OptionalWindow,
+                              PracticeItem, PracticeResponse, PracticeSession, QuestionKnowledgeLink, StudentKnowledgeState,
+                              StudentLearningProfile, VariantGeneration, PracticeAssessment)
 from .correction_core import remember_idempotent, replay_idempotent
-from .learning_projection import OptionalKey, enqueue, new_id, register_job_handler, require_published_graph
+from .learning_mapping import _current_links, _match_node, auto_confirm_model_links
+from .learning_rules import RULE_VERSION, model_decision_usable
+from .learning_projection import (OptionalKey, enqueue, fingerprints, new_id, project_student, register_job_handler,
+                                   published_graph, require_published_graph)
 from .learning_reports import SHANGHAI, local_day, register_report_section
 from .models import Homework, Student
 from .providers.prompts import Role
@@ -39,7 +47,7 @@ MAX_ITEMS = 3
 NEEDS_PRACTICE = ("needs_help_now", "consolidating")
 BANK_JOB_STUDENT = "tenant-bank"
 GENERATE_INSTRUCTIONS = (
-    "为托管班初中数学出少量同知识点练习题候选，供老师审核后使用。题目必须只考查 knowledge 中给出的知识点，符合人教版初中难度，"
+    "为托管班出少量同知识点练习题候选，供老师审核后使用。题目必须只考查 knowledge 中给出的知识点，符合 curriculum 的教材与年级范围，"
     "题干自足、答案唯一。answer_kind 为 number 时 answer_values 写最简数值（分数写成 a/b）；choice 时题干内含 A-D 选项，"
     "answer_values 写正确选项字母；text 时写可接受的最简答案。solution_text 写简洁步骤，hint_text 只指方向不给答案。"
     "source_question 仅作题型参考，不要照抄数字，也不得包含任何学生信息。")
@@ -85,8 +93,13 @@ def grade(item: PracticeItem, answer: str) -> str:
 
 
 def item_dict(item: PracticeItem, *, staff=False):
-    body = {"id": item.id, "knowledge_id": item.knowledge_id, "stem_text": item.stem_text, "answer_kind": item.answer_kind,
+    body = {"id": item.id, "knowledge_id": item.knowledge_id, "graph_version": item.graph_version,
+            "stem_text": item.stem_text, "answer_kind": item.answer_kind,
             "difficulty": item.difficulty}
+    if item.question_kind:
+        body.update({"question_type": item.question_type, "question_kind": item.question_kind,
+                     "options": item.options or [], "answer_fields": item.answer_fields or [],
+                     "verification": item.verification})
     if staff:
         body.update({"item_family_id": item.item_family_id, "answer_values": item.answer_values, "hint_text": item.hint_text,
                      "solution_text": item.solution_text, "source": item.source, "status": item.status, "revision": item.revision,
@@ -150,24 +163,52 @@ def gate_status(session, student_id, at=None):
             "checked_at": at.isoformat()}
 
 
-def _names(session):
-    graph = require_published_graph(session)
+def _graph_by_version(session, graph_version):
+    graph = session.get(CurriculumGraph, graph_version) if graph_version else None
+    if graph is None or graph.status != "published" or (graph.book_identity and not graph_is_usable(graph)):
+        raise Problem(422, "validation", "invalid_request", "请选择已发布且可用的教材图谱版本。")
+    return graph
+
+
+def _names(session, student_id=None, *, graph_version=None):
+    graph = _graph_by_version(session, graph_version) if graph_version else require_published_graph(session, student_id)
     return {n.id: n for n in session.scalars(select(KnowledgeNode).where(KnowledgeNode.graph_version == graph.version))}
 
 
 def _states(session, student_id):
+    graph = require_published_graph(session, student_id)
+    projection = session.get(LearningProjection, student_id)
+    expected = fingerprints(session, [student_id]).get(student_id)
+    if expected and (projection is None or projection.source_fingerprint != expected):
+        return {}
     return {r.knowledge_id: r.document for r in session.scalars(select(StudentKnowledgeState)
-                                                                .where(StudentKnowledgeState.student_id == student_id))}
+                  .where(StudentKnowledgeState.student_id == student_id, StudentKnowledgeState.graph_version == graph.version,
+                         StudentKnowledgeState.rule_version == RULE_VERSION))}
 
 
-def pick_items(session, tenant_id, student_id, knowledge_ids, count):
+def _source_matches_graph(session, student_id, homework, question, graph):
+    profile = session.get(StudentLearningProfile, student_id)
+    curriculum = homework.curriculum if homework else {}
+    subject = canonical_subject((question.document.get("subject") if question else None)
+                                or curriculum.get("subject") or graph.subject)
+    scope = scope_for_profile(profile.document if profile else {}, subject)
+    return bool(scope and curriculum_matches_scope(curriculum, scope)
+                and (scope.graph_version is None or scope.graph_version == graph.version))
+
+
+def pick_items(session, tenant_id, student_id, knowledge_ids, count, source_stem=None):
     """Unseen reviewed items first, one per family, easier first; never repeat within a session."""
     seen = set(session.scalars(select(PracticeResponse.item_id).where(PracticeResponse.student_id == student_id)))
+    graph = require_published_graph(session, student_id)
+    source_key = _normalize(source_stem) if source_stem else None
     pool = list(session.scalars(select(PracticeItem).where(PracticeItem.tenant_id == tenant_id, PracticeItem.status == "approved",
+                                                           PracticeItem.graph_version == graph.version,
                                                            PracticeItem.knowledge_id.in_(knowledge_ids))
                                 .order_by(PracticeItem.difficulty, PracticeItem.created_at, PracticeItem.id)))
     chosen, families = [], set()
     for item in sorted(pool, key=lambda i: (i.id in seen, knowledge_ids.index(i.knowledge_id), i.difficulty)):
+        if source_key and _normalize(item.stem_text) == source_key:
+            continue
         if item.item_family_id in families:
             continue
         chosen.append(item)
@@ -177,9 +218,110 @@ def pick_items(session, tenant_id, student_id, knowledge_ids, count):
     return chosen
 
 
-def preview_targets(session, student_id, knowledge_ids):
-    names, states = _names(session), _states(session, student_id)
-    graph = require_published_graph(session)
+def _variant_error_overview(session, student, gate):
+    """Build student-facing clusters from the current AI verdicts.
+
+    This view is intentionally independent of the teacher review queue. A
+    wrong or partially correct AI result is useful for practice immediately;
+    topics that do not match the published graph are kept in a visible
+    fallback cluster instead of disappearing from the page.
+    """
+    graph = require_published_graph(session, student.id)
+    nodes = {node.id: node for node in session.scalars(select(KnowledgeNode).where(
+        KnowledgeNode.graph_version == graph.version, KnowledgeNode.node_type.in_(('concept', 'skill'))))}
+    node_list = list(nodes.values())
+    states = _states(session, student.id)
+    projection = session.get(LearningProjection, student.id)
+    expected = fingerprints(session, [student.id]).get(student.id)
+    homework_ids = select(Homework.id).where(Homework.student_id == student.id, Homework.processing_blocked.is_(False))
+    rows = []
+    uncertain_count = 0
+    for case in session.scalars(select(Entity).where(Entity.homework_id.in_(homework_ids), Entity.kind == "case")):
+        decision = case.document.get("current_decision") or {}
+        verdict = decision.get("verdict")
+        if case.document.get("lifecycle", "active") != "active":
+            continue
+        if (decision.get("validity") not in {"candidate", "confirmed"}
+                or (decision.get("origin") == "model" and not model_decision_usable(decision))):
+            uncertain_count += 1
+            continue
+        if verdict == "unable_to_judge":
+            uncertain_count += 1
+            continue
+        if verdict not in ("incorrect", "partially_correct") or case.document.get("lifecycle", "active") != "active":
+            continue
+        question = session.get(Entity, case.document.get("question_id"))
+        homework = session.get(Homework, case.homework_id)
+        attempt = session.get(Entity, case.document.get("current_attempt_id"))
+        occurred_at = (attempt.document.get("occurred_at") if attempt else None) or (iso(homework.occurred_at) if homework else None)
+        labels = [value.strip() for value in decision.get("knowledge_points", [])
+                  if isinstance(value, str) and value.strip()]
+        current_links = _current_links(session, case.document.get("question_id"))
+        links = sorted((link for link in current_links.values() if link.status == "confirmed"),
+                       key=lambda link: (link.created_at, link.id), reverse=True)
+        rejected = {link.knowledge_id for link in current_links.values() if link.status == "rejected"}
+        scope_matches = _source_matches_graph(session, student.id, homework, question, graph)
+        primary_link = next((link for link in links if scope_matches and link.role == "primary" and link.knowledge_id in nodes), None)
+        node = nodes.get(primary_link.knowledge_id) if primary_link else next(
+            (candidate for label in labels if scope_matches and graph_is_usable(graph) and (candidate := _match_node(label, node_list))
+             and candidate.id not in rejected), None)
+        topic = labels[0] if labels else ((question.document.get("question_type") or "未标注题型") if question else "未标注题型")
+        if node is None:
+            key = ("auto-topic-" if scope_matches else "history-topic-") + hashlib.sha256(topic.encode("utf-8")).hexdigest()[:16]
+            name = f"{'待匹配题型' if scope_matches else '历史教材题目'} · {topic[:24]}"
+        else:
+            key, name = node.id, node.name
+        rows.append((key, name, node, case, decision, question, homework, occurred_at, scope_matches))
+
+    # One card represents one original wrong question even if a rebuild left
+    # more than one historical evidence row for it.
+    groups = {}
+    for knowledge_id, name, node, case, decision, question, homework, occurred_at, scope_matches in sorted(
+            rows, key=lambda item: (item[7] or "", item[3].id), reverse=True):
+        group = groups.setdefault(knowledge_id, {"knowledge_id": knowledge_id, "name": name,
+                                                   "learning_status": states.get(knowledge_id, {}).get("learning_status", "needs_help_now"),
+                                                   "error_count": 0, "source_case_id": case.id, "questions": [],
+                                                   "available_items": 0, "graph_version": graph.version if node else None,
+                                                   "curriculum_status": "current" if scope_matches else "historical_unmatched"})
+        if any(item["case_id"] == case.id for item in group["questions"]):
+            continue
+        group["error_count"] += 1
+        group["questions"].append({
+            "case_id": case.id, "question_id": case.document.get("question_id"),
+            "question_text": (question.document.get("stem_text") or "")[:240] if question else None,
+            "homework_title": homework.title if homework else None,
+            "occurred_at": occurred_at,
+            "correct_answer": decision.get("correct_answer"),
+            "correction_method": decision.get("correction_method"),
+            "source_curriculum": homework.curriculum if homework else None,
+            "curriculum_status": "current" if scope_matches else "historical_unmatched",
+        })
+
+    approved_items = list(session.scalars(select(PracticeItem).where(
+        PracticeItem.tenant_id == student.tenant_id, PracticeItem.status == "approved", PracticeItem.graph_version == graph.version)))
+    for group in groups.values():
+        group["source_case_id"] = group["questions"][0]["case_id"]
+        source_key = _normalize(group["questions"][0]["question_text"] or "")
+        group["available_items"] = sum(1 for item in approved_items
+                                       if item.knowledge_id == group["knowledge_id"] and _normalize(item.stem_text) != source_key)
+
+    return {"student_id": student.id,
+            "projection": {"pending": bool(expected) and (projection is None or projection.source_fingerprint != expected),
+                           "projected_at": projection.projected_at.isoformat() if projection else None},
+            "gate": {"open": gate["open"], "reasons": gate["reasons"], "remaining_minutes": gate["remaining_minutes"]},
+            "groups": sorted(groups.values(), key=lambda item: (-item["error_count"], item["name"])),
+            "pending_count": uncertain_count,
+            "notice": "错题按 AI 本次判定归纳；当前教材范围内的可靠关联用于练习。旧教材题目保留原始来源，不会自动归入新教材。"}
+
+
+def preview_targets(session, student_id, knowledge_ids, *, graph_version):
+    # Historical sessions render their own graph, never today's selected book.
+    graph = session.get(CurriculumGraph, graph_version) if graph_version else None
+    if graph is None:
+        return []
+    names = {n.id: n for n in session.scalars(select(KnowledgeNode).where(KnowledgeNode.graph_version == graph.version))}
+    current_graph = published_graph(session, student_id)
+    states = _states(session, student_id) if current_graph and current_graph.version == graph.version else {}
     edges = list(session.scalars(select(KnowledgeEdge).where(KnowledgeEdge.graph_version == graph.version,
                                                              KnowledgeEdge.relation_type == "prerequisite_of",
                                                              KnowledgeEdge.to_id.in_(knowledge_ids))))
@@ -196,23 +338,37 @@ def preview_targets(session, student_id, knowledge_ids):
 
 
 def session_dict(session, row: PracticeSession, *, staff=False):
-    items = {i.id: i for i in session.scalars(select(PracticeItem).where(PracticeItem.id.in_(row.item_ids)))}
+    items = {i.id: i for i in session.scalars(select(PracticeItem).where(
+        PracticeItem.id.in_(row.item_ids), PracticeItem.tenant_id == row.tenant_id,
+        PracticeItem.graph_version == row.graph_version))}
     responses = {r.item_id: r for r in session.scalars(select(PracticeResponse).where(PracticeResponse.session_id == row.id))}
+    assessments = {}
+    for assessment in session.scalars(select(PracticeAssessment).where(PracticeAssessment.session_id == row.id)
+                                     .order_by(PracticeAssessment.created_at, PracticeAssessment.id)):
+        assessments[assessment.item_id] = assessment
     entries = []
     for item_id in row.item_ids:
+        if item_id not in items:
+            raise Problem(409, "conflict", "revision_conflict", "历史练习的题目与教材版本不一致，请核对原始记录。")
         item, response = items[item_id], responses.get(item_id)
         entry = {**item_dict(item, staff=staff), "has_hint": bool(item.hint_text) and row.purpose == "variant"}
+        if item_id in assessments:
+            from .practice_generation import assessment_dict
+            entry["assessment"] = assessment_dict(session, assessments[item_id])
         if response:
-            entry["response"] = {"answer_text": response.answer_text, "result": response.result, "hint_used": response.hint_used}
+            entry["response"] = {"answer_text": response.answer_text, "result": response.result, "hint_used": response.hint_used,
+                                 **({k: v for k, v in response.details.items() if k in ("selected_options", "answers", "feedback")}
+                                    if response.details else {})}
             entry["solution_text"] = item.solution_text
         entries.append(entry)
     body = {"id": row.id, "student_id": row.student_id, "purpose": row.purpose, "knowledge_ids": row.knowledge_ids,
+            "graph_version": row.graph_version,
             "status": row.status, "exit_reason": row.exit_reason, "items": entries, "started_at": iso(row.started_at),
             "budget_ends_at": iso(row.budget_ends_at), "ended_at": iso(row.ended_at),
             "hints_allowed": row.purpose == "variant",
             "notice": "这是自愿活动，可以随时结束；不做或中途结束都不会记欠账，也不影响知识地图。"}
     if row.purpose == "preview":
-        body["targets"] = preview_targets(session, row.student_id, row.knowledge_ids)
+        body["targets"] = preview_targets(session, row.student_id, row.knowledge_ids, graph_version=row.graph_version)
     if staff:
         body["gate"] = row.gate
     return body
@@ -242,8 +398,9 @@ def optional_section(session, student, window_start, window_end):
 
 @register_downstream_purger
 def purge_practice(session, tenant_id, student_id):
-    for model in (PracticeResponse, PracticeSession, OptionalWindow):
+    for model in (PracticeAssessment, PracticeResponse, PracticeSession, VariantGeneration, OptionalWindow):
         session.execute(delete(model).where(model.student_id == student_id, model.tenant_id == tenant_id))
+    session.execute(delete(PracticeItem).where(PracticeItem.owner_student_id == student_id, PracticeItem.tenant_id == tenant_id))
 
 
 def generation_schema():
@@ -258,24 +415,33 @@ def generation_schema():
 
 @register_job_handler("generate_practice")
 def generate_practice(session, job, worker):
+    graph_version = job.payload.get("graph_version")
+    if not graph_version:
+        return {"status": "graph_version_missing"}
+    try:
+        graph = _graph_by_version(session, graph_version)
+    except Problem:
+        return {"status": "graph_unavailable"}
     client = worker.client
     if client is None or not client.settings.enabled:
         return {"status": "provider_disabled"}
-    node = _names(session).get(job.payload["knowledge_id"])
+    node = _names(session, graph_version=graph.version).get(job.payload["knowledge_id"])
     if node is None:
         return {"status": "unknown_knowledge"}
-    text = json.dumps({"knowledge": {"id": node.id, "name": node.name, "objective": node.observable_objective},
+    text = json.dumps({"curriculum": {"graph_version": graph.version, "title": graph.title, "book_identity": graph.book_identity},
+                       "knowledge": {"id": node.id, "name": node.name, "objective": node.observable_objective},
                        "count": job.payload["count"], "source_question": job.payload.get("source_question")}, ensure_ascii=False)
     result = client.generate(role=Role.KNOWLEDGE_EXTRACT, text=text, output_schema=generation_schema(), thinking=True,
                              max_tokens=3072, instructions=GENERATE_INSTRUCTIONS)
     stamp = now()
     family = f"family_{uuid4().hex[:16]}"
     for index, item in enumerate(result.data["items"][:job.payload["count"]]):
-        session.add(PracticeItem(id=new_id("item"), tenant_id=job.tenant_id, knowledge_id=node.id,
+        session.add(PracticeItem(id=new_id("item"), tenant_id=job.tenant_id, knowledge_id=node.id, graph_version=graph.version,
                                  item_family_id=f"{family}_{index}", stem_text=item["stem_text"], answer_kind=item["answer_kind"],
                                  answer_values=item["answer_values"], hint_text=item["hint_text"],
                                  solution_text=item["solution_text"], difficulty=item["difficulty"], source="model",
-                                 status="candidate", generation={"model": result.metadata.model, "job_id": job.id},
+                                 status="candidate", generation={"model": result.metadata.model, "job_id": job.id,
+                                                                 "graph_version": graph.version},
                                  created_by=job.payload.get("requested_by"), revision=1, created_at=stamp, updated_at=stamp))
     return {"status": "proposed"}
 
@@ -286,6 +452,8 @@ class Strict(BaseModel):
 
 class ItemInput(Strict):
     knowledge_id: str = Field(pattern=r"^[a-z][a-z0-9_-]{2,63}$")
+    graph_version: str | None = Field(default=None, min_length=1, max_length=64)
+    student_id: str | None = Field(default=None, min_length=1, max_length=64)
     item_family_id: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_-]{2,63}$")
     stem_text: str = Field(min_length=2, max_length=600)
     answer_kind: Literal["number", "choice", "text"]
@@ -311,6 +479,8 @@ class ReviewInput(Strict):
 
 class GenerateInput(Strict):
     knowledge_id: str = Field(pattern=r"^[a-z][a-z0-9_-]{2,63}$")
+    graph_version: str | None = Field(default=None, min_length=1, max_length=64)
+    student_id: str | None = Field(default=None, min_length=1, max_length=64)
     count: int = Field(default=3, ge=1, le=5)
     source_case_id: str | None = Field(default=None, max_length=64)
 
@@ -329,17 +499,33 @@ class StartInput(Strict):
     source_case_id: str | None = Field(default=None, max_length=64)
     count: int = Field(default=2, ge=1, le=MAX_ITEMS)
     with_quiz: bool = False
+    generation_job_id: str | None = Field(default=None, max_length=64)
 
     @model_validator(mode="after")
     def check(self):
-        if self.purpose == "variant" and not self.knowledge_id:
+        if self.generation_job_id and (self.purpose != "variant" or self.with_quiz):
+            raise ValueError("generated items are one voluntary variant")
+        if self.purpose == "variant" and not (self.knowledge_id or self.generation_job_id):
             raise ValueError("variant practice needs knowledge_id")
         return self
 
 
+class FieldAnswerInput(Strict):
+    field_id: str = Field(min_length=1, max_length=40)
+    answer_text: str = Field(min_length=1, max_length=4000)
+
+
 class AnswerInput(Strict):
     item_id: str = Field(max_length=64)
-    answer_text: str = Field(min_length=1, max_length=200)
+    answer_text: str | None = Field(default=None, min_length=1, max_length=4000)
+    selected_options: list[Annotated[str, Field(min_length=1, max_length=8)]] | None = Field(default=None, max_length=10)
+    answers: list[FieldAnswerInput] | None = Field(default=None, max_length=12)
+
+    @model_validator(mode="after")
+    def check_answer(self):
+        if not (self.answer_text or self.selected_options or self.answers):
+            raise ValueError("an answer is required")
+        return self
 
 
 class ExitInput(Strict):
@@ -361,6 +547,8 @@ def install_practice(app, engine, cfg, database_session, current_actor):
         item = session.scalar(query.with_for_update() if lock else query)
         if item is None:
             raise Problem(404, "not_found", "not_found", "资源不存在或不可访问。")
+        if item.owner_student_id:
+            require_student(session, actor, item.owner_student_id)
         return item
 
     def load_session(session, actor, session_id, lock=False):
@@ -371,10 +559,23 @@ def install_practice(app, engine, cfg, database_session, current_actor):
         require_student(session, actor, row.student_id)
         return row
 
+    def bank_graph(session, actor, graph_version=None, student_id=None):
+        if student_id:
+            require_student(session, actor, student_id)
+            graph = require_published_graph(session, student_id)
+            if graph_version and graph_version != graph.version:
+                raise Problem(409, "conflict", "revision_conflict", "学生教材已变化，请刷新后选择当前图谱。")
+            return graph
+        return _graph_by_version(session, graph_version) if graph_version else require_published_graph(session)
+
     @app.get("/v1/practice-items", operation_id="listPracticeItems")
-    def list_items(actor: ActorDep, session: SessionDep, knowledge_id: str | None = None, status: str = "candidate"):
+    def list_items(actor: ActorDep, session: SessionDep, knowledge_id: str | None = None, status: str = "candidate",
+                   graph_version: str | None = None, student_id: str | None = None):
         require_staff(actor)
-        query = select(PracticeItem).where(PracticeItem.tenant_id == actor.tenant_id, PracticeItem.status == status)
+        graph = bank_graph(session, actor, graph_version, student_id)
+        query = select(PracticeItem).where(PracticeItem.tenant_id == actor.tenant_id, PracticeItem.status == status,
+                                           PracticeItem.graph_version == graph.version)
+        query = query.where((PracticeItem.owner_student_id.is_(None)) | (PracticeItem.owner_student_id == student_id))
         if knowledge_id:
             query = query.where(PracticeItem.knowledge_id == knowledge_id)
         rows = session.scalars(query.order_by(PracticeItem.knowledge_id, PracticeItem.created_at).limit(200))
@@ -383,12 +584,14 @@ def install_practice(app, engine, cfg, database_session, current_actor):
     @app.post("/v1/practice-items", status_code=201, operation_id="createPracticeItem")
     def create_item(payload: ItemInput, actor: ActorDep, session: SessionDep):
         require_staff(actor)
-        node = _names(session).get(payload.knowledge_id)
+        graph = bank_graph(session, actor, payload.graph_version, payload.student_id)
+        node = _names(session, graph_version=graph.version).get(payload.knowledge_id)
         if node is None or node.node_type not in ("concept", "skill"):
             raise Problem(422, "validation", "invalid_request", "题目只能关联已发布的具体知识点。")
         stamp = now()
         item = PracticeItem(id=new_id("item"), tenant_id=actor.tenant_id, item_family_id=payload.item_family_id or f"family_{uuid4().hex[:16]}",
-                            **payload.model_dump(exclude={"item_family_id"}), source="staff", status="approved", created_by=actor.id,
+                            **payload.model_dump(exclude={"item_family_id", "graph_version", "student_id"}),
+                            graph_version=graph.version, source="staff", status="approved", created_by=actor.id,
                             reviewed_by=actor.id, reviewed_at=stamp, revision=1, created_at=stamp, updated_at=stamp)
         session.add(item)
         session.commit()
@@ -398,11 +601,15 @@ def install_practice(app, engine, cfg, database_session, current_actor):
     def review_item(item_id: str, payload: ReviewInput, actor: ActorDep, session: SessionDep):
         require_staff(actor)
         item = load_item(session, actor, item_id, lock=True)
+        if item.owner_student_id:
+            raise Problem(409, "conflict", "revision_conflict", "学员专属练习已绑定独立验题版本，不能作为共享题库直接改写。")
         if item.revision != payload.expected_revision:
             raise Problem(409, "conflict", "revision_conflict", "题目已被修改，请刷新后再审核。")
         allowed = {"approve": ("candidate",), "reject": ("candidate",), "retire": ("approved",)}[payload.action]
         if item.status not in allowed:
             raise Problem(409, "conflict", "revision_conflict", "题目当前状态不能执行该操作。")
+        if payload.action == "approve":
+            _graph_by_version(session, item.graph_version)
         if payload.edits:
             for field, value in payload.edits.model_dump(exclude_unset=True).items():
                 setattr(item, field, value)
@@ -415,23 +622,34 @@ def install_practice(app, engine, cfg, database_session, current_actor):
     @app.post("/v1/practice-items/generate", status_code=202, operation_id="generatePracticeItems")
     def generate(payload: GenerateInput, actor: ActorDep, session: SessionDep):
         require_staff(actor)
-        node = _names(session).get(payload.knowledge_id)
-        if node is None or node.node_type not in ("concept", "skill"):
-            raise Problem(422, "validation", "invalid_request", "只能为已发布的具体知识点生成候选。")
         source_question = None
+        source_homework, question = None, None
+        student_id = payload.student_id
         if payload.source_case_id:
             case = session.get(Entity, payload.source_case_id)
             if case is None or case.kind != "case":
                 raise Problem(404, "not_found", "not_found", "资源不存在或不可访问。")
-            require_student(session, actor, session.get(Homework, case.homework_id).student_id)
+            source_homework = session.get(Homework, case.homework_id)
+            require_student(session, actor, source_homework.student_id)
+            if student_id and student_id != source_homework.student_id:
+                raise Problem(404, "not_found", "not_found", "来源错题不存在或不可访问。")
+            student_id = source_homework.student_id
             question = session.scalar(select(Entity).where(Entity.kind == "question", Entity.homework_id == case.homework_id,
                                                            Entity.id == case.document["question_id"]))
             source_question = (question.document.get("stem_text") or "")[:400] if question else None
+        graph = bank_graph(session, actor, payload.graph_version, student_id)
+        node = _names(session, graph_version=graph.version).get(payload.knowledge_id)
+        if node is None or node.node_type not in ("concept", "skill"):
+            raise Problem(422, "validation", "invalid_request", "只能为已发布的具体知识点生成候选。")
+        if source_homework and not _source_matches_graph(session, student_id, source_homework, question, graph):
+            raise Problem(409, "conflict", "curriculum_mismatch", "来源错题属于其他教材范围，请先核实教材。")
         job_id = enqueue(session, actor.tenant_id, BANK_JOB_STUDENT, "generate_practice",
-                         {"knowledge_id": node.id, "count": payload.count, "source_question": source_question, "requested_by": actor.id},
-                         f"practice:{actor.tenant_id}:{node.id}")
+                         {"knowledge_id": node.id, "graph_version": graph.version, "count": payload.count,
+                          "source_question": source_question, "requested_by": actor.id},
+                         f"practice:{actor.tenant_id}:" + hashlib.sha256(f"{graph.version}:{node.id}".encode()).hexdigest())
         session.commit()
-        return {"job_id": job_id, "status": "queued", "notice": "模型只生成候选题，老师审核通过后学生才会看到。"}
+        return {"job_id": job_id, "graph_version": graph.version, "status": "queued",
+                "notice": "模型只生成候选题，老师审核通过后学生才会看到。"}
 
     @app.get("/v1/practice-generations/{job_id}", operation_id="getPracticeGeneration")
     def generation_status(job_id: str, actor: ActorDep, session: SessionDep):
@@ -441,13 +659,14 @@ def install_practice(app, engine, cfg, database_session, current_actor):
             raise Problem(404, "not_found", "not_found", "资源不存在或不可访问。")
         outcome = (job.payload.get("outcome") or {}).get("status")
         items = [i.id for i in session.scalars(select(PracticeItem).where(PracticeItem.tenant_id == job.tenant_id, PracticeItem.source == "model",
+                                                                          PracticeItem.graph_version == job.payload.get("graph_version"),
                                                                           PracticeItem.knowledge_id == job.payload["knowledge_id"]))
                  if (i.generation or {}).get("job_id") == job.id]
         status = {"queued": "queued", "running": "running", "dead": "failed"}.get(job.status)
         if status is None:
             status = "succeeded" if outcome in (None, "proposed") else "failed"
         return {"job_id": job.id, "status": status, "failure_code": None if status != "failed" else (outcome or job.last_error),
-                "knowledge_id": job.payload["knowledge_id"], "candidate_item_ids": items}
+                "knowledge_id": job.payload["knowledge_id"], "graph_version": job.payload.get("graph_version"), "candidate_item_ids": items}
 
     @app.put("/v1/students/{student_id}/optional-window", operation_id="setOptionalWindow")
     def set_window(student_id: str, payload: WindowInput, actor: ActorDep, session: SessionDep):
@@ -478,9 +697,11 @@ def install_practice(app, engine, cfg, database_session, current_actor):
                 "notice": "完成学校任务后可以休息或结束。额外活动完全自愿，不做也不会记欠账。"}
         if not gate["open"] and not is_staff(actor):
             return body
-        names, states = _names(session), _states(session, student_id)
+        names, states = _names(session, student_id), _states(session, student_id)
+        graph = require_published_graph(session, student_id)
         counts = dict(session.execute(select(PracticeItem.knowledge_id, func.count(PracticeItem.id))
-                                      .where(PracticeItem.tenant_id == student.tenant_id, PracticeItem.status == "approved")
+                                      .where(PracticeItem.tenant_id == student.tenant_id, PracticeItem.status == "approved",
+                                             PracticeItem.graph_version == graph.version)
                                       .group_by(PracticeItem.knowledge_id)).all())
         body["variants"] = [{"knowledge_id": k, "name": names[k].name, "learning_status": s["learning_status"],
                              "available_items": counts.get(k, 0)}
@@ -492,6 +713,17 @@ def install_practice(app, engine, cfg, database_session, current_actor):
                                "quiz_items_available": len(pick_items(session, student.tenant_id, student_id, current, MAX_ITEMS))}
         return body
 
+    @app.get("/v1/students/{student_id}/variant-practice", operation_id="getVariantPractice")
+    def variant_practice(student_id: str, actor: ActorDep, session: SessionDep):
+        """Return current AI mistake clusters for the student's practice page."""
+        student = require_student(session, actor, student_id)
+        # Existing jobs may have been completed before automatic graph linking
+        # was enabled. Backfill those links the first time this page is opened.
+        if auto_confirm_model_links(session, student.tenant_id, student.id):
+            project_student(session, student.tenant_id, student.id)
+            session.commit()
+        return _variant_error_overview(session, student, gate_status(session, student_id))
+
     @app.post("/v1/students/{student_id}/practice-sessions", status_code=201, operation_id="startPracticeSession")
     def start(student_id: str, payload: StartInput, actor: ActorDep, session: SessionDep, idempotency_key: OptionalKey = None):
         operation = f"POST /v1/students/{student_id}/practice-sessions"
@@ -501,6 +733,14 @@ def install_practice(app, engine, cfg, database_session, current_actor):
         session.scalar(select(Student).where(Student.id == student_id).with_for_update())
         if (replay := replay_idempotent(session, actor, student_id, operation, idempotency_key, payload.model_dump(mode="json"))) is not None:
             return replay
+        if payload.generation_job_id:
+            from .practice_generation import start_generated
+            result = start_generated(session, actor, student, payload.generation_job_id,
+                                     source_case_id=payload.source_case_id, knowledge_id=payload.knowledge_id)
+            result = remember_idempotent(session, actor, student_id, operation, idempotency_key,
+                                         payload.model_dump(mode="json"), result)
+            session.commit()
+            return result
         if session.scalar(select(PracticeSession.id).where(PracticeSession.student_id == student_id, PracticeSession.status == "active")):
             active = session.scalar(select(PracticeSession).where(PracticeSession.student_id == student_id, PracticeSession.status == "active"))
             _expire(active, now())
@@ -508,14 +748,46 @@ def install_practice(app, engine, cfg, database_session, current_actor):
                 raise Problem(409, "conflict", "practice_active", "已有进行中的活动，请先完成或结束。")
         at = now()
         gate = gate_status(session, student_id, at)
-        if not gate["open"]:
+        direct_variant = payload.purpose == "variant" and payload.source_case_id is not None
+        if not gate["open"] and not direct_variant:
             session.commit()
             raise Problem(409, "conflict", "optional_gate_closed", "现在还不能开始额外活动：需要学校任务已完成、老师确认有余力并开放时间。")
-        names = _names(session)
+        names = _names(session, student_id)
+        graph = require_published_graph(session, student_id)
+        if payload.purpose == "variant" and payload.knowledge_id not in names:
+            raise Problem(422, "validation", "invalid_request", "练习必须关联当前教材图谱的知识点。")
+        source_stem = None
+        source_case = None
+        if payload.source_case_id:
+            source_case = session.get(Entity, payload.source_case_id)
+            if source_case is None or source_case.kind != "case":
+                raise Problem(404, "not_found", "not_found", "来源错题不存在或不可访问。")
+            source_homework = session.get(Homework, source_case.homework_id)
+            if source_homework is None or source_homework.student_id != student_id:
+                raise Problem(404, "not_found", "not_found", "来源错题不存在或不可访问。")
+            source_question = session.get(Entity, source_case.document.get("question_id"))
+            source_stem = source_question.document.get("stem_text") if source_question else None
+            if not _source_matches_graph(session, student_id, source_homework, source_question, graph):
+                raise Problem(409, "conflict", "curriculum_mismatch", "这道历史错题不属于当前教材范围，不能自动用于新教材练习。")
         if payload.purpose == "variant":
-            state = _states(session, student_id).get(payload.knowledge_id)
-            if state is None or state["learning_status"] not in NEEDS_PRACTICE:
-                raise Problem(409, "conflict", "practice_not_needed", "这个知识点目前没有需要额外练习的依据。")
+            if source_case is not None:
+                source_decision = source_case.document.get("current_decision") or {}
+                source_links = list(_current_links(session, source_case.document["question_id"]).values())
+                confirmed_ids = {link.knowledge_id for link in source_links if link.status == "confirmed"}
+                rejected_ids = {link.knowledge_id for link in source_links if link.status == "rejected"}
+                matched_ids = {node.id for label in source_decision.get("knowledge_points", [])
+                               if isinstance(label, str) and (node := _match_node(label, list(names.values())))}
+                if (source_case.document.get("lifecycle", "active") != "active"
+                        or source_decision.get("validity") not in {"candidate", "confirmed"}
+                        or source_decision.get("verdict") not in ("incorrect", "partially_correct")
+                        or (source_decision.get("origin") == "model" and not model_decision_usable(source_decision))
+                        or payload.knowledge_id in rejected_ids
+                        or payload.knowledge_id not in (confirmed_ids | matched_ids)):
+                    raise Problem(409, "conflict", "practice_not_needed", "这道题当前没有可用于举一反三的错题判定。")
+            else:
+                state = _states(session, student_id).get(payload.knowledge_id)
+                if state is None or state["learning_status"] not in NEEDS_PRACTICE:
+                    raise Problem(409, "conflict", "practice_not_needed", "这个知识点目前没有需要额外练习的依据。")
             knowledge_ids, count = [payload.knowledge_id], payload.count
         else:
             profile = session.get(StudentLearningProfile, student_id)
@@ -523,14 +795,17 @@ def install_practice(app, engine, cfg, database_session, current_actor):
             if not knowledge_ids:
                 raise Problem(409, "conflict", "course_unknown", "还不知道下一课的内容，暂不提供预习。")
             count = MAX_ITEMS if payload.with_quiz else 0
-        items = pick_items(session, student.tenant_id, student_id, knowledge_ids, count) if count else []
+        items = pick_items(session, student.tenant_id, student_id, knowledge_ids, count, source_stem) if count else []
         if payload.purpose == "variant" and not items:
             raise Problem(409, "conflict", "no_reviewed_items", "这个知识点还没有老师审核过的练习题。")
         row = PracticeSession(id=new_id("practice"), tenant_id=student.tenant_id, student_id=student_id, purpose=payload.purpose,
+                              graph_version=graph.version,
                               knowledge_ids=knowledge_ids, source_case_id=payload.source_case_id, item_ids=[i.id for i in items],
                               hints_used=[], gate={**gate, "child_willing": {"value": True, "source": "student", "actor": actor.id,
-                                                                            "at": at.isoformat()}},
-                              status="active", started_at=at, budget_ends_at=at + timedelta(minutes=gate["remaining_minutes"]))
+                                                                            "at": at.isoformat()},
+                                     "direct_variant": direct_variant},
+                              status="active", started_at=at,
+                              budget_ends_at=at + timedelta(minutes=max(gate["remaining_minutes"], 10) if direct_variant else gate["remaining_minutes"]))
         session.add(row)
         session.flush()
         result = remember_idempotent(session, actor, student_id, operation, idempotency_key, payload.model_dump(mode="json"),
@@ -570,6 +845,8 @@ def install_practice(app, engine, cfg, database_session, current_actor):
         if row.purpose != "variant":
             raise Problem(409, "conflict", "hints_disabled", "小测进行中不提供提示；可以随时结束。")
         item = session.get(PracticeItem, item_id)
+        if item is None or item.graph_version != row.graph_version:
+            raise Problem(409, "conflict", "revision_conflict", "题目与本次活动的教材版本不一致。")
         if not item.hint_text:
             raise Problem(404, "not_found", "not_found", "这道题没有提示。")
         if item_id not in row.hints_used:
@@ -582,7 +859,7 @@ def install_practice(app, engine, cfg, database_session, current_actor):
         row = load_session(session, actor, session_id, lock=True)
         operation = f"POST /v1/practice-sessions/{session_id}/responses"
         if (replay := replay_idempotent(session, actor, row.student_id, operation, idempotency_key, payload.model_dump(mode="json"))) is not None:
-            return replay
+            return JSONResponse(replay, status_code=202) if replay.get("result") == "pending" else replay
         at = now()
         _expire(row, at)
         if row.status != "active" or payload.item_id not in row.item_ids:
@@ -591,18 +868,53 @@ def install_practice(app, engine, cfg, database_session, current_actor):
         if session.scalar(select(PracticeResponse.id).where(PracticeResponse.session_id == row.id, PracticeResponse.item_id == payload.item_id)):
             raise Problem(409, "conflict", "revision_conflict", "这道题已经作答。")
         item = session.get(PracticeItem, payload.item_id)
-        result = grade(item, payload.answer_text)
+        if item is None or item.graph_version != row.graph_version:
+            raise Problem(409, "conflict", "revision_conflict", "题目与本次活动的教材版本不一致。")
+        pending_assessment = session.scalar(select(PracticeAssessment).where(PracticeAssessment.session_id == row.id,
+            PracticeAssessment.item_id == item.id, PracticeAssessment.status.in_(("queued", "grading"))))
+        if pending_assessment:
+            outbox = session.get(LearningOutbox, pending_assessment.outbox_id)
+            if outbox and outbox.status in ("queued", "running"):
+                from .practice_generation import queue_assessment
+                body = queue_assessment(session, row, item, payload)
+                session.commit()
+                return JSONResponse(body, status_code=202)
+        details, feedback = None, None
+        if item.status == "ai_verified":
+            from .practice_generation import grade_generated
+            if item.owner_student_id != row.student_id or item.tenant_id != row.tenant_id:
+                raise Problem(409, "conflict", "revision_conflict", "题目与本次学员不一致。")
+            grading, details = grade_generated(item, payload, rule_only=True)
+            if grading is None:
+                from .practice_generation import queue_assessment
+                body = queue_assessment(session, row, item, payload)
+                body = remember_idempotent(session, actor, row.student_id, operation, idempotency_key,
+                                           payload.model_dump(mode="json"), body)
+                session.commit()
+                return JSONResponse(body, status_code=202)
+            result, feedback = grading["result"], grading["feedback"]
+            if result == "unscorable":
+                return {"item_id": item.id, "result": result, "session_status": row.status, "retryable": True,
+                        "feedback": feedback, "solution_text": None}
+            details = {**details, "feedback": feedback}
+        else:
+            if payload.answer_text is None:
+                raise Problem(422, "validation", "invalid_request", "这道历史练习需要文字作答。")
+            result = grade(item, payload.answer_text)
+        submitted_text = (payload.answer_text or ("、".join(payload.selected_options) if payload.selected_options else
+                          "\n".join(f"{a.field_id}: {a.answer_text}" for a in payload.answers or [])))
         session.add(PracticeResponse(id=new_id("presp"), tenant_id=row.tenant_id, student_id=row.student_id, session_id=row.id,
-                                     item_id=item.id, knowledge_id=item.knowledge_id,
+                                     item_id=item.id, knowledge_id=item.knowledge_id, graph_version=row.graph_version,
                                      event_type="optional_variant" if row.purpose == "variant" else "optional_quiz",
-                                     answer_text=payload.answer_text.strip(), result=result, hint_used=item.id in row.hints_used,
-                                     occurred_at=at))
+                                     answer_text=submitted_text.strip(), result=result, hint_used=item.id in row.hints_used,
+                                     details=details, occurred_at=at))
         session.flush()
         answered = session.scalar(select(func.count()).select_from(PracticeResponse).where(PracticeResponse.session_id == row.id))
         if answered == len(row.item_ids):
             row.status, row.ended_at = "completed", at
         body = remember_idempotent(session, actor, row.student_id, operation, idempotency_key, payload.model_dump(mode="json"),
-                                   {"item_id": item.id, "result": result, "solution_text": item.solution_text, "session_status": row.status})
+                                   {"item_id": item.id, "result": result, "solution_text": item.solution_text, "session_status": row.status,
+                                    **({"feedback": feedback} if feedback else {})})
         session.commit()
         return body
 
@@ -615,3 +927,9 @@ def install_practice(app, engine, cfg, database_session, current_actor):
             row.status, row.exit_reason, row.ended_at = "completed" if finished_reading else "exited", payload.reason, now()
         session.commit()
         return session_dict(session, row, staff=is_staff(actor))
+
+    from .practice_generation import install_variant_generation
+    install_variant_generation(app, database_session, current_actor)
+
+
+from . import practice_generation as _student_variant_jobs  # noqa: E402,F401

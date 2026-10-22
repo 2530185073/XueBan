@@ -68,10 +68,11 @@ class OutputDiagnostic:
 
 # Do not derive names from the response or schema: either may contain private text.
 _DIAGNOSTIC_FIELDS = frozenset({
-    "items", "coverage", "asset_id", "label", "stem_text", "answer_text",
+    "items", "coverage", "layout_index", "page", "asset_id", "label", "stem_text", "answer_text",
     "answer_status", "regions", "answer_regions", "uncertainties", "x", "y",
     "width", "height", "coordinate_space", "collection_scope",
-    "unrecognized_regions", "note", "verdict", "reason_code", "readback",
+    "unrecognized_regions", "note", "question_type", "options", "blank_count",
+    "knowledge_points", "correction_method", "correct_answer", "verdict", "reason_code", "readback",
     "recognition_consistent", "basis_summary", "first_error_region",
     "guidance_code", "focus_region", "choices", "finish_reason", "message", "content",
 })
@@ -92,6 +93,58 @@ def _schema_diagnostic(error: ValidationError) -> OutputDiagnostic:
 
 
 @dataclass(frozen=True)
+class TransportDiagnostic:
+    """Content-free counters for this one HTTP read, not model/fee evidence.
+
+    Bytes/chunks are HTTPX-decoded body data, not raw wire measurements. Event
+    kinds are counted in fixed categories only; no provider-supplied strings,
+    text deltas, reasoning, headers, URLs, or credentials are retained here.
+    """
+    protocol: str = "bounded-http.progress.v1"
+    content_mode: str = "unknown"
+    phase: str = "waiting_headers"
+    headers_received_ms: int | None = None
+    first_body_byte_ms: int | None = None
+    last_body_byte_ms: int | None = None
+    first_sse_data_ms: int | None = None
+    first_output_text_ms: int | None = None
+    body_chunks_received: int = 0
+    decoded_body_bytes: int = 0
+    sse_comment_lines: int = 0
+    sse_data_lines: int = 0
+    sse_events: int = 0
+    output_text_events: int = 0
+    output_text_delta_chars: int = 0
+    reasoning_events: int = 0
+    other_events: int = 0
+    done_marker_seen: bool = False
+    terminal_event: str | None = None
+    terminal_accepted: bool = False
+    pending_buffer_bytes: int = 0
+    pending_data_lines: int = 0
+    elapsed_ms: int = 0
+
+
+    def __post_init__(self):
+        modes = {"unknown", "sse", "body"}
+        phases = {"waiting_headers", "headers_received", "reading_sse", "reading_body",
+                  "validating_sse_event", "terminal_received", "body_complete"}
+        if (self.protocol != "bounded-http.progress.v1" or self.content_mode not in modes
+                or self.phase not in phases or self.terminal_event not in {None, "completed", "incomplete", "failed"}
+                or type(self.done_marker_seen) is not bool or type(self.terminal_accepted) is not bool):
+            raise ValueError("invalid_transport_diagnostic")
+        static = {"protocol", "content_mode", "phase", "terminal_event", "done_marker_seen", "terminal_accepted"}
+        nullable = {"headers_received_ms", "first_body_byte_ms", "last_body_byte_ms",
+                    "first_sse_data_ms", "first_output_text_ms"}
+        for name, value in vars(self).items():
+            if name in static or name in nullable and value is None:
+                continue
+            if type(value) is not int or not 0 <= value <= 2**53 - 1:
+                raise ValueError("invalid_transport_diagnostic")
+
+
+
+@dataclass(frozen=True)
 class Attempt:
     number: int
     status_code: int | None
@@ -103,6 +156,7 @@ class Attempt:
     # Usage is not a bill. Even a timeout/retry may have incurred a charge.
     charge_status: Literal["unknown"] = "unknown"
     diagnostic: OutputDiagnostic | None = None
+    transport: TransportDiagnostic | None = None
 
 
 @dataclass(frozen=True)
@@ -219,7 +273,7 @@ def _images(values: tuple[str, ...]) -> list[dict[str, Any]]:
         )
         if not valid_magic or len(raw) > 4_194_304 or total > 8_388_608:
             raise ProviderError("invalid_input")
-        result.append({"type": "image_url", "image_url": {"url": value}})
+        result.append({"type": "image_url", "image_url": {"url": value, "detail": "high"}})
     return result
 
 
@@ -247,7 +301,7 @@ def _usage(value: object) -> Usage | None:
 class ArkClient:
     # Keep the legacy adapter's budget unchanged. Explicit multimodel subclasses
     # may opt into a larger output budget for dense whole-page work.
-    MAX_OUTPUT_TOKENS = 8192
+    MAX_OUTPUT_TOKENS = 16384
 
     def __init__(self, settings: ArkSettings, *, transport: httpx.BaseTransport | None = None, sleep: Callable[[float], None] = time.sleep):
         self.settings = settings
@@ -278,8 +332,9 @@ class ArkClient:
             for value, low, high in ((cfg.max_concurrency, 1, 16), (cfg.max_attempts, 1, 3), (cfg.max_tokens, 1, self.MAX_OUTPUT_TOKENS), (cfg.max_response_bytes, 256, 4_194_304)):
                 if type(value) is not int or not low <= value <= high:
                     raise ValueError()
-            for value in (cfg.timeout_seconds, cfg.queue_timeout_seconds, cfg.total_timeout_seconds):
-                if not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 < value <= 120:
+            for value, ceiling in ((cfg.timeout_seconds, 240), (cfg.total_timeout_seconds, 240),
+                                   (cfg.queue_timeout_seconds, 120)):
+                if not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 < value <= ceiling:
                     raise ValueError()
             if type(cfg.thinking) is not bool:
                 raise ValueError()
@@ -341,6 +396,7 @@ class ArkClient:
                 {"role": "user", "content": content},
             ],
             "stream": False,
+            "temperature": 0,
             "max_tokens": max_tokens,
             "thinking": {"type": "enabled" if thinking else "disabled"},
             "response_format": {"type": "json_object"},

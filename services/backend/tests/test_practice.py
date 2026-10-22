@@ -132,6 +132,33 @@ def test_variant_uses_reviewed_items_and_never_changes_state(flow, clock):
     assert events == {"optional_variant"}
 
 
+def test_variant_overview_groups_confirmed_errors_and_excludes_source_stem(flow, clock):
+    case = needs_help(flow)
+    new_item(flow, family="variant-a")
+
+    overview = flow.client.get("/v1/students/student_a/variant-practice")
+    assert overview.status_code == 200, overview.text
+    body = overview.json()
+    assert body["projection"]["pending"] is False
+    assert [(group["knowledge_id"], group["error_count"]) for group in body["groups"]] == [("kp-rational-add-sub", 1)]
+    assert body["groups"][0]["questions"][0]["case_id"] == case["id"]
+    assert body["groups"][0]["available_items"] == 1
+
+    open_window(flow, confirm=True)
+    started = start(flow, purpose="variant", knowledge_id="kp-rational-add-sub", count=1, source_case_id=case["id"])
+    assert started.status_code == 201, started.text
+    assert started.json()["items"][0]["stem_text"] != "1 + 1 = ?"
+
+
+def test_variant_overview_includes_ai_error_before_teacher_confirmation(flow, clock):
+    case = reviewed(flow)
+    body = flow.client.get("/v1/students/student_a/variant-practice").json()
+    assert body["pending_count"] == 0
+    assert len(body["groups"]) == 1
+    assert body["groups"][0]["knowledge_id"].startswith("auto-topic-")
+    assert body["groups"][0]["questions"][0]["case_id"] == case["id"]
+
+
 def test_preview_quiz_has_no_hints_and_leaving_creates_no_debt(flow, clock):
     reviewed(flow)
     teacher(flow)

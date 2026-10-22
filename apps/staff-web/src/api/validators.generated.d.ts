@@ -1,4 +1,5 @@
 // Generated; do not edit.
+export declare const data_AnswerCheck: (value: unknown) => boolean
 export declare const data_Scope: (value: unknown) => boolean
 export declare const data_CurriculumContext: (value: unknown) => boolean
 export declare const data_Region: (value: unknown) => boolean
@@ -31,6 +32,9 @@ export declare const data_HelpPage: (value: unknown) => boolean
 export declare const data_QuestionRead: (value: unknown) => boolean
 export declare const data_AttemptRead: (value: unknown) => boolean
 export declare const data_DecisionRead: (value: unknown) => boolean
+export declare const data_RecognitionRecoveryStatus: (value: unknown) => boolean
+export declare const data_RecognitionRecheckAccepted: (value: unknown) => boolean
+export declare const data_HomeworkDetailRead: (value: unknown) => boolean
 export declare const requests_CreateHomework: (value: unknown) => boolean
 export declare const requests_CreateUpload: (value: unknown) => boolean
 export declare const requests_CompleteUpload: (value: unknown) => boolean
@@ -49,3 +53,4 @@ export declare const requests_SetProgress: (value: unknown) => boolean
 export declare const requests_RequestDeletion: (value: unknown) => boolean
 export declare const requests_RenewUpload: (value: unknown) => boolean
 export declare const requests_RepairLayout: (value: unknown) => boolean
+export declare const requests_StartRecognitionRecheck: (value: unknown) => boolean

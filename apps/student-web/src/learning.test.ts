@@ -20,7 +20,7 @@ describe('learning labels', () => {
   it('never uses percentages, scores or rankings in any copy', () => {
     const copy = JSON.stringify([statusLabels, resultLabels, answerFeedback, wrapUps, exitChoices, ['repeated_errors', 'assisted_or_unverified_only', 'no_scorable_evidence', 'corrected_with_help_awaiting_new_school_item'].map(code => reasonText('no_judgment', [code]))])
     for (const absent of ['%', '正确率', '掌握度', '排名', '分数', '错过']) expect(copy).not.toContain(absent)
-    expect(wrapUps.exited.text).toContain('不会记欠账'); expect(answerFeedback.unscorable.title).toBe('没法自动判断，可以对照解析')
+    expect(wrapUps.exited.text).toContain('不会记欠账'); expect(answerFeedback.unscorable.title).toBe('暂时没有确认对错')
   })
 })
 
@@ -97,7 +97,7 @@ describe('session time', () => {
     expect(effectiveStatus({ status: 'exited', budget_ends_at: '2026-10-16T08:05:00Z' }, now)).toBe('exited')
   })
   it('maps the start conflicts to kind messages', () => {
-    for (const code of ['optional_gate_closed', 'practice_not_needed', 'course_unknown', 'no_reviewed_items', 'practice_active', 'hints_disabled']) expect(practiceMessage(new StudentError(code, 409), 'x')).not.toBe(new StudentError(code, 409).message)
+    for (const code of ['optional_gate_closed', 'practice_not_needed', 'course_unknown', 'no_reviewed_items', 'practice_active', 'hints_disabled', 'curriculum_mismatch']) expect(practiceMessage(new StudentError(code, 409), 'x')).not.toBe(new StudentError(code, 409).message)
     expect(practiceMessage(new StudentError('optional_gate_closed', 409), 'x')).toContain('今天就到这里也很好')
     expect(practiceMessage(new Error('boom'), '这次没有开始。')).toBe('这次没有开始。')
   })

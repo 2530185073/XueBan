@@ -129,7 +129,8 @@ def test_connection_timeout_is_fifteen_seconds_but_never_exceeds_other_budgets(p
     with ResponsesClient(settings(timeout_seconds=phase, total_timeout_seconds=total),
                          transport=httpx.MockTransport(serve)) as client:
         generate(client)
-    assert timeouts[0]["connect"] == expected
+    # The remaining total budget includes validation and semaphore time too.
+    assert expected - .1 < timeouts[0]["connect"] <= expected
 
 
 @pytest.mark.parametrize("client_type,field", [(BoundedChatClient, "max_tokens"), (ResponsesClient, "max_output_tokens")])
@@ -148,9 +149,29 @@ def test_large_whole_page_budget_is_explicit_and_preserved_in_request(client_typ
     assert [request[field] for request in requests] == [24576, 32768]
 
 
-def test_legacy_ark_budget_is_not_relaxed_by_multimodel_adapters():
+def test_legacy_ark_budget_is_not_relaxed_beyond_its_two_stage_limit():
     with pytest.raises(ProviderError, match="invalid_configuration"):
-        ArkClient(settings(max_tokens=8193))
+        ArkClient(settings(max_tokens=16385))
     with ArkClient(settings(), transport=httpx.MockTransport(lambda _: pytest.fail("No request allowed"))) as client:
         with pytest.raises(ProviderError, match="invalid_input"):
-            client.generate(role="check", text="synthetic", output_schema=SCHEMA, max_tokens=8193)
+            client.generate(role="check", text="synthetic", output_schema=SCHEMA, max_tokens=16385)
+
+
+@pytest.mark.parametrize("body", [b"not json", b"[]", b"null", b'{"status":"completed","usage":"bad"}'])
+def test_http_200_malformed_response_is_recorded_provider_error(body):
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, content=body))
+    with ResponsesClient(settings(), transport=transport) as client, pytest.raises(ProviderError) as failure:
+        generate(client)
+    assert failure.value.code == "invalid_output"
+    assert len(failure.value.attempts) == 1
+    assert failure.value.attempts[0].status_code == 200
+
+
+def test_explicit_nonstream_mode_still_uses_bounded_transport_and_strict_schema():
+    requests = []
+    transport = httpx.MockTransport(lambda request: (
+        requests.append(json.loads(request.content)) or httpx.Response(200, json=envelope())))
+    with ResponsesClient(settings(), transport=transport, stream=False) as client:
+        result = generate(client)
+    assert requests[0]["stream"] is False
+    assert result.data == {"observation": "visible answer"}

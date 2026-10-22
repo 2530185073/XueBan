@@ -1974,6 +1974,178 @@
           }
         }
       }
+    },
+    "/v1/cases/{case_id}/recognition-rechecks": {
+      "post": {
+        "operationId": "startRecognitionRecheck",
+        "summary": "对同一作答原图再次识读",
+        "description": "读取原图进行有界识读恢复，沿用当前作答资产与原目标单位；同一作答资产最多受理两次，修改版本不重置次数。四个期望版本用于并发校验；服务失败或未知执行结果如实返回，不自动声明已纠正。",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "202": {
+            "description": "已受理再次识读，返回任务及该作答剩余恢复次数",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/RecognitionRecheckAccepted"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "requests.schema.json#/$defs/StartRecognitionRecheck"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/cases/{case_id}/recognition-rechecks/status": {
+      "get": {
+        "operationId": "getRecognitionRecheckStatus",
+        "summary": "读取当前作答的再次识读状态",
+        "description": "返回固定上限、已用和剩余次数、活动及最近任务、最近结果与不可重试原因；不执行识读。",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "当前作答的识读恢复状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/RecognitionRecoveryStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/homeworks/{homework_id}/detail": {
+      "get": {
+        "operationId": "getHomeworkDetail",
+        "summary": "在只读一致快照中读取作业详情",
+        "description": "认证首条SQL前建立REPEATABLE READ只读事务；不写业务或调用模型。仅409 detail_bundle_limit表示容量超限且允许客户端回退逐项读取；其余错误不得降级。",
+        "x-allowed-roles": [
+          "student",
+          "sitting_teacher",
+          "campus_admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "data.schema.json#/$defs/HomeworkDetailRead"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "homework_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_-]{2,63}$"
+            }
+          }
+        ]
+      }
     }
   },
   "components": {

@@ -1151,6 +1151,154 @@
           ]
         }
       }
+    },
+    {
+      "name": "request_StartRecognitionRecheck",
+      "schema": "requests.schema.json#/$defs/StartRecognitionRecheck",
+      "value": {
+        "expected_revision": 4,
+        "attempt_id": "attempt_correction",
+        "question_revision": 2,
+        "attempt_recognition_revision": 1
+      }
+    },
+    {
+      "name": "recognition_recovery_available",
+      "schema": "data.schema.json#/$defs/RecognitionRecoveryStatus",
+      "value": {
+        "case_id": "case_algebra",
+        "attempt_id": "attempt_correction",
+        "limit": 2,
+        "used": 0,
+        "remaining": 2,
+        "active_job_id": null,
+        "last_job_id": null,
+        "last_outcome": null,
+        "eligible": true,
+        "blocked_reason": null
+      }
+    },
+    {
+      "name": "recognition_recovery_running",
+      "schema": "data.schema.json#/$defs/RecognitionRecoveryStatus",
+      "value": {
+        "case_id": "case_algebra",
+        "attempt_id": "attempt_correction",
+        "limit": 2,
+        "used": 1,
+        "remaining": 1,
+        "active_job_id": "job_recheck",
+        "last_job_id": "job_recheck",
+        "last_outcome": null,
+        "eligible": false,
+        "blocked_reason": "active_recovery"
+      }
+    },
+    {
+      "name": "recognition_recovery_exhausted",
+      "schema": "data.schema.json#/$defs/RecognitionRecoveryStatus",
+      "value": {
+        "case_id": "case_algebra",
+        "attempt_id": "attempt_correction",
+        "limit": 2,
+        "used": 2,
+        "remaining": 0,
+        "active_job_id": null,
+        "last_job_id": "job_recheck_last",
+        "last_outcome": "unchanged_pending",
+        "eligible": false,
+        "blocked_reason": "budget_exhausted"
+      }
+    },
+    {
+      "name": "accepted_recognition_recheck",
+      "schema": "data.schema.json#/$defs/RecognitionRecheckAccepted",
+      "value": {
+        "job": {
+          "id": "job_recheck",
+          "revision": 1,
+          "kind": "recognition_recheck",
+          "status": "queued",
+          "created_at": "2026-10-16T08:00:00Z",
+          "updated_at": "2026-10-16T08:00:00Z",
+          "retry_after_seconds": null,
+          "failure": null,
+          "result": null
+        },
+        "created_resource": null,
+        "recovery": {
+          "case_id": "case_algebra",
+          "attempt_id": "attempt_correction",
+          "limit": 2,
+          "used": 1,
+          "remaining": 1,
+          "active_job_id": "job_recheck",
+          "last_job_id": "job_recheck",
+          "last_outcome": null,
+          "eligible": false,
+          "blocked_reason": "active_recovery"
+        }
+      }
+    },
+    {
+      "name": "successful_recognition_recheck_job",
+      "schema": "data.schema.json#/$defs/Job",
+      "value": {
+        "id": "job_recheck_done",
+        "revision": 2,
+        "kind": "recognition_recheck",
+        "status": "succeeded",
+        "created_at": "2026-10-16T08:00:00Z",
+        "updated_at": "2026-10-16T08:00:00Z",
+        "retry_after_seconds": null,
+        "failure": null,
+        "result": {
+          "resource_type": "attempt",
+          "resource_id": "attempt_correction"
+        }
+      }
+    },
+    {
+      "name": "empty_homework_detail",
+      "schema": "data.schema.json#/$defs/HomeworkDetailRead",
+      "value": {
+        "protocol": "homework-detail.v1",
+        "homework": {
+          "id": "homework_synthetic",
+          "revision": 3,
+          "scope": {
+            "tenant_id": "tenant_synthetic",
+            "campus_id": "campus_synthetic",
+            "student_id": "student_synthetic"
+          },
+          "curriculum": {
+            "stage": "junior_middle",
+            "publisher_code": "PEP",
+            "grade": null,
+            "subject": null,
+            "volume": null,
+            "edition": null
+          },
+          "title": "合成作业样例",
+          "created_at": "2026-10-16T08:00:00Z",
+          "occurred_at": "2026-10-16T08:00:00Z",
+          "coverage": {
+            "collection_scope": "partial",
+            "unrecognized_regions": [],
+            "note": "仅采集一个题区，不能计算整页正确率。"
+          },
+          "asset_ids": [],
+          "question_ids": [],
+          "case_ids": [],
+          "job_ids": [],
+          "processing_blocked": false
+        },
+        "case_records": [],
+        "questions": [],
+        "attempts": [],
+        "checks": [],
+        "jobs": []
+      }
     }
   ]
 }

@@ -12,9 +12,9 @@ import webbrowser
 import httpx
 
 if __package__:
-    from .mac_local import BACKEND, REPO, alive, api_environment, load, spawn, wait_ready
+    from .mac_local import BACKEND, REPO, alive, load, spawn, wait_ready, without_model_environment
 else:
-    from mac_local import BACKEND, REPO, alive, api_environment, load, spawn, wait_ready
+    from mac_local import BACKEND, REPO, alive, load, spawn, wait_ready, without_model_environment
 
 
 def local_origin(value):
@@ -41,7 +41,8 @@ def restart_api(runtime, config, env):
     if pidfile.exists():
         pid = int(pidfile.read_text())
         if alive(pid):
-            command = subprocess.check_output(['ps', '-p', str(pid), '-o', 'command='], text=True)
+            command = subprocess.check_output(['ps', '-p', str(pid), '-o', 'command='],
+                                              env=without_model_environment(os.environ), text=True)
             if 'xueban_backend.app:create_app' not in command:
                 raise RuntimeError('PID belongs to another process; refusing to stop it')
             os.kill(pid, signal.SIGTERM)
@@ -51,7 +52,7 @@ def restart_api(runtime, config, env):
             if alive(pid):
                 raise RuntimeError('API has not stopped; PID file retained')
         pidfile.unlink()
-    api_env = api_environment(env)
+    api_env = without_model_environment(env)
     spawn(runtime, 'api', [sys.executable, '-m', 'uvicorn', 'xueban_backend.app:create_app', '--factory',
           '--host', config['host'], '--port', str(config['api_port']), '--no-access-log'], api_env)
     wait_ready(runtime, config)
@@ -69,11 +70,13 @@ def main():
         raise ValueError('The local launcher requires a loopback-bound API')
     web = REPO / 'apps/student-web'
     # Read model configuration only in the backend launcher, never pass it to npm.
-    build_env = {k: v for k, v in os.environ.items() if not k.startswith(('ARK_', 'OPENAI_', 'ZYAI_', 'DATABASE_', 'JWT_', 'SIGNING_'))}
+    build_env = {k: v for k, v in without_model_environment(os.environ).items()
+                 if not k.startswith(('DATABASE_', 'JWT_', 'SIGNING_'))}
     if not (web / 'node_modules').is_dir():
         subprocess.run(['npm', 'ci'], cwd=web, env=build_env, check=True)
     subprocess.run(['npm', 'run', 'build'], cwd=web, env=build_env, check=True)
-    subprocess.run([sys.executable, str(BACKEND / 'scripts/mac_local.py'), '--runtime', str(runtime), 'start'], check=True)
+    subprocess.run([sys.executable, str(BACKEND / 'scripts/mac_local.py'), '--runtime', str(runtime), 'start'],
+                   env=without_model_environment(os.environ), check=True)
     config, env = load(runtime)
     if not ready(origin):
         restart_api(runtime, config, env)

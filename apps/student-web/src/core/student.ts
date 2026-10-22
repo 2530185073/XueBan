@@ -1,4 +1,6 @@
-import type { Account, AdminRequestOptions, AuthSession, Accepted, AssetAccess, AttemptRead, CaseDetail, CaseRecord, CheckRun, CorrectionCase, CreateCorrection, CreateHelp, DecisionRead, DraftSummary, DraftView, HelpRequest, Hint, HomeworkDetail, HomeworkPage, HomeworkSession, HomeworkSummary, IdentityContext, ImageAsset, InputVersions, Job, JournalEntry, NormalizedPhoto, QuestionRead, RequestHint, Review, StoredDraft, StoredPage, UploadTicket } from './types'
+import { detailFromSnapshot, type HomeworkDetailRead } from './homeworkDetail'
+import { isRecognitionProgress, type RecognitionProgress } from './recognitionProgress'
+import type { Account, AdminRequestOptions, AuthSession, Accepted, RecognitionRecoveryStatus, RecognitionRecheckAccepted, AssetAccess, AttemptRead, CaseDetail, CaseRecord, CheckRun, CorrectionCase, CreateCorrection, CreateHelp, DecisionRead, DraftSummary, DraftView, HelpRequest, Hint, HomeworkDetail, HomeworkPage, HomeworkSession, HomeworkSummary, IdentityContext, ImageAsset, InputVersions, Job, JournalEntry, NormalizedPhoto, QuestionRead, RequestHint, Review, StoredDraft, StoredPage, UploadTicket } from './types'
 import { StudentApi } from './api'
 import { StudentError, safeError } from './errors'
 import { DRAFT_FORMAT, DraftStore, LEGACY_PAGE_ID, type PurgeReport } from './store'
@@ -6,14 +8,18 @@ import { editPhoto, normalizePhoto } from './photo'
 import { applyChange, checkBatch, checkSelection, isIdentity, movePage, pageBudget, removePage, type EditChange, type PageEdit } from './pages'
 import { homeworkPageIds } from './homeworkPages'
 import { valid } from './validation'
-import { bucketOfCase, countBuckets, firstUnresolved, isRetired, orderActiveCases, orderCasesByCreation, retiredCases } from './cases'
+import { bucketOfCase, countBuckets, firstUnresolved, isRetired, orderActiveCases, orderCasesByCreation, orderRowsByPhoto, retiredCases } from './cases'
 import { ObjectUrls } from './objectUrls'
 import { compareCreated } from './chronology'
-import { isAgentContext, isKnowledgeDetail, isKnowledgeMap, isMemory, isMemoryList, isOptionalActivities, isPracticeAnswer, isPracticeHint, isPracticeSession, isPracticeSessionList, MEMORY_CONTENT_MAX, MEMORY_CONTENT_MIN, PRACTICE_ANSWER_MAX, type AgentContext, type ExitReason, type KnowledgeDetail, type KnowledgeMap, type Memory, type MemoryList, type OptionalActivities, type PracticeAnswer, type PracticeHint, type PracticeSession, type StartPractice, type StudentMemoryCategory } from './learning'
+import { isCurriculumBooks, isCurriculumCatalog, isKnowledgeDetail, isKnowledgeMap, isStudentCurriculum, isVariantPracticeOverview, isVariantGeneration, isVariantGenerationList, isAgentContext, isMemory, isMemoryList, isOptionalActivities, isPracticeAnswer, isPracticeAssessment, isPracticeHint, isPracticeSession, isPracticeSessionList, MEMORY_CONTENT_MAX, MEMORY_CONTENT_MIN, PRACTICE_ANSWER_MAX, type AgentContext, type CurriculumBooks, type CurriculumCatalog, type ExitReason, type GenerateVariant, type VariantGeneration, type VariantGenerationList, type PracticeSubmission, type KnowledgeDetail, type KnowledgeMap, type Memory, type MemoryList, type OptionalActivities, type PracticeAnswer, type PracticeAssessment, type PracticeHint, type PracticeSession, type StartPractice, type StudentCurriculum, type StudentMemoryCategory, type VariantPracticeOverview } from './learning'
 
 export const remoteDraftId = (id: string) => `remote_${id}`
+import type { CurriculumContext } from './types'
+export type { CurriculumContext } from './types'
 const encoded = encodeURIComponent
 const active = (job: Job) => ['queued', 'running', 'retryable_failed'].includes(job.status)
+const terminalFailure = (job: Job) => ['failed', 'superseded', 'cancelled'].includes(job.status)
+const JOB_POLL_ROUNDS = 120
 const latestRecognition = (jobs: Job[]) => jobs.filter(job => job.kind === 'recognize_homework').sort(compareCreated).at(-1)
 const matches = (v: InputVersions, row: CaseDetail) => v.question_id === row.case.question_id && v.question_revision === row.case.current_question_revision && v.attempt_id === row.case.current_attempt_id && v.attempt_recognition_revision === row.attempt.recognition_revision
 export function effectiveDecision(row: CaseDetail) { const d = row.case.current_decision; return !isRetired(row.case) && d && !['stale', 'retracted'].includes(d.validity) && matches(d.input_versions, row) ? d : null }
@@ -35,16 +41,18 @@ async function readable(blob: Blob, index: number) {
 }
 export function decisionLabel(row: CaseDetail): string {
   const d = effectiveDecision(row)
-  if (row.attempt.recognition_status !== 'ready') return '作答待核实 · 先对照原图看看'
-  if (!d) return '等待检查'
+  if (!d) {
+    if (row.attempt.recognition_status !== 'ready') return '识别待核实 · 请重拍或请老师看'
+    return '等待检查'
+  }
   if (d.validity === 'needs_review' || d.verdict === 'unable_to_judge') return '暂时看不准 · 可以先看其他题'
   const text = { correct: '正确', incorrect: '需要订正', partially_correct: '部分需要订正', unanswered: '尚未作答' }[d.verdict]
   return `${d.validity === 'confirmed' && d.origin === 'staff' ? '老师确认' : 'AI 初判'} · ${text}`
 }
-interface Context { scope: string; student: string; epoch: number }
+interface Context { scope: string; student: string; epoch: number; detailSession?: Session }
 interface Session { access_token: string; expires_at: string; kind: 'account' }
 interface PendingAuth { body: string; key: string }
-export interface ClientOptions { origin?: string; transport?: typeof fetch; storage?: Storage; store?: DraftStore; normalize?: (file: Blob, maxBytes?: number) => Promise<NormalizedPhoto>; edit?: (source: NormalizedPhoto, edit: PageEdit, maxBytes?: number) => Promise<NormalizedPhoto>; sleep?: (ms: number) => Promise<void> }
+export interface ClientOptions { detailSnapshotEnabled?: boolean; origin?: string; transport?: typeof fetch; storage?: Storage; store?: DraftStore; normalize?: (file: Blob, maxBytes?: number) => Promise<NormalizedPhoto>; edit?: (source: NormalizedPhoto, edit: PageEdit, maxBytes?: number) => Promise<NormalizedPhoto>; sleep?: (ms: number) => Promise<void> }
 export class StudentClient {
   private session: Session | null = null
   private currentAccount: Account | null = null
@@ -53,8 +61,13 @@ export class StudentClient {
   private currentIdentity: IdentityContext | null = null
   private student: string | null = null
   private epoch = 0
+  private evidenceSessions = new WeakMap<Session, number>()
+  private nextEvidenceSession = 0
+  private identityFlight: { epoch: number; session: Session | null; promise: Promise<IdentityContext> } | null = null
+  private caseFlights = new Map<string, { epoch: number; session: Session | null; scope: string; promise: Promise<CorrectionCase> }>()
   private listeners = new Set<() => void>()
   private api: StudentApi
+  private detailSnapshotEnabled: boolean
   private store: DraftStore
   private storage: Storage
   private origin: string
@@ -66,12 +79,13 @@ export class StudentClient {
   private urls = new ObjectUrls()
   private housekeeping: Promise<PurgeReport | null>
   constructor(options: ClientOptions = {}) {
+    this.detailSnapshotEnabled = options.detailSnapshotEnabled ?? (import.meta.env.VITE_HOMEWORK_DETAIL_SNAPSHOT_ENABLED === '1')
     this.origin = options.origin ?? location.origin
     const url = new URL(this.origin)
     if (url.origin !== this.origin || !['http:', 'https:'].includes(url.protocol)) throw new StudentError('invalid_origin', 422)
     this.storage = options.storage ?? sessionStorage; this.store = options.store ?? new DraftStore()
     this.normalize = options.normalize ?? normalizePhoto; this.edit = options.edit ?? editPhoto; this.sleep = options.sleep ?? (ms => new Promise(resolve => setTimeout(resolve, ms)))
-    this.api = new StudentApi(this.origin, () => this.token(), () => this.disconnect(), options.transport)
+    this.api = new StudentApi(this.origin, () => this.token(), () => this.disconnect(), options.transport, () => { const epoch = this.epoch, session = this.session; return () => this.currentSession(epoch, session) })
     this.housekeeping = this.store.purgeExpired().catch(() => null)
   }
   /** blob: URLs for photos of the signed-in student; all are revoked on sign-out or account loss. */
@@ -81,13 +95,23 @@ export class StudentClient {
   get account() { return this.currentAccount }
   get identity() { return this.currentIdentity }
   get selectedStudentId() { return this.student }
+  /** Non-secret scope fence for concurrent read-only views, including same-account re-login. */
+  get historyScope() { return this.session && this.student && this.currentIdentity ? JSON.stringify([this.epoch, this.currentIdentity.actor_id, this.student]) : null }
+  /** Opaque read-only trace scope; even same-token restore changes session identity. */
+  get evidenceScope() {
+    const scope = this.historyScope, session = this.session
+    if (!scope || !session) return null
+    let id = this.evidenceSessions.get(session)
+    if (id === undefined) { id = ++this.nextEvidenceSession; this.evidenceSessions.set(session, id) }
+    return JSON.stringify([scope, id])
+  }
   subscribe(listener: () => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
   private changed() { for (const listener of this.listeners) listener() }
   private storageKey(name: string) { return `xueban:${this.origin}:${name}` }
   private load<T>(name: string): T | null { try { return JSON.parse(this.storage.getItem(this.storageKey(name)) ?? 'null') as T | null } catch { return null } }
   private persist(name: string, value: unknown) { try { this.storage.setItem(this.storageKey(name), JSON.stringify(value)) } catch { throw new StudentError('session_storage_unavailable', 0, '无法保存本次会话，请允许浏览器会话存储后重试。') } }
   private token() { if (this.session && Date.parse(this.session.expires_at) <= Date.now()) this.disconnect(); return this.session?.access_token ?? null }
-  private clearSession(clearPending = true) { this.epoch++; this.session = null; this.currentAccount = null; this.currentIdentity = null; this.student = null; this.dropMedia(); if (clearPending) this.pendingAuth.clear(); this.storage.removeItem(this.storageKey('session')); this.storage.removeItem(this.storageKey('selected')); this.storage.removeItem(this.storageKey('pair')); this.storage.removeItem(this.storageKey('scope')); this.changed() }
+  private clearSession(clearPending = true) { this.epoch++; this.identityFlight = null; this.caseFlights.clear(); this.session = null; this.currentAccount = null; this.currentIdentity = null; this.student = null; this.dropMedia(); if (clearPending) this.pendingAuth.clear(); this.storage.removeItem(this.storageKey('session')); this.storage.removeItem(this.storageKey('selected')); this.storage.removeItem(this.storageKey('pair')); this.storage.removeItem(this.storageKey('scope')); this.changed() }
   disconnect() { this.clearSession() }
   // Identifiers only (already used as IndexedDB scope keys), so a later account
   // failure during restore can still find the device data it must remove.
@@ -104,25 +128,48 @@ export class StudentClient {
    * can no longer use the device data. Remove that scope's drafts, photos and
    * journal; a plain local expiry keeps them for the next sign-in.
    */
+  private currentSession(epoch: number, session: Session | null) { return this.epoch === epoch && this.session === session }
   private async identityRequest<T>(path: string, shape: string): Promise<T> {
-    const hint = this.scopeHint(), live = !!this.session && Date.parse(this.session.expires_at) > Date.now()
-    try { return await this.api.request<T>(path, shape) }
-    catch (error) {
-      if (!(error instanceof StudentError) || !(error.status === 403 && error.code === 'access_denied' || error.status === 401 && error.code === 'authentication_required' && live)) throw error
+    const epoch = this.epoch, session = this.session
+    const hint = this.scopeHint(), live = !!session && Date.parse(session.expires_at) > Date.now()
+    try {
+      // Identity reads own their rejection cleanup so an old 401 cannot sign out
+      // a newer login before the session fence is checked.
+      const value = await this.api.request<T>(path, shape, undefined, undefined, false, undefined, () => undefined)
+      if (!this.currentSession(epoch, session)) throw new StudentError('session_changed', 401)
+      return value
+    } catch (error) {
+      if (!this.currentSession(epoch, session)) throw new StudentError('session_changed', 401)
+      if (!(error instanceof StudentError) || !(error.status === 403 && error.code === 'access_denied' || error.status === 401 && error.code === 'authentication_required' && live)) {
+        if (error instanceof StudentError && error.status === 401) this.disconnect()
+        throw error
+      }
+      // Retire this session before asynchronous device cleanup. A later login
+      // must not be cleared when the old scope's cleanup finishes.
+      this.disconnect()
       if (hint.student) await this.store.purgeScopes(scope => this.matchesScope(scope, hint)).catch(() => null)
-      this.dropMedia(); this.disconnect()
       throw new StudentError('account_unavailable', error.status, error.status === 403 ? '这个账号目前不能查看作业，本机保存的草稿、照片和未确认的提交已清除。请联系老师确认账号。' : '登录已失效或账号已停用，本机保存的草稿和照片已清除。请重新登录。')
     }
   }
   selectStudent(id: string) { if (!this.currentAccount || this.currentAccount.student_id !== id || !this.currentIdentity?.authorized_students.some(s => s.student_id === id)) throw new StudentError('access_denied', 403); if (id !== this.student) { this.epoch++; this.student = id; this.dropMedia(); this.changed() } }
-  private check(ctx: Context) { if (this.epoch !== ctx.epoch || !this.session || this.student !== ctx.student) throw new StudentError('session_changed', 401) }
+  private check(ctx: Context) { if (this.epoch !== ctx.epoch || !this.session || this.student !== ctx.student || ctx.detailSession !== undefined && this.session !== ctx.detailSession) throw new StudentError('session_changed', 401) }
   private async read<T>(ctx: Context, path: string, shape: string) { this.check(ctx); const value = await this.api.request<T>(path, shape); this.check(ctx); return value }
-  private async verifyIdentity(): Promise<IdentityContext> {
-    const epoch = this.epoch
+  private verifyIdentity(): Promise<IdentityContext> {
+    const epoch = this.epoch, session = this.session, existing = this.identityFlight
+    if (existing && existing.epoch === epoch && existing.session === session) return existing.promise
+    // Register before executing any identity update or synchronous subscriber.
+    const promise = Promise.resolve().then(() => this.fetchIdentity(epoch, session))
+    const flight = { epoch, session, promise }; this.identityFlight = flight
+    const clear = () => { if (this.identityFlight === flight) this.identityFlight = null }
+    void promise.then(clear, clear)
+    return promise
+  }
+  private async fetchIdentity(epoch: number, session: Session | null): Promise<IdentityContext> {
+    if (!this.currentSession(epoch, session)) throw new StudentError('session_changed', 401)
     let identity: IdentityContext
     try { identity = await this.identityRequest<IdentityContext>('/v1/me', 'IdentityContext') }
-    catch (error) { if (epoch === this.epoch) { this.epoch++; this.currentIdentity = null; this.student = null; this.dropMedia(); this.changed() } throw error }
-    if (epoch !== this.epoch) throw new StudentError('session_changed', 401)
+    catch (error) { if (this.currentSession(epoch, session)) { this.epoch++; this.currentIdentity = null; this.student = null; this.dropMedia(); this.changed() } throw error }
+    if (!this.currentSession(epoch, session)) throw new StudentError('session_changed', 401)
     if (this.currentIdentity && this.currentIdentity.actor_id !== identity.actor_id) { this.disconnect(); throw new StudentError('session_changed', 401) }
     if (this.student && !identity.authorized_students.some(s => s.student_id === this.student)) {
       this.epoch++; this.currentIdentity = null; this.student = null; this.dropMedia(); this.changed()
@@ -132,29 +179,34 @@ export class StudentClient {
     this.currentIdentity = identity
     // Initial login/restoration publishes once selection is ready. Emitting
     // earlier lets subscribers race authorize() against student selection.
-    if (changed && this.student) this.changed(); return identity
+    if (changed && this.student) this.changed()
+    if (!this.currentSession(epoch, session)) throw new StudentError('session_changed', 401)
+    return identity
   }
   private async readyAccount(): Promise<IdentityContext | null> {
-    const epoch = this.epoch
+    const epoch = this.epoch, session = this.session
     const account = await this.identityRequest<Account>('/v1/auth/account', 'Account')
-    if (epoch !== this.epoch) throw new StudentError('session_changed', 401)
+    if (!this.currentSession(epoch, session)) throw new StudentError('session_changed', 401)
     this.currentAccount = account
     if (account.must_change_password) { this.currentIdentity = null; this.student = null; this.changed(); return null }
     const identity = await this.verifyIdentity()
+    if (!this.currentSession(epoch, session)) throw new StudentError('session_changed', 401)
     if (account.student_id) {
       if (!identity.authorized_students.some(s => s.student_id === account.student_id)) { this.disconnect(); throw new StudentError('access_denied', 403) }
       this.student = account.student_id
     } else if (identity.roles.includes('student')) { this.disconnect(); throw new StudentError('access_denied', 403) }
-    this.changed(); return identity
+    this.changed()
+    if (!this.currentSession(epoch, session)) throw new StudentError('session_changed', 401)
+    return identity
   }
   async restore(): Promise<IdentityContext | null> {
     // Pairing is no longer a product login path. Never redeem an old pending code.
     this.storage.removeItem(this.storageKey('pair')); this.storage.removeItem(this.storageKey('selected'))
     const session = this.load<Session>('session')
     if (!session || session.kind !== 'account' || typeof session.access_token !== 'string' || !session.access_token || !Number.isFinite(Date.parse(session.expires_at)) || Date.parse(session.expires_at) <= Date.now()) { this.disconnect(); return null }
-    this.session = session
+    this.session = session; const epoch = this.epoch
     try { return await this.readyAccount() }
-    catch (error) { this.currentAccount = null; this.currentIdentity = null; this.student = null; this.dropMedia(); this.changed(); throw error }
+    catch (error) { if (this.currentSession(epoch, session)) { this.currentAccount = null; this.currentIdentity = null; this.student = null; this.dropMedia(); this.changed() } throw error }
   }
   private async authWrite<T>(path: string, payload: unknown, shape: string, publicRequest = false): Promise<T> {
     const body = JSON.stringify(payload), previous = this.pendingAuth.get(path)
@@ -205,12 +257,14 @@ export class StudentClient {
     if (!this.session) throw new StudentError('authentication_required', 401)
     if (this.currentAccount?.must_change_password) throw new StudentError('password_change_required', 403)
     if (!this.student) throw new StudentError('access_denied', 403)
-    const wanted = this.student, identity = await this.verifyIdentity()
+    const epoch = this.epoch, session = this.session, wanted = this.student, identity = await this.verifyIdentity()
+    if (!this.currentSession(epoch, session)) throw new StudentError('session_changed', 401)
     if (!wanted || this.student !== wanted || !identity.authorized_students.some(s => s.student_id === wanted)) { this.student = null; this.dropMedia(); this.changed(); throw new StudentError('access_denied', 403) }
     await this.housekeeping
+    if (!this.currentSession(epoch, session) || this.student !== wanted) throw new StudentError('session_changed', 401)
     const hint = JSON.stringify({ actor: identity.actor_id, student: wanted })
     if (this.storage.getItem(this.storageKey('scope')) !== hint) try { this.storage.setItem(this.storageKey('scope'), hint) } catch { /* Only an optimization for later cleanup. */ }
-    const ctx = { student: wanted, epoch: this.epoch, scope: JSON.stringify([this.origin, identity.actor_id, wanted]) }
+    const ctx = { student: wanted, epoch, scope: JSON.stringify([this.origin, identity.actor_id, wanted]) }
     this.check(ctx); return ctx
   }
   /** One-time message about unconfirmed submissions that expired on this device. */
@@ -248,7 +302,7 @@ export class StudentClient {
   }
   private view(d: StoredDraft): DraftView {
     const pages = d.pages.map(p => ({ id: p.id, blob: p.photo.blob, width: p.photo.width, height: p.photo.height, size: p.photo.size, edited: !!p.original, assetId: p.assetId, uploaded: p.uploaded }))
-    return { id: d.id, title: d.title, stage: d.stage, createdAt: d.createdAt, updatedAt: d.updatedAt, homeworkId: d.homeworkId, error: d.error, pageCount: pages.length, uploadedCount: pages.filter(p => p.uploaded).length, photo: pages[0]?.blob ?? null, pages, editable: !d.locked, detail: d.detail, correction: d.correction ? { caseId: d.correction.caseId, parentAttemptId: d.correction.parentAttemptId } : undefined }
+    return { id: d.id, title: d.title, stage: d.stage, createdAt: d.createdAt, updatedAt: d.updatedAt, homeworkId: d.homeworkId, error: d.error, pageCount: pages.length, uploadedCount: pages.filter(p => p.uploaded).length, photo: pages[0]?.blob ?? null, pages, editable: !d.locked, detail: d.detail, recognitionJobId: d.recognitionJobId, curriculum: d.curriculum ?? null, correction: d.correction ? { caseId: d.correction.caseId, parentAttemptId: d.correction.parentAttemptId } : undefined }
   }
   async listDrafts(): Promise<DraftSummary[]> { const ctx = await this.authorize(); const drafts = await this.store.drafts(ctx.scope); this.check(ctx); return drafts.map(d => { const { photo: _p, detail: _d, pages: _pages, editable: _e, ...summary } = this.view(d); return summary }) }
   async getDraft(id: string) { const ctx = await this.authorize(); const d = await this.store.draft(ctx.scope, id); this.check(ctx); return this.view(d) }
@@ -265,10 +319,10 @@ export class StudentClient {
     checkBatch([...existing, ...pages].map(page => page.photo.size))
     return pages
   }
-  async createDraft(files: Blob | Blob[], title = '学校作业') {
+  async createDraft(files: Blob | Blob[], title = '学校作业', curriculum: CurriculumContext | null = null) {
     const list = Array.isArray(files) ? files : [files]; checkSelection(0, list)
     const ctx = await this.authorize(); const pages = await this.importPages(list, []); this.check(ctx)
-    const now = new Date().toISOString(); const d: StoredDraft = { format: DRAFT_FORMAT, id: crypto.randomUUID(), title: title.trim().slice(0, 120) || '学校作业', stage: 'local', createdAt: now, updatedAt: now, homeworkId: null, error: null, scope: ctx.scope, pages, locked: false, detail: null, generation: 0, checkJobs: {} }
+    const now = new Date().toISOString(); const d: StoredDraft = { format: DRAFT_FORMAT, id: crypto.randomUUID(), title: title.trim().slice(0, 120) || '学校作业', stage: 'local', createdAt: now, updatedAt: now, homeworkId: null, error: null, scope: ctx.scope, pages, locked: false, detail: null, generation: 0, checkJobs: {}, curriculum }
     await this.save(ctx, d); return this.view(d)
   }
   /** Applies a page change to a draft that has sent nothing yet. */
@@ -331,7 +385,26 @@ export class StudentClient {
     return homeworkPageIds(assets.filter(a => a.homework_id === hw.id), detail.jobs, detail.cases)
   }
   private async caseRecordRead(ctx: Context, id: string, homeworkId?: string): Promise<CorrectionCase> {
-    const c = await this.read<CorrectionCase>(ctx, `/v1/cases/${encoded(id)}`, 'CorrectionCase')
+    this.check(ctx)
+    const session = this.session, epoch = ctx.epoch
+    let flight = this.caseFlights.get(id)
+    if (!flight || flight.epoch !== epoch || flight.session !== session || flight.scope !== ctx.scope) {
+      // Record and recovery panels mount together. Share only their in-flight
+      // case GET; each public operation still authorizes and checks ownership.
+      const promise = Promise.resolve().then(() => {
+        if (!this.currentSession(epoch, session)) throw new StudentError('session_changed', 401)
+        return this.read<CorrectionCase>(ctx, `/v1/cases/${encoded(id)}`, 'CorrectionCase')
+      })
+      const pending = { epoch, session, scope: ctx.scope, promise }; flight = pending
+      this.caseFlights.set(id, pending)
+      const clear = () => { if (this.caseFlights.get(id) === pending) this.caseFlights.delete(id) }
+      void promise.then(clear, clear)
+    }
+    const result = await flight.promise
+    this.check(ctx)
+    if (!this.currentSession(epoch, session)) throw new StudentError('session_changed', 401)
+    // Callers must not share mutable arrays or nested decision/scope objects.
+    const c = structuredClone(result)
     if (c.scope.student_id !== ctx.student || homeworkId && c.homework_id !== homeworkId) throw new StudentError('access_denied', 403)
     return c
   }
@@ -344,6 +417,56 @@ export class StudentClient {
     return { case: c, question: q.record, attempt: a.record }
   }
   private async caseDetail(ctx: Context, id: string): Promise<CaseDetail> { return this.rowFor(ctx, await this.caseRecordRead(ctx, id)) }
+  private async recoveryStatus(ctx: Context, caseId: string, attemptId: string): Promise<RecognitionRecoveryStatus> {
+    const value = await this.read<RecognitionRecoveryStatus>(ctx, `/v1/cases/${encoded(caseId)}/recognition-rechecks/status`, 'RecognitionRecoveryStatus')
+    if (value.case_id !== caseId || value.attempt_id !== attemptId) throw new StudentError('stale_input', 409)
+    if (value.used + value.remaining !== value.limit || value.active_job_id && value.eligible) throw new StudentError('invalid_response', 502)
+    return value
+  }
+  /** Read-only recovery progress, bound to the current student's original attempt. */
+  async recognitionRecoveryStatus(caseId: string, attemptId: string) {
+    const ctx = await this.authorize(), c = await this.caseRecordRead(ctx, caseId)
+    if (c.current_attempt_id !== attemptId) throw new StudentError('stale_input', 409)
+    return this.recoveryStatus(ctx, caseId, attemptId)
+  }
+  /** Explicit user action only. Unknown writes retain their original key/body across reloads. */
+  async startRecognitionRecheck(row: CaseDetail): Promise<RecognitionRecoveryStatus> {
+    const ctx = await this.authorize(), current = await this.caseDetail(ctx, row.case.id)
+    if (current.attempt.id !== row.attempt.id) throw new StudentError('stale_input', 409)
+    const status = await this.recoveryStatus(ctx, row.case.id, row.attempt.id)
+    if (status.active_job_id) return status
+    const id = `recognition-recheck:${row.case.id}:${row.attempt.id}`
+    const previous = await this.store.operation(ctx.scope, id); this.check(ctx)
+    // An unresolved submission is replayed once only after an explicit click;
+    // neither polling nor a 503 chooses a new idempotency key.
+    if (previous?.response === undefined && previous) {
+      const accepted = await this.replay<RecognitionRecheckAccepted>(ctx, previous)
+      this.checkRecoveryAccepted(accepted, row)
+      return this.recoveryStatus(ctx, row.case.id, row.attempt.id)
+    }
+    if (!status.eligible) return status
+    if (current.case.revision !== row.case.revision || current.case.current_question_revision !== row.case.current_question_revision || current.attempt.recognition_revision !== row.attempt.recognition_revision) throw new StudentError('revision_conflict', 409)
+    if (previous) await this.store.removeOperation(ctx.scope, id)
+    try {
+      const accepted = await this.write<RecognitionRecheckAccepted>(ctx, id, `/v1/cases/${encoded(row.case.id)}/recognition-rechecks`, {
+        expected_revision: current.case.revision, attempt_id: current.attempt.id,
+        question_revision: current.case.current_question_revision, attempt_recognition_revision: current.attempt.recognition_revision,
+      }, 'RecognitionRecheckAccepted', 'StartRecognitionRecheck')
+      this.checkRecoveryAccepted(accepted, row)
+      return this.recoveryStatus(ctx, row.case.id, row.attempt.id)
+    } catch (error) {
+      // A network/503 result may have committed. Recover by GET, never another POST.
+      const recovered = await this.recoveryStatus(ctx, row.case.id, row.attempt.id).catch(() => null)
+      if (recovered?.active_job_id) return recovered
+      throw error
+    }
+  }
+  private checkRecoveryAccepted(value: RecognitionRecheckAccepted, row: CaseDetail) {
+    if (value.job.kind !== 'recognition_recheck' || value.recovery.case_id !== row.case.id || value.recovery.attempt_id !== row.attempt.id
+      || value.recovery.active_job_id && value.recovery.active_job_id !== value.job.id
+      || value.job.result && (value.job.result.resource_type !== 'attempt' || value.job.result.resource_id !== row.attempt.id)
+      || value.created_resource && (value.created_resource.resource_type !== 'attempt' || value.created_resource.resource_id !== row.attempt.id)) throw new StudentError('invalid_response', 502)
+  }
   /** All case records of a homework, following layout-repair replacements that the homework list may not name yet. */
   private async caseRecords(ctx: Context, homework: HomeworkSession) {
     const records = new Map<string, CorrectionCase>(), queue = [...homework.case_ids]
@@ -352,16 +475,58 @@ export class StudentClient {
       const c = await this.caseRecordRead(ctx, queue[index], homework.id); records.set(c.id, c)
       if (c.lifecycle === 'superseded') for (const next of c.replacement_case_ids) if (!queue.includes(next)) queue.push(next)
     }
+    // A capacity fallback must never turn a truncated traversal into a
+    // successful smaller homework, including replacements discovered late.
+    if (queue.some(id => !records.has(id))) throw new StudentError('detail_bundle_limit', 409, '题目记录较多，本次未能完整加载；已保留原有记录。')
     return records
   }
   private async detail(ctx: Context, id: string): Promise<HomeworkDetail> {
+    if (!this.detailSnapshotEnabled) return this.legacyDetail(ctx, id)
+    this.check(ctx)
+    // A same-token restore still creates a different authenticated session.
+    // Carry this fence through the caller's later storage awaits and save.
+    ctx.detailSession ??= this.session!
+    try {
+      const snapshot = await this.read<HomeworkDetailRead>(ctx, `/v1/homeworks/${encoded(id)}/detail`, 'HomeworkDetailRead')
+      const detail = detailFromSnapshot(snapshot, id, ctx.student)
+      this.check(ctx)
+      return detail
+    } catch (error) {
+      // Explicit deployment opt-in, never infer old-server support from a 404.
+      // Only the server's bounded-bundle rejection may use the original reads.
+      this.check(ctx)
+      if (!(error instanceof StudentError) || error.status !== 409 || error.code !== 'detail_bundle_limit') throw error
+      return this.legacyDetail(ctx, id)
+    }
+  }
+  private async legacyDetail(ctx: Context, id: string): Promise<HomeworkDetail> {
     const homework = await this.read<HomeworkSession>(ctx, `/v1/homeworks/${encoded(id)}`, 'HomeworkSession')
     if (homework.scope.student_id !== ctx.student) throw new StudentError('access_denied', 403)
-    const records = await this.caseRecords(ctx, homework), cases: CaseDetail[] = [], jobs: Job[] = []
-    for (const caseId of orderActiveCases(homework.case_ids, records)) cases.push(await this.rowFor(ctx, records.get(caseId)!))
-    for (const id of homework.job_ids) jobs.push(await this.read<Job>(ctx, `/v1/jobs/${encoded(id)}`, 'Job'))
-    const rows = new Map(cases.map(row => [row.case.id, row]))
-    return { homework, cases: orderCasesByCreation(homework.case_ids, records, cases).map(caseId => rows.get(caseId)!), jobs, retired: retiredCases(records) }
+    const records = await this.caseRecords(ctx, homework), jobs: Job[] = []
+    // Independent cases can load together while preserving each row's
+    // question-to-attempt read order and validation. Stop queuing after failure.
+    let rowFailure: { error: unknown } | undefined
+    const cases = await mapLimit(orderActiveCases(homework.case_ids, records), 4, async caseId => {
+      if (rowFailure) throw rowFailure.error
+      try { return await this.rowFor(ctx, records.get(caseId)!) }
+      catch (error) { rowFailure ??= { error }; throw error }
+    })
+    for (const jobId of homework.job_ids) jobs.push(await this.read<Job>(ctx, `/v1/jobs/${encoded(jobId)}`, 'Job'))
+    // A failed or queued check is row-level state. Keep it next to the row so
+    // the student view can distinguish it from a missing judgment.
+    const withCheckJobs = await mapLimit(cases, 3, async row => {
+      const checks = await mapLimit(row.case.check_ids, 3, checkId => this.read<CheckRun>(ctx, `/v1/checks/${encoded(checkId)}`, 'CheckRun'))
+      for (const check of checks.sort(compareCreated).reverse()) {
+        if (matches(check.input_versions, row)) {
+          const job = jobs.find(candidate => candidate.id === check.job_id)
+          if (job) return { ...row, checkJob: job }
+        }
+      }
+      return row
+    })
+    const rows = new Map(withCheckJobs.map(row => [row.case.id, row]))
+    const ordered = orderCasesByCreation(homework.case_ids, records, withCheckJobs).map(caseId => rows.get(caseId)!)
+    return { homework, cases: orderRowsByPhoto(ordered, homework.asset_ids), jobs, retired: retiredCases(records) }
   }
   /** Read-only counts for the history list; never a whole-homework accuracy. */
   async homeworkSummary(homework: HomeworkSession): Promise<HomeworkSummary> { return this.summaryFor(await this.authorize(), homework) }
@@ -378,6 +543,17 @@ export class StudentClient {
     if (homework.scope.student_id !== ctx.student) throw new StudentError('access_denied', 403)
     const records = await this.caseRecords(ctx, homework), active = orderCasesByCreation(homework.case_ids, records).map(id => records.get(id)!)
     return { homeworkId: homework.id, revision: homework.revision, counts: countBuckets(active.map(bucketOfCase)), firstUnresolvedCaseId: firstUnresolved(active, bucketOfCase)?.id ?? null, retired: records.size - active.length }
+  }
+  /** Exact captured question snapshot, including noncurrent historical revisions. */
+  async questionRevision(homeworkId: string, questionId: string, revision: number): Promise<QuestionRead> {
+    if (!Number.isSafeInteger(revision) || revision < 1) throw new StudentError('invalid_response', 502)
+    const authorized = await this.authorize(), ctx = { ...authorized, detailSession: this.session! }
+    const homework = await this.read<HomeworkSession>(ctx, `/v1/homeworks/${encoded(homeworkId)}`, 'HomeworkSession')
+    if (homework.id !== homeworkId || homework.scope.student_id !== ctx.student || !homework.question_ids.includes(questionId)) throw new StudentError('access_denied', 403)
+    const question = await this.read<QuestionRead>(ctx, `/v1/questions/${encoded(questionId)}?revision=${revision}`, 'QuestionRead')
+    if (question.record.question_id !== questionId || question.record.homework_id !== homeworkId || question.record.revision !== revision || question.current_revision < revision) throw new StudentError('stale_detail', 409)
+    this.check(ctx)
+    return question
   }
   /** Every attempt, check decision, shown hint, help request and review of one case. */
   async caseRecord(caseId: string): Promise<CaseRecord> {
@@ -409,11 +585,28 @@ export class StudentClient {
     if (d.pages.some(page => !page.uploaded) || !recognition && !detail.cases.length) d.stage = d.stage === 'failed' ? 'failed' : 'waiting'
     else if (recognition?.status === 'failed') d.stage = 'failed'
     else if (detail.jobs.some(active)) d.stage = 'waiting'
-    else d.stage = detail.cases.every(row => effectiveDecision(row) || row.attempt.recognition_status !== 'ready') ? 'complete' : 'waiting'
+    else if (detail.cases.every(row => effectiveDecision(row) || row.attempt.recognition_status === 'needs_revision')) d.stage = 'complete'
+    else if (detail.jobs.some(terminalFailure)) d.stage = 'failed'
+    else d.stage = 'waiting'
     if (d.stage === 'complete' && !hasPendingWrite) d.error = null
     detail.draftId = d.id
     await this.save(ctx, d)
     return detail
+  }
+  /** Refresh the currently opened cache, including a correction-photo draft.
+   * GET only: never resumes uploads/checks or creates a replacement draft.
+   */
+  async refreshRecognitionDraft(id: string, homeworkId: string): Promise<DraftView> {
+    const ctx = await this.authorize(), opened = await this.store.draft(ctx.scope, id)
+    this.check(ctx)
+    if (opened.homeworkId !== homeworkId) throw new StudentError('stale_input', 409)
+    const detail = await this.detail(ctx, homeworkId)
+    // Re-read after network work so unrelated local edits/operation state survive.
+    const latest = await this.store.draft(ctx.scope, id); this.check(ctx)
+    if (latest.homeworkId !== homeworkId) throw new StudentError('stale_input', 409)
+    latest.detail = { ...detail, draftId: latest.id }
+    await this.save(ctx, latest)
+    return this.view(latest)
   }
   async assetBlob(id: string): Promise<Blob> {
     const ctx = await this.authorize(), key = ctx.scope + ':' + id
@@ -439,21 +632,42 @@ export class StudentClient {
     const now = new Date().toISOString(), d: StoredDraft = { format: DRAFT_FORMAT, id: crypto.randomUUID(), scope: ctx.scope, title: '新订正照片', stage: 'local', createdAt: now, updatedAt: now, homeworkId: row.case.homework_id, pages: [newPage(photo)], locked: false, detail: null, error: null, generation: 0, checkJobs: {}, correction: { caseId, parentAttemptId: row.case.current_attempt_id, reportedHelp } }
     await this.save(ctx, d); return this.view(d)
   }
-  private async awaitJob(ctx: Context, id: string): Promise<Job> {
-    for (let count = 0; count < 120; count++) {
-      const job = await this.read<Job>(ctx, `/v1/jobs/${encoded(id)}`, 'Job')
-      if (!active(job)) return job
-      await this.sleep(Math.min(5000, Math.max(1000, (job.retry_after_seconds ?? 2) * 1000))); this.check(ctx)
+  /** Poll a group as one unit so a slow job cannot prevent the other jobs from being observed. */
+  async recognitionProgress(jobId: string, homeworkId: string, assetIds: string[]): Promise<RecognitionProgress> {
+    const ctx = await this.authorize(), session = this.session
+    const value = await this.read<unknown>(ctx, `/v1/jobs/${encoded(jobId)}/recognition-progress`, 'RecognitionProgress')
+    if (!this.currentSession(ctx.epoch, session)) throw new StudentError('session_changed', 401)
+    if (!isRecognitionProgress(value) || value.job_id !== jobId || value.homework_id !== homeworkId || value.student_id !== ctx.student || value.pages.some(p => !assetIds.includes(p.asset_id))) throw new StudentError('invalid_response', 502)
+    return value
+  }
+
+  private async pollJobs(ctx: Context, ids: string[]): Promise<Job[]> {
+    const latest = new Map<string, Job>(), uniqueIds = unique(ids)
+    for (let count = 0; count < JOB_POLL_ROUNDS; count++) {
+      const pending = uniqueIds.filter(id => !latest.has(id) || active(latest.get(id)!))
+      if (!pending.length) return [...latest.values()]
+      const current = await Promise.all(pending.map(id => this.read<Job>(ctx, `/v1/jobs/${encoded(id)}`, 'Job')))
+      current.forEach(job => latest.set(job.id, job))
+      if (![...latest.values()].some(active)) return [...latest.values()]
+      const delay = Math.min(5000, Math.max(1000, Math.max(...current.map(job => job.retry_after_seconds ?? 2)) * 1000))
+      await this.sleep(delay); this.check(ctx)
     }
+    return [...latest.values()]
+  }
+  private async awaitJob(ctx: Context, id: string): Promise<Job> {
+    const [job] = await this.pollJobs(ctx, [id])
+    if (job && !active(job)) return job
     throw new StudentError('job_waiting', 0, '任务仍在处理中，可稍后打开这份记录继续查看。')
   }
   private jobSucceeded(job: Job) { if (job.status !== 'succeeded') throw new StudentError(`job_${job.status}`, 0, job.status === 'failed' ? '本次识别或检查未完成。原图和失败记录已保留，可明确重试未完成部分。' : '任务版本已变化，请刷新作业查看最新结果。') }
-  runDraft(id: string, options: { retryFailed?: boolean; rerecognize?: boolean } = {}): Promise<DraftView> {
-    const key = `${this.epoch}:${id}`; const existing = this.runs.get(key); if (existing) return existing
+  runDraft(id: string, options: { retryFailed?: boolean; rerecognize?: boolean; forceCheckCaseIds?: string[]; forceCheckToken?: string } = {}): Promise<DraftView> {
+    const key = `${this.epoch}:${id}`; const existing = this.runs.get(key)
+    // Explicit input changes must not inherit an older background run.
+    if (existing) return options.forceCheckCaseIds?.length || options.retryFailed || options.rerecognize ? existing.then(() => this.runDraft(id, options)) : existing
     const run = async () => { const ctx = await this.authorize(); if (typeof navigator !== 'undefined' && navigator.locks) return navigator.locks.request(`xueban:${ctx.scope}:${id}`, () => this.process(ctx, id, options)); return this.process(ctx, id, options) }
     const result = run().finally(() => { this.runs.delete(key) }); this.runs.set(key, result); return result
   }
-  private async process(ctx: Context, id: string, options: { retryFailed?: boolean; rerecognize?: boolean }): Promise<DraftView> {
+  private async process(ctx: Context, id: string, options: { retryFailed?: boolean; rerecognize?: boolean; forceCheckCaseIds?: string[]; forceCheckToken?: string }): Promise<DraftView> {
     const d = await this.store.draft(ctx.scope, id); this.check(ctx)
     const journalId = d.journalId ?? id
     const post = <T>(name: string, path: string, body: unknown, shape: string, requestShape: string) => this.write<T>(ctx, `${journalId}:${name}`, path, body, shape, requestShape)
@@ -491,7 +705,8 @@ export class StudentClient {
       d.error = null
       if (!d.homeworkId) {
         d.stage = 'creating'; await this.save(ctx, d)
-        const hw = await post<HomeworkSession>('homework', `/v1/students/${encoded(ctx.student)}/homeworks`, { title: d.title, occurred_at: d.createdAt, collection_scope: 'partial', curriculum: { stage: 'junior_middle', publisher_code: 'PEP', grade: null, subject: null, volume: null, edition: null } }, 'HomeworkSession', 'CreateHomework')
+        const course = d.curriculum
+        const hw = await post<HomeworkSession>('homework', `/v1/students/${encoded(ctx.student)}/homeworks`, { title: d.title, occurred_at: d.createdAt, collection_scope: 'partial', curriculum: course ?? { stage: null, publisher_code: null, grade: null, subject: null, volume: null, edition: null } }, 'HomeworkSession', 'CreateHomework')
         d.homeworkId = hw.id; await this.save(ctx, d)
       }
       const path = `/v1/homeworks/${encoded(d.homeworkId)}`
@@ -547,37 +762,63 @@ export class StudentClient {
         }
         await this.save(ctx, d)
       }
-      if (d.recognitionJobId) { d.stage = 'recognizing'; await this.save(ctx, d); this.jobSucceeded(await this.awaitJob(ctx, d.recognitionJobId)) }
+      if (d.recognitionJobId) {
+        d.stage = 'recognizing'; await this.save(ctx, d)
+        const [recognitionJob] = await this.pollJobs(ctx, [d.recognitionJobId])
+        if (!recognitionJob || active(recognitionJob)) {
+          d.error = null; d.stage = 'waiting'; d.detail = await this.detail(ctx, d.homeworkId); await this.save(ctx, d); return this.view(d)
+        }
+        this.jobSucceeded(recognitionJob)
+      }
       d.detail = await this.detail(ctx, d.homeworkId)
-      // Whole-page processing already saves candidate and needs_review decisions.
-      // A pending review is a result, not a reason to launch another model check.
-      // Keep the old per-question path only for ready answers without a current result.
-      const rowsToCheck = d.correction ? [await this.caseDetail(ctx, d.correction.caseId)] : d.detail.cases
-      const pendingRows = rowsToCheck.filter(row => !effectiveDecision(row) && row.attempt.recognition_status === 'ready')
-      if (!pendingRows.length) { d.stage = 'complete'; await this.save(ctx, d); return this.view(d) }
+      // Recovery is a server-owned original-image task, not a new /checks request.
+      if (d.detail.jobs.some(job => job.kind === 'recognition_recheck' && active(job))) { d.stage = 'waiting'; d.error = null; await this.save(ctx, d); return this.view(d) }
       d.stage = 'checking'; await this.save(ctx, d)
-      const ids = pendingRows.map(row => row.case.id)
-      const failures: Job[] = []
+      const forced = new Set(options.forceCheckCaseIds ?? [])
+      const ids = forced.size ? [...forced] : d.correction ? [d.correction.caseId] : d.detail.cases.map(row => row.case.id)
+      const knownJobs = new Map(d.detail.jobs.map(job => [job.id, job]))
+      const checkJobs = new Map<string, Job>()
+      const skipped = new Set<string>()
       for (const caseId of ids) {
         let row: CaseDetail
         try { row = await this.caseDetail(ctx, caseId) } catch (e) { if (!d.correction && e instanceof StudentError && ['case_superseded', 'case_unavailable'].includes(e.code)) continue; throw e }
-        if (effectiveDecision(row) || row.attempt.recognition_status !== 'ready') continue
+        if (effectiveDecision(row) && !forced.has(caseId)) continue
+        const answerTextPresent = typeof row.attempt.answer_text === 'string' && row.attempt.answer_text.trim().length > 0
+        if (row.attempt.recognition_status === 'pending' || row.attempt.recognition_status === 'failed'
+          || row.attempt.recognition_status === 'needs_revision' && (!forced.has(caseId) || !answerTextPresent)) {
+          skipped.add(caseId); continue
+        }
         let job: Job | undefined
-        for (const checkId of [...row.case.check_ids].reverse()) {
-          const check = await this.read<CheckRun>(ctx, `/v1/checks/${encoded(checkId)}`, 'CheckRun')
-          if (matches(check.input_versions, row)) { const candidate = await this.read<Job>(ctx, `/v1/jobs/${encoded(check.job_id)}`, 'Job'); if (active(candidate)) { job = candidate; break } if (candidate.status === 'failed' && !options.retryFailed) { job = candidate; break } }
+        const checks = await mapLimit(row.case.check_ids, 3, checkId => this.read<CheckRun>(ctx, `/v1/checks/${encoded(checkId)}`, 'CheckRun'))
+        for (const check of checks.sort(compareCreated).reverse()) {
+          if (matches(check.input_versions, row)) {
+            const candidate = knownJobs.get(check.job_id) ?? await this.read<Job>(ctx, `/v1/jobs/${encoded(check.job_id)}`, 'Job')
+            if (active(candidate)) { job = candidate; break }
+            if (candidate.status === 'failed' && !options.retryFailed) { job = candidate; break }
+          }
         }
         if (!job) {
           const version = `${row.attempt.id}-${row.case.current_question_revision}-${row.attempt.recognition_revision}`
-          const accepted = await post<Accepted>(`check-${caseId}-${version}-${d.generation}`, `/v1/cases/${encoded(caseId)}/checks`, { expected_revision: row.case.revision, attempt_id: row.attempt.id, question_revision: row.case.current_question_revision, attempt_recognition_revision: row.attempt.recognition_revision }, 'Accepted', 'StartCheck')
+          const accepted = await post<Accepted>(`check-${caseId}-${version}-${d.generation}${forced.has(caseId) ? `-${options.forceCheckToken ?? crypto.randomUUID()}` : ''}`, `/v1/cases/${encoded(caseId)}/checks`, { expected_revision: row.case.revision, attempt_id: row.attempt.id, question_revision: row.case.current_question_revision, attempt_recognition_revision: row.attempt.recognition_revision }, 'Accepted', 'StartCheck')
           job = accepted.job
         }
-        d.checkJobs[caseId] = job.id; await this.save(ctx, d)
-        const done = await this.awaitJob(ctx, job.id); if (done.status !== 'succeeded') failures.push(done)
-        d.detail = await this.detail(ctx, d.homeworkId); await this.save(ctx, d)
+        d.checkJobs[caseId] = job.id; checkJobs.set(caseId, job); await this.save(ctx, d)
       }
+      const polled = await this.pollJobs(ctx, [...checkJobs.values()].map(job => job.id))
       d.detail = await this.detail(ctx, d.homeworkId)
-      if (failures.length) this.jobSucceeded(failures[0])
+      if (polled.some(active)) { d.error = null; d.stage = 'waiting'; await this.save(ctx, d); return this.view(d) }
+      const failure = polled.find(job => job.status !== 'succeeded')
+      if (failure) this.jobSucceeded(failure)
+      const unresolved = d.detail.cases.filter(row => (!d.correction || row.case.id === d.correction.caseId) && !effectiveDecision(row))
+      if (unresolved.length) {
+        if (unresolved.some(row => row.attempt.recognition_status === 'failed')) throw new StudentError('recognition_failed', 0, '部分题目的识别服务未完成，未生成判断；请重试或请坐班老师核实。')
+        // A correction photo can finish recognition without enough answer
+        // evidence for a second-pass judgment. Keep the case visible for
+        // review, but do not turn a completed recognition into a false error.
+        if (unresolved.every(row => row.attempt.recognition_status === 'needs_revision')) { d.stage = 'complete'; await this.save(ctx, d); return this.view(d) }
+        // A pending attempt or a server-side queued check is unfinished work.
+        d.error = null; d.stage = skipped.size ? 'waiting' : 'checking'; await this.save(ctx, d); return this.view(d)
+      }
       d.stage = 'complete'; await this.save(ctx, d); return this.view(d)
     } catch (error) {
       this.check(ctx); d.error = safeError(error); d.stage = error instanceof StudentError && error.code === 'job_waiting' ? 'waiting' : 'failed'
@@ -634,15 +875,47 @@ export class StudentClient {
    * Idempotency-Key and these writes are not journaled; callers re-read
    * after an unknown outcome instead of replaying.
    */
-  private async learning<T>(path: (student: string) => string, guard: (value: unknown) => value is T, body?: unknown): Promise<{ value: T; student: string }> {
+  private async learning<T>(path: (student: string) => string, guard: (value: unknown) => value is T, body?: unknown, method?: 'PUT'): Promise<{ value: T; student: string }> {
     const ctx = await this.authorize()
-    const value = await this.api.request<unknown>(path(encoded(ctx.student)), 'Learning', body === undefined ? undefined : JSON.stringify(body), body === undefined ? undefined : crypto.randomUUID())
+    const value = await this.api.request<unknown>(path(encoded(ctx.student)), 'Learning', body === undefined ? undefined : JSON.stringify(body), body === undefined ? undefined : crypto.randomUUID(), false, method)
     this.check(ctx)
     if (!guard(value)) throw new StudentError('invalid_response', 502)
     return { value, student: ctx.student }
   }
   private owned<T extends { student_id: string }>(result: { value: T; student: string }): T { if (result.value.student_id !== result.student) throw new StudentError('access_denied', 403); return result.value }
   async knowledgeMap(): Promise<KnowledgeMap> { return this.owned(await this.learning(s => `/v1/students/${s}/knowledge`, isKnowledgeMap)) }
+  async setQuestionSubject(questionId: string, questionRevision: number, subject: string): Promise<void> {
+    const ctx = await this.authorize()
+    const value = await this.api.request<unknown>(`/v1/questions/${encoded(questionId)}/subject`, 'Learning',
+      JSON.stringify({ expected_question_revision: questionRevision, subject }), crypto.randomUUID(), false, 'PUT')
+    this.check(ctx)
+    if (typeof value !== 'object' || value === null || (value as { question_id?: unknown }).question_id !== questionId
+        || (value as { subject?: unknown }).subject !== subject) throw new StudentError('invalid_response', 502)
+  }
+  async curriculumCatalog(): Promise<CurriculumCatalog> {
+    const ctx = await this.authorize(), value = await this.api.request<unknown>('/v1/curriculum/catalog', 'Learning')
+    this.check(ctx); if (!isCurriculumCatalog(value)) throw new StudentError('invalid_response', 502); return value
+  }
+  async studentCurriculum(): Promise<StudentCurriculum> {
+    const { value, student } = await this.learning(s => `/v1/students/${s}/curriculum`, isStudentCurriculum)
+    if (value.student_id !== student) throw new StudentError('access_denied', 403)
+    return value
+  }
+  async setStudentGrade(grade: number): Promise<StudentCurriculum> {
+    if (![5, 6, 7, 8].includes(grade)) throw new StudentError('invalid_grade', 422, '请选择五至八年级。')
+    const profile = await this.learning(s => `/v1/students/${s}/learning-profile`, (value): value is { student_id: string; revision: number } => typeof value === 'object' && value !== null && typeof (value as { revision?: unknown }).revision === 'number' && (value as { student_id?: unknown }).student_id === this.student)
+    const current = profile.value as { revision: number }
+    const { value, student } = await this.learning(s => `/v1/students/${s}/learning-profile`, isStudentCurriculum, {
+      expected_revision: current.revision, grade, term: null, current_knowledge_ids: [], note: null,
+    }, 'PUT')
+    if (value.student_id !== student) throw new StudentError('access_denied', 403)
+    return value
+  }
+  async curriculumBooks(): Promise<CurriculumBooks> { return this.owned(await this.learning(s => `/v1/students/${s}/curriculum-books`, isCurriculumBooks)) }
+  async selectCurriculumBook(graphVersion: string | null, expectedRevision: number): Promise<CurriculumBooks> {
+    if (!Number.isInteger(expectedRevision) || expectedRevision < 0 || (graphVersion !== null && (!graphVersion || graphVersion.length > 200))) throw new StudentError('invalid_curriculum_selection', 422)
+    return this.owned(await this.learning(s => `/v1/students/${s}/curriculum-books`, isCurriculumBooks, { expected_revision: expectedRevision, graph_version: graphVersion }, 'PUT'))
+  }
   async knowledgeNode(knowledgeId: string): Promise<KnowledgeDetail> { return (await this.learning(s => `/v1/students/${s}/knowledge/${encoded(knowledgeId)}`, isKnowledgeDetail)).value }
   async agentContext(caseId: string): Promise<AgentContext> {
     const { value } = await this.learning(() => `/v1/cases/${encoded(caseId)}/agent-context`, isAgentContext)
@@ -657,17 +930,47 @@ export class StudentClient {
   }
   async retractMemory(memoryId: string): Promise<Memory> { return (await this.learning(() => `/v1/memories/${encoded(memoryId)}/retract`, isMemory, {})).value }
   async optionalActivities(): Promise<OptionalActivities> { return (await this.learning(s => `/v1/students/${s}/optional-activities`, isOptionalActivities)).value }
+  async variantPractice(): Promise<VariantPracticeOverview> { return this.owned(await this.learning(s => `/v1/students/${s}/variant-practice`, isVariantPracticeOverview)) }
+  async generateVariant(request: GenerateVariant): Promise<VariantGeneration> {
+    const value = this.owned(await this.learning(s => `/v1/students/${s}/variant-generations`, isVariantGeneration, request))
+    if (value.source_case_id !== request.source_case_id) throw new StudentError('invalid_response', 502)
+    return value
+  }
+  async variantGeneration(jobId: string): Promise<VariantGeneration> {
+    const value = this.owned(await this.learning(() => `/v1/variant-generations/${encoded(jobId)}`, isVariantGeneration))
+    if (value.job_id !== jobId) throw new StudentError('invalid_response', 502)
+    return value
+  }
+  async variantGenerations(): Promise<VariantGenerationList> {
+    const value = this.owned(await this.learning(s => `/v1/students/${s}/variant-generations`, isVariantGenerationList))
+    if (value.items.some(item => item.student_id !== value.student_id)) throw new StudentError('access_denied', 403)
+    return value
+  }
   async startPractice(request: StartPractice): Promise<PracticeSession> { return this.owned(await this.learning(s => `/v1/students/${s}/practice-sessions`, isPracticeSession, request)) }
-  async practiceSession(sessionId: string): Promise<PracticeSession> { return this.owned(await this.learning(() => `/v1/practice-sessions/${encoded(sessionId)}`, isPracticeSession)) }
+  async practiceSession(sessionId: string): Promise<PracticeSession> {
+    const value = this.owned(await this.learning(() => `/v1/practice-sessions/${encoded(sessionId)}`, isPracticeSession))
+    if (value.id !== sessionId) throw new StudentError('invalid_response', 502)
+    return value
+  }
+  async practiceAssessment(assessmentId: string, sessionId: string, itemId: string): Promise<PracticeAssessment> {
+    const value = this.owned(await this.learning(() => `/v1/practice-assessments/${encoded(assessmentId)}`, isPracticeAssessment))
+    if (value.assessment_id !== assessmentId || value.session_id !== sessionId || value.item_id !== itemId) throw new StudentError('invalid_response', 502)
+    return value
+  }
   /** The student's unfinished activity, if any (e.g. after a reload or an unconfirmed start). */
   async activePractice(): Promise<PracticeSession | null> {
     const { value, student } = await this.learning(s => `/v1/students/${s}/practice-sessions`, isPracticeSessionList)
     return value.items.find(item => item.student_id === student && item.status === 'active' && Date.parse(item.budget_ends_at) > Date.now()) ?? null
   }
-  async answerPractice(sessionId: string, itemId: string, answer: string): Promise<PracticeAnswer> {
-    const trimmed = answer.trim()
+  async answerPractice(sessionId: string, itemId: string, answer: string | PracticeSubmission): Promise<PracticeAnswer> {
+    const submission = typeof answer === 'string' ? { answer_text: answer } : answer
+    const trimmed = submission.answer_text.trim()
     if (!trimmed || [...trimmed].length > PRACTICE_ANSWER_MAX) throw new StudentError('answer_length', 422, `请写下答案（不超过 ${PRACTICE_ANSWER_MAX} 个字）。`)
-    const { value } = await this.learning(() => `/v1/practice-sessions/${encoded(sessionId)}/responses`, isPracticeAnswer, { item_id: itemId, answer_text: trimmed })
+    const selected = submission.selected_options
+    const answers = submission.answers?.map(part => ({ field_id: part.field_id, answer_text: part.answer_text.trim() }))
+    if (selected && (!selected.length || selected.length > 10 || new Set(selected).size !== selected.length || selected.some(value => !value.trim() || value.length > 8))) throw new StudentError('answer_length', 422, '请重新选择答案。')
+    if (answers && (!answers.length || answers.length > 12 || new Set(answers.map(part => part.field_id)).size !== answers.length || answers.some(part => !part.field_id || part.field_id.length > 40 || !part.answer_text))) throw new StudentError('answer_length', 422, '请填好每个空，再提交。')
+    const { value } = await this.learning(() => `/v1/practice-sessions/${encoded(sessionId)}/responses`, isPracticeAnswer, { item_id: itemId, answer_text: trimmed, ...(selected ? { selected_options: selected } : {}), ...(answers ? { answers } : {}) })
     if (value.item_id !== itemId) throw new StudentError('invalid_response', 502)
     return value
   }
