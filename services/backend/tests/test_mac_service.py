@@ -31,13 +31,17 @@ def runtime(tmp_path, monkeypatch):
 
 def test_plists_hold_no_secret_and_no_configuration(runtime, tmp_path):
     written = mac_service.write_plists(runtime, tmp_path / "agents")
-    assert len(written) == 3
+    assert len(written) == 4
     for path in written:
         raw = Path(path).read_bytes()
         assert not any(secret.encode() in raw for secret in SECRETS)
         assert b"postgresql+psycopg" not in raw and b"DATABASE_URL" not in raw
         assert oct(Path(path).stat().st_mode & 0o777) == "0o600"
         plist = plistlib.loads(raw)
+        if plist["Label"].endswith(".backup"):
+            assert "KeepAlive" not in plist and plist["StartCalendarInterval"] == {"Hour": 3, "Minute": 17}
+            assert plist["ProgramArguments"][-1] == "backup"
+            continue
         assert plist["KeepAlive"] is True and plist["RunAtLoad"] is True and plist["ThrottleInterval"] >= 10
         assert plist["ProgramArguments"][2:4] == ["--runtime", str(runtime)] and plist["ProgramArguments"][-2] == "exec"
         assert set(plist["EnvironmentVariables"]) == {"PATH", "LC_ALL", "LANG"}
@@ -146,3 +150,20 @@ def test_backup_always_restarts_writers_even_when_recovery_fails(runtime, monkey
         mac_service.run_backup(runtime)
     assert calls[:2] == ["bootout:worker", "bootout:api"]
     assert calls[2:] == ["bootstrap:api", "bootstrap:worker"]
+
+
+def test_install_survives_nothing_left_to_stop(runtime, tmp_path, monkeypatch):
+    seen = []
+
+    class Done:
+        returncode, stdout, stderr = 0, "", ""
+
+    class AlreadyStopped:
+        returncode, stdout, stderr = 1, "", "pg_ctl: no server running"
+
+    monkeypatch.setattr(mac_service, "AGENT_DIR", tmp_path / "agents")
+    monkeypatch.setattr(mac_service, "plist_path", lambda name, agent_dir=tmp_path / "agents": agent_dir / f"{mac_service.label(name)}.plist")
+    monkeypatch.setattr(mac_service, "launchctl", lambda *a, **k: seen.append(a[0]) or Done())
+    monkeypatch.setattr(mac_service.subprocess, "run", lambda *a, **k: AlreadyStopped())
+    written = mac_service.install(runtime)
+    assert len(written) == 4 and seen.count("bootstrap") == 4 and seen.count("enable") == 4
