@@ -39,8 +39,8 @@ def label(name):
     return f"{LABEL_PREFIX}.{name}"
 
 
-def plist_path(name, agent_dir=AGENT_DIR):
-    return Path(agent_dir) / f"{label(name)}.plist"
+def plist_path(name, agent_dir=None):
+    return Path(agent_dir or AGENT_DIR) / f"{label(name)}.plist"
 
 
 def build_programs(runtime, config):
@@ -105,9 +105,9 @@ def render_backup_plist(runtime, log_dir, python=None):
     return plistlib.dumps(payload)
 
 
-def write_plists(runtime, agent_dir=AGENT_DIR):
+def write_plists(runtime, agent_dir=None):
     runtime = Path(runtime)
-    agent_dir = Path(agent_dir)
+    agent_dir = Path(agent_dir or AGENT_DIR)
     agent_dir.mkdir(parents=True, exist_ok=True)
     written = []
     for name in AGENTS:
@@ -151,16 +151,16 @@ def domain():
     return f"gui/{os.getuid()}"
 
 
-def install(runtime):
-    runtime = Path(runtime)
+def install(runtime, agent_dir=None):
+    runtime, agent_dir = Path(runtime), Path(agent_dir or AGENT_DIR)
     # Hand-started processes must stop so launchd owns them. A non-zero exit only means there was
     # nothing left to stop (e.g. PostgreSQL already down), which is the state we want.
     subprocess.run([sys.executable, str(BACKEND / "scripts/mac_local.py"), "--runtime", str(runtime), "stop"],
                    check=False, capture_output=True, env=without_model_environment(os.environ))
-    written = write_plists(runtime)
+    written = write_plists(runtime, agent_dir)
     for name in (*AGENTS, "backup"):
         launchctl("bootout", f"{domain()}/{label(name)}", check=False)
-        launchctl("bootstrap", domain(), str(plist_path(name)))
+        launchctl("bootstrap", domain(), str(plist_path(name, agent_dir)))
         launchctl("enable", f"{domain()}/{label(name)}")
     return written
 
@@ -235,28 +235,65 @@ def prune(root, keep):
     return [p.name for p in doomed]
 
 
+def _loaded(name):
+    return launchctl("print", f"{domain()}/{label(name)}", check=False).returncode == 0
+
+
+def _wait(condition, seconds, step=0.5):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(step)
+    return condition()
+
+
+def _restart(name, attempts=5):
+    """bootstrap fails silently while the old job is still unloading, so retry and verify it is loaded."""
+    for _ in range(attempts):
+        if _loaded(name):
+            return True
+        launchctl("bootstrap", domain(), str(plist_path(name)), check=False)
+        if _wait(lambda: _loaded(name), 3):
+            return True
+        time.sleep(1)
+    return _loaded(name)
+
+
 def run_backup(runtime, keep=14):
-    """Stop the writers, take a verified backup, always restart them."""
+    """Stop the writers, wait until they are really gone, back up, always restart them (verified)."""
     runtime = Path(runtime)
     target = runtime / "scheduled-backups"
     target.mkdir(mode=0o700, exist_ok=True)
-    stopped = []
+    stopped, failed_restart = [], []
     try:
         for name in ("worker", "api"):
             launchctl("bootout", f"{domain()}/{label(name)}", check=False)
             stopped.append(name)
+        for name in stopped:
+            if not _wait(lambda n=name: not _loaded(n), 30):
+                raise RuntimeError(f"{name} did not stop within 30s; backup not attempted")
         for name in WRITER_PIDS:
             (runtime / name).unlink(missing_ok=True)
-        result = subprocess.run(
-            [sys.executable, str(REPO / "infra/scripts/recovery.py"), "--runtime", str(runtime),
-             "backup", "--writers-quiesced", "--backup-dir", str(target)],
-            capture_output=True, text=True, env=without_model_environment(os.environ))
+        # recovery.py refuses to run while any other client is connected; give the pool a moment to close.
+        result = None
+        for _ in range(6):
+            result = subprocess.run(
+                [sys.executable, str(REPO / "infra/scripts/recovery.py"), "--runtime", str(runtime),
+                 "backup", "--writers-quiesced", "--backup-dir", str(target)],
+                capture_output=True, text=True, env=without_model_environment(os.environ))
+            if result.returncode == 0 or "database_has_other_clients" not in result.stderr:
+                break
+            time.sleep(2)
         if result.returncode:
             raise RuntimeError("backup failed: " + (result.stderr.strip().splitlines() or ["unknown"])[-1][:200])
         info = json.loads(result.stdout.strip().splitlines()[-1])
     finally:
         for name in reversed(stopped):
-            launchctl("bootstrap", domain(), str(plist_path(name)), check=False)
+            if not _restart(name):
+                failed_restart.append(name)
+    if failed_restart:
+        raise RuntimeError("backup finished but could not restart: " + ", ".join(failed_restart))
     info["pruned"] = prune(target, keep)
     return info
 

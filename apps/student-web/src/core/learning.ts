@@ -83,7 +83,7 @@ export interface KnowledgeMap {
   nodes?: KnowledgeGraphNode[]; edges?: KnowledgeGraphEdge[]; book_identity?: CurriculumBookIdentity | null; source_note?: string | null
   states: KnowledgeState[]; chapters: ChapterRollup[]; subjects?: CurriculumSubject[]; notice: string
 }
-export interface KnowledgeEvidence { id: string; occurred_at: string; question_text: string | null; homework_title: string | null; result: EvidenceResult; assistance_level: string; event_type: string; source_role?: 'model' | 'sitting_teacher' | 'unknown'; case_id?: string; question_id?: string; homework_id?: string; attempt_id?: string; decision_id?: string }
+export interface KnowledgeEvidence { id: string; occurred_at: string; question_text: string | null; homework_title: string | null; result: EvidenceResult; assistance_level: string; event_type: string; source_role?: 'model' | 'sitting_teacher' | 'unknown'; case_id?: string; question_id?: string; homework_id?: string; attempt_id?: string; parent_attempt_id?: string | null; decision_id?: string; answer_text?: string | null; reference_answer?: string | null; item_family_id?: string; independent?: boolean }
 export interface KnowledgeDetail {
   node: { id: string; name: string; observable_objective: string | null; definition: string | null }
   state: ({ learning_status: LearningStatus; reason_codes: string[] } & EvidenceSources) | null
