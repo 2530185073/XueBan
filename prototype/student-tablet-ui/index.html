@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f4f7fb" />
+    <title>荣耀伴学 · 平板原型</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="prototype-shell" aria-live="polite">
+      <section class="login-view view is-active" data-view="login" aria-labelledby="login-title">
+        <div class="login-brand-panel">
+          <div class="brand-lockup brand-lockup--large">
+            <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+            <span>荣耀伴学</span>
+          </div>
+          <div class="login-brand-copy">
+            <p class="eyebrow">STUDY WITH CLARITY</p>
+            <h1>把每一次作业，<br />变成看得见的进步。</h1>
+            <p>从拍照上传开始，逐步建立属于你的知识地图。</p>
+          </div>
+          <div class="login-orbit" aria-hidden="true">
+            <span class="orbit-line orbit-line--one"></span>
+            <span class="orbit-line orbit-line--two"></span>
+            <span class="orbit-dot orbit-dot--one"></span>
+            <span class="orbit-dot orbit-dot--two"></span>
+            <span class="orbit-dot orbit-dot--three"></span>
+            <span class="orbit-core">学</span>
+          </div>
+          <div class="login-footer-note">初中学习 · 机构平板专用</div>
+        </div>
+
+        <div class="login-form-panel">
+          <div class="login-form-wrap">
+            <div class="mobile-brand brand-lockup">
+              <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+              <span>荣耀伴学</span>
+            </div>
+            <p class="eyebrow">WELCOME BACK</p>
+            <h2 id="login-title">欢迎回来</h2>
+            <p class="form-intro">登录你的学习空间，继续今天的任务。</p>
+
+            <form id="login-form" novalidate>
+              <label class="field-label" for="student-account">账号</label>
+              <div class="input-wrap">
+                <span class="input-symbol" aria-hidden="true">ID</span>
+                <input id="student-account" name="account" type="text" placeholder="输入学生账号" autocomplete="username" />
+              </div>
+              <p class="field-error" id="account-error" role="alert"></p>
+
+              <label class="field-label" for="student-password">密码</label>
+              <div class="input-wrap">
+                <span class="input-symbol" aria-hidden="true">••</span>
+                <input id="student-password" name="password" type="password" placeholder="输入密码" autocomplete="current-password" />
+                <button class="icon-button password-toggle" type="button" aria-label="显示密码" data-password-toggle>
+                  <span aria-hidden="true">○</span>
+                </button>
+              </div>
+              <p class="field-error" id="password-error" role="alert"></p>
+
+              <div class="form-row form-row--between">
+                <label class="checkbox-label">
+                  <input type="checkbox" checked />
+                  <span>记住账号</span>
+                </label>
+                <button class="text-button" type="button" data-toast="请联系教务老师重置密码">忘记密码？</button>
+              </div>
+
+              <button class="primary-button primary-button--login" type="submit">
+                <span>登录</span>
+                <span class="button-arrow" aria-hidden="true">→</span>
+              </button>
+            </form>
+
+            <p class="login-help">首次使用？请向教务老师获取账号</p>
+          </div>
+          <div class="login-form-bottom"><span>隐私说明</span><span>v0.1 产品原型</span></div>
+        </div>
+      </section>
+
+      <section class="app-view view" data-view="app" aria-label="荣耀伴学应用">
+        <aside class="app-sidebar">
+          <div class="brand-lockup brand-lockup--sidebar">
+            <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+            <span>荣耀伴学</span>
+          </div>
+
+          <nav class="side-nav" aria-label="主导航">
+            <button class="side-nav-item is-active" type="button" data-nav="home">
+              <span class="nav-icon nav-icon--home" aria-hidden="true"></span><span>首页</span>
+            </button>
+            <button class="side-nav-item" type="button" data-nav="profile">
+              <span class="nav-icon nav-icon--map" aria-hidden="true"></span><span>我的知识图谱</span>
+            </button>
+            <button class="side-nav-item is-disabled" type="button" disabled>
+              <span class="nav-icon nav-icon--box" aria-hidden="true"></span><span>口口口</span><span class="nav-soon">二期</span>
+            </button>
+            <button class="side-nav-item is-disabled" type="button" disabled>
+              <span class="nav-icon nav-icon--spark" aria-hidden="true"></span><span>口口口</span><span class="nav-soon">三期</span>
+            </button>
+          </nav>
+
+          <div class="sidebar-bottom">
+            <button class="side-nav-item is-disabled" type="button" disabled>
+              <span class="nav-icon nav-icon--gear" aria-hidden="true"></span><span>口口口</span>
+            </button>
+            <button class="profile-mini" type="button" data-nav="profile">
+              <span class="avatar avatar--small">林</span>
+              <span class="profile-mini-copy"><strong>林同学</strong><small>初一 · 3班</small></span>
+              <span class="profile-chevron" aria-hidden="true">›</span>
+            </button>
+          </div>
+        </aside>
+
+        <div class="app-content">
+          <header class="app-header">
+            <div class="header-context">
+              <span class="status-dot" aria-hidden="true"></span>
+              <span>自习模式</span>
+              <span class="header-divider"></span>
+              <span>2026年10月16日 · 星期五</span>
+            </div>
+            <div class="header-actions">
+              <button class="icon-button header-icon-button" type="button" aria-label="通知" data-toast="目前没有新通知"><span class="bell-shape" aria-hidden="true"></span></button>
+              <button class="header-user" type="button" data-nav="profile"><span class="avatar avatar--top">林</span><span>林同学</span><span class="chevron-down" aria-hidden="true">⌄</span></button>
+            </div>
+          </header>
+
+          <div class="page-area">
+            <section class="page-panel home-panel is-active" data-panel="home" aria-labelledby="home-title">
+              <div class="page-heading page-heading--home">
+                <div>
+                  <p class="eyebrow">MY STUDY SPACE</p>
+                  <h2 id="home-title">下午好，林同学 <span class="wave" aria-hidden="true">⌁</span></h2>
+                  <p class="page-subtitle">今天也从一份作业开始，慢慢把知识点学扎实。</p>
+                </div>
+                <div class="today-label"><span>今日学习</span><strong>10.16</strong></div>
+              </div>
+
+              <div class="home-grid">
+                <button class="feature-card feature-card--upload" type="button" data-open-upload>
+                  <span class="feature-card-topline"><span class="feature-tag">核心功能 01</span><span class="feature-arrow" aria-hidden="true">↗</span></span>
+                  <span class="feature-icon feature-icon--camera" aria-hidden="true"><span></span></span>
+                  <span class="feature-card-title">拍照上传</span>
+                  <span class="feature-card-description">上传今天的作业，让 AI 帮你看见每一道题。</span>
+                  <span class="feature-card-action">开始上传 <b aria-hidden="true">→</b></span>
+                </button>
+
+                <button class="feature-card feature-card--map" type="button" data-nav="profile">
+                  <span class="feature-card-topline"><span class="feature-tag">核心功能 02</span><span class="feature-arrow" aria-hidden="true">↗</span></span>
+                  <span class="feature-icon feature-icon--network" aria-hidden="true"><span></span><span></span><span></span><i></i></span>
+                  <span class="feature-card-title">知识图谱</span>
+                  <span class="feature-card-description">看看你的知识掌握情况，找到下一步该努力的地方。</span>
+                  <span class="feature-card-action">查看我的图谱 <b aria-hidden="true">→</b></span>
+                </button>
+              </div>
+
+              <div class="home-lower-grid">
+                <section class="focus-strip" aria-labelledby="focus-title">
+                  <div class="section-heading"><div><p class="eyebrow">QUICK VIEW</p><h3 id="focus-title">今天的学习焦点</h3></div><span class="section-caption">由最近的作业分析生成</span></div>
+                  <div class="focus-content">
+                    <div class="focus-visual" aria-hidden="true"><span class="focus-ring"></span><strong>3</strong><small>个待巩固点</small></div>
+                    <div class="focus-list"><div><span class="focus-bullet focus-bullet--orange"></span><span>一元一次方程</span><small>数学 · 待加强</small></div><div><span class="focus-bullet focus-bullet--green"></span><span>一般过去时</span><small>英语 · 巩固中</small></div><div><span class="focus-bullet focus-bullet--purple"></span><span>光的反射</span><small>物理 · 待复习</small></div></div>
+                    <button class="outline-button" type="button" data-nav="profile">查看详情</button>
+                  </div>
+                </section>
+                <section class="coming-panel" aria-label="后续功能占位"><p class="eyebrow">COMING LATER</p><h3>口口口</h3><p>口口口</p><span class="placeholder-block placeholder-block--long"></span><span class="placeholder-block"></span></section>
+              </div>
+            </section>
+
+            <section class="page-panel profile-panel" data-panel="profile" aria-labelledby="profile-title" hidden>
+              <div class="page-heading page-heading--profile"><div><p class="eyebrow">MY KNOWLEDGE MAP</p><h2 id="profile-title">我的知识图谱</h2><p class="page-subtitle">根据作业、练习和阶段测评逐步建立。</p></div><button class="outline-button" type="button" data-nav="home">返回首页</button></div>
+              <div class="profile-summary-row">
+                <section class="student-summary"><span class="avatar avatar--large">林</span><div><h3>林同学</h3><p>初一 · 3班 · 已学习 28 天</p><span class="summary-update">最近更新：今天 17:42</span></div><div class="summary-divider"></div><div class="summary-stat"><strong>42</strong><span>已分析知识点</span></div><div class="summary-stat"><strong>16</strong><span>正在巩固</span></div></section>
+                <section class="map-legend"><span class="legend-title">掌握状态</span><span><i class="legend-dot legend-dot--strong"></i>已掌握</span><span><i class="legend-dot legend-dot--learning"></i>巩固中</span><span><i class="legend-dot legend-dot--focus"></i>待加强</span></section>
+              </div>
+              <div class="profile-main-grid">
+                <section class="knowledge-map-panel" aria-labelledby="map-title">
+                  <div class="section-heading"><div><p class="eyebrow">KNOWLEDGE OVERVIEW</p><h3 id="map-title">知识掌握地图</h3></div><div class="subject-tabs" role="tablist" aria-label="学科筛选"><button class="subject-tab is-active" type="button" data-subject="all" role="tab" aria-selected="true">全部</button><button class="subject-tab" type="button" data-subject="math" role="tab" aria-selected="false">数学</button><button class="subject-tab" type="button" data-subject="english" role="tab" aria-selected="false">英语</button><button class="subject-tab" type="button" data-subject="physics" role="tab" aria-selected="false">物理</button></div></div>
+                  <div class="map-canvas" id="knowledge-map">
+                    <span class="map-axis map-axis--x" aria-hidden="true"></span><span class="map-axis map-axis--y" aria-hidden="true"></span>
+                    <span class="map-line map-line--a" aria-hidden="true"></span><span class="map-line map-line--b" aria-hidden="true"></span><span class="map-line map-line--c" aria-hidden="true"></span><span class="map-line map-line--d" aria-hidden="true"></span><span class="map-line map-line--e" aria-hidden="true"></span><span class="map-line map-line--f" aria-hidden="true"></span>
+                    <button class="map-node map-node--center" type="button" data-node="overview"><span>我的<br />知识</span></button>
+                    <button class="map-node map-node--math node-focus" type="button" data-node="equation" data-subject="math"><small>数学</small><span>一元一次<br />方程</span><i>待加强</i></button>
+                    <button class="map-node map-node--english node-learning" type="button" data-node="past" data-subject="english"><small>英语</small><span>一般<br />过去时</span><i>巩固中</i></button>
+                    <button class="map-node map-node--physics node-strong" type="button" data-node="reflection" data-subject="physics"><small>物理</small><span>光的<br />反射</span><i>已掌握</i></button>
+                    <button class="map-node map-node--math-small node-learning" type="button" data-node="geometry" data-subject="math"><small>数学</small><span>几何图形</span><i>巩固中</i></button>
+                    <button class="map-node map-node--english-small node-strong" type="button" data-node="reading" data-subject="english"><small>英语</small><span>阅读理解</span><i>已掌握</i></button>
+                    <button class="map-node map-node--physics-small node-focus" type="button" data-node="force" data-subject="physics"><small>物理</small><span>力与运动</span><i>待加强</i></button>
+                    <span class="map-label map-label--top">掌握程度</span><span class="map-label map-label--right">最近练习</span>
+                  </div>
+                  <p class="map-note">图谱会随着新的作业和测评持续更新，先从你自己的变化看起。</p>
+                </section>
+                <aside class="node-detail-panel" id="node-detail" aria-live="polite"><div class="detail-kicker"><span class="detail-status-dot detail-status-dot--focus"></span><span id="detail-subject">数学 · 待加强</span></div><h3 id="detail-title">一元一次方程</h3><p id="detail-description">最近 3 次练习中，有 2 次在“移项与合并同类项”处出错。</p><div class="detail-progress-label"><span>掌握进度</span><strong id="detail-progress-value">48%</strong></div><div class="detail-progress"><span id="detail-progress-bar" style="width:48%"></span></div><div class="detail-actions"><button class="detail-action detail-action--primary" type="button" data-toast="复习任务将在下一版开放">去复习 <span aria-hidden="true">→</span></button><button class="detail-action" type="button" data-toast="错题记录将在下一版开放">看错题 <span aria-hidden="true">→</span></button></div><div class="detail-source"><span>数据来源</span><strong id="detail-source-value">最近 3 次作业</strong></div></aside>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <div class="upload-modal" id="upload-modal" hidden>
+        <div class="modal-backdrop" data-close-upload></div>
+        <section class="upload-dialog" role="dialog" aria-modal="true" aria-labelledby="upload-title">
+          <button class="modal-close icon-button" type="button" aria-label="关闭上传窗口" data-close-upload>×</button>
+          <p class="eyebrow">SUBMIT HOMEWORK</p>
+          <h2 id="upload-title">上传今天的作业</h2>
+          <p class="dialog-subtitle">拍清整页，AI 才能更准确地识别题目和作答。</p>
+          <label class="drop-zone" for="homework-file"><span class="drop-icon" aria-hidden="true">＋</span><strong>点击选择作业照片</strong><small>支持 JPG、PNG · 可多选</small><input id="homework-file" type="file" accept="image/*" multiple /></label>
+          <div class="upload-bottom"><span id="upload-file-name">还没有选择照片</span><button class="primary-button" type="button" data-submit-upload>提交分析 <span aria-hidden="true">→</span></button></div>
+        </section>
+      </div>
+
+      <div class="toast" id="toast" role="status"></div>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>
