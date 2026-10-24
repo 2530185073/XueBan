@@ -48,9 +48,9 @@ describe('star map layout', () => {
 
 describe('star map semantics', () => {
   it('size reflects evidence count only, never a score; no-judgment stays small', () => {
-    expect(starRadius(node('x', 'c', 0, 'no_judgment', 9))).toBe(7)
-    expect(starRadius(node('x', 'c', 0, 'stable_for_now', 0))).toBe(9)
-    expect(starRadius(node('x', 'c', 0, 'stable_for_now', 99))).toBe(15)
+    expect(starRadius(node('x', 'c', 0, 'no_judgment', 9))).toBe(4.5)
+    expect(starRadius(node('x', 'c', 0, 'stable_for_now', 0))).toBe(5.5)
+    expect(starRadius(node('x', 'c', 0, 'stable_for_now', 99))).toBe(9)
   })
   it('selection lights up only its direct neighbours', () => {
     const map = layoutStarMap(nodes, edges)
