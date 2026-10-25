@@ -13,6 +13,7 @@ from test_correction_flow import flow  # noqa: F401  (pytest fixture reuse)
 
 ADMIN_PASSWORD = "synthetic-admin-password-1"
 STAFF_PASSWORD = "synthetic-teacher-password-1"
+CHANGED_PASSWORD = "teacher123"
 
 
 def keyed(value):
@@ -57,7 +58,7 @@ def test_admin_creates_campus_teacher_who_sees_queue(flow, tmp_path):
     login = client.post("/v1/auth/login", json={"username": "teacher.a", "password": STAFF_PASSWORD}, headers=keyed("login-teacher-1")).json()
     token = {"Authorization": "Bearer " + login["access_token"]}
     assert client.get("/v1/review-queue", headers=token).status_code == 403
-    changed = client.post("/v1/auth/change-password", json={"current_password": STAFF_PASSWORD, "new_password": STAFF_PASSWORD + "-new"}, headers={**token, **keyed("teacher-change-1")})
+    changed = client.post("/v1/auth/change-password", json={"current_password": STAFF_PASSWORD, "new_password": CHANGED_PASSWORD}, headers={**token, **keyed("teacher-change-1")})
     assert changed.status_code == 200, changed.text
     token = {"Authorization": "Bearer " + changed.json()["access_token"]}
 
@@ -96,7 +97,7 @@ def test_admin_changes_teacher_campuses_roles_and_deactivates(flow, tmp_path):
     created = client.post("/v1/admin/staff-accounts", json={"username": "teacher.b", "display_name": "合成老师乙", "campus_ids": ["campus_a"], "roles": ["sitting_teacher"], "initial_password": STAFF_PASSWORD}, headers={**admin, **keyed("staff-create-b")}).json()
     teacher = created["principal_id"]
     login = client.post("/v1/auth/login", json={"username": "teacher.b", "password": STAFF_PASSWORD}, headers=keyed("login-teacher-b")).json()
-    changed = client.post("/v1/auth/change-password", json={"current_password": STAFF_PASSWORD, "new_password": STAFF_PASSWORD + "-new"}, headers={"Authorization": "Bearer " + login["access_token"], **keyed("teacher-b-change")}).json()
+    changed = client.post("/v1/auth/change-password", json={"current_password": STAFF_PASSWORD, "new_password": CHANGED_PASSWORD}, headers={"Authorization": "Bearer " + login["access_token"], **keyed("teacher-b-change")}).json()
     token = {"Authorization": "Bearer " + changed["access_token"]}
     path = f"/v1/admin/staff-accounts/{teacher}/access"
 
@@ -115,17 +116,17 @@ def test_admin_changes_teacher_campuses_roles_and_deactivates(flow, tmp_path):
     narrowed = client.post(path, json={"campus_ids": ["campus_c"], "roles": ["sitting_teacher"], "active": True}, headers={**admin, **keyed("access-b-4")})
     assert narrowed.status_code == 200 and narrowed.json()["campus_ids"] == ["campus_c"]
     assert client.get("/v1/review-queue", headers=token).status_code == 401
-    relogin = client.post("/v1/auth/login", json={"username": "teacher.b", "password": STAFF_PASSWORD + "-new"}, headers=keyed("login-teacher-b-2")).json()
+    relogin = client.post("/v1/auth/login", json={"username": "teacher.b", "password": CHANGED_PASSWORD}, headers=keyed("login-teacher-b-2")).json()
     assert client.get(f"/v1/cases/{case['id']}", headers={"Authorization": "Bearer " + relogin["access_token"]}).status_code == 404
 
     # Deactivation blocks sign-in and stays listed so it can be reversed.
     off = client.post(path, json={"campus_ids": ["campus_c"], "roles": ["sitting_teacher"], "active": False}, headers={**admin, **keyed("access-b-5")})
     assert off.status_code == 200 and off.json()["active"] is False
-    assert client.post("/v1/auth/login", json={"username": "teacher.b", "password": STAFF_PASSWORD + "-new"}, headers=keyed("login-teacher-b-3")).status_code != 200
+    assert client.post("/v1/auth/login", json={"username": "teacher.b", "password": CHANGED_PASSWORD}, headers=keyed("login-teacher-b-3")).status_code != 200
     assert any(item["principal_id"] == teacher and not item["active"] for item in client.get("/v1/admin/staff-accounts", headers=admin).json()["items"])
     on = client.post(path, json={"campus_ids": ["campus_c"], "roles": ["sitting_teacher"], "active": True}, headers={**admin, **keyed("access-b-6")})
     assert on.json()["active"] is True
-    assert client.post("/v1/auth/login", json={"username": "teacher.b", "password": STAFF_PASSWORD + "-new"}, headers=keyed("login-teacher-b-4")).status_code == 200
+    assert client.post("/v1/auth/login", json={"username": "teacher.b", "password": CHANGED_PASSWORD}, headers=keyed("login-teacher-b-4")).status_code == 200
 
     # Another administrator's account is not a teacher account to reshape here.
     other = client.get("/v1/admin/staff-accounts", headers=admin).json()["items"]

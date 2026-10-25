@@ -368,6 +368,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     install_reports(app, engine, cfg, database_session, current_actor)
     from .practice import install_practice
     install_practice(app, engine, cfg, database_session, current_actor)
+    from .variant_notebook import install_variant_notebook
+    install_variant_notebook(app, database_session, current_actor)
+    from .practice_photo import install_practice_photo
+    install_practice_photo(app, cfg, database_session, current_actor)
     from .ops import install_ops
     install_ops(app, engine, cfg)
     from .student_web import install_student_web

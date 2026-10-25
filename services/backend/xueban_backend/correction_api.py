@@ -517,7 +517,15 @@ def install_correction(app, engine, cfg, database_session, current_actor):
     mutate("/v1/assets/{asset_id}/complete", "completeUpload", "asset", "CompleteUpload", "ImageAsset", complete)
     mutate("/v1/homeworks/{homework_id}/recognitions", "startRecognition", "homework", "StartRecognition", "Accepted", recognize, 202)
     mutate("/v1/cases/{case_id}/checks", "startCheck", "case", "StartCheck", "Accepted", check, 202)
+    def require_original_recheck_support():
+        # The restored two-stage provider has no colleague-only image-recovery
+        # operation. Reject stale clients before accepting a doomed paid job.
+        if cfg.correction_mode == "user_original":
+            raise Problem(409, "conflict", "optional_gate_closed",
+                          "当前识图流程不支持原图重核，请重新拍照上传。")
+
     def recheck_original(session, actor, homework, case, payload):
+        require_original_recheck_support()
         return recognition_recheck.accept(session, contracts, homework, case, payload)
 
     mutate("/v1/cases/{case_id}/recognition-rechecks", "startRecognitionRecheck", "case",
@@ -526,6 +534,7 @@ def install_correction(app, engine, cfg, database_session, current_actor):
     @app.get("/v1/cases/{case_id}/recognition-rechecks/status", operation_id="getRecognitionRecheckStatus")
     def recheck_status(case_id: str, actor: ActorDep, session: SessionDep):
         case, _ = locate(session, actor, case_id, "case")
+        require_original_recheck_support()
         return checked("RecognitionRecoveryStatus", recognition_recheck.status(session, case))
     mutate("/v1/cases/{case_id}/hints", "requestHint", "case", "RequestHint", "Accepted", hint, 202)
     mutate("/v1/cases/{case_id}/attempts", "createCorrection", "case", "CreateCorrection", "Accepted", correction, 202)

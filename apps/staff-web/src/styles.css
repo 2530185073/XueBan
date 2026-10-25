@@ -198,3 +198,158 @@ details.card>summary{list-style:none;cursor:pointer}
 @media(max-width:600px){.mapping-gap-note li{align-items:flex-start;flex-direction:column}}
 
 .mapping-gap-note summary{cursor:pointer;padding:8px 0;font-size:13px;font-weight:600}
+
+/*
+ * Staff workspace visual refinement
+ * Keep the existing information architecture and components, while making
+ * the most common actions feel immediate and secondary detail quieter.
+ */
+:root{
+  --surface:#fffefa;
+  --surface-muted:#f7f8f3;
+  --surface-raised:#ffffff;
+  --line-soft:#e9ece4;
+  --line-strong:#dce3d8;
+  --focus:#7da78a;
+  --shadow-soft:0 8px 24px rgba(31,55,43,.055),0 1px 3px rgba(31,55,43,.04);
+  --shadow-raised:0 16px 40px rgba(31,55,43,.09),0 2px 8px rgba(31,55,43,.05);
+}
+
+html{scroll-behavior:smooth}
+body{background:#f5f6f1;color:var(--ink)}
+button,a,input,textarea,select{transition:background-color .18s ease,border-color .18s ease,color .18s ease,box-shadow .18s ease,opacity .18s ease,transform .18s ease}
+button:focus-visible,a:focus-visible{outline:2px solid var(--focus);outline-offset:3px;box-shadow:0 0 0 5px rgba(125,167,138,.16)}
+input:focus,textarea:focus,select:focus{outline:0;border-color:#9bbb9f;box-shadow:0 0 0 4px rgba(125,167,138,.14)}
+
+/* One calm canvas: the workbench carries the visual weight, not every child. */
+.app-header{height:72px;padding-inline:32px;background:rgba(255,254,250,.94);box-shadow:0 1px 0 rgba(35,62,47,.035)}
+.brand{gap:10px;font-size:19px}.brand-mark{width:36px;height:36px;border-radius:10px 10px 10px 3px;box-shadow:0 3px 8px rgba(24,63,53,.14)}
+.header-actions{gap:10px}.connection-state{padding:7px 10px;margin-right:0;border-radius:99px;background:#f5f7f2}.connection-state.connected{color:#5c8065}
+.sample-banner{min-height:36px;background:#f4efdf;border-bottom-color:#ebe2ca}
+.workspace-heading{padding:26px 32px 20px}.workspace-heading h1{font-size:24px;letter-spacing:.5px}.eyebrow{margin-bottom:8px;color:#879482;letter-spacing:1.7px}
+
+.button{min-height:38px;padding:8px 14px;border-color:var(--line-strong);border-radius:9px;background:var(--surface);box-shadow:0 1px 1px rgba(31,55,43,.025)}
+.button:hover:not(:disabled){background:#f2f5ef;border-color:#c6d3c4;box-shadow:0 3px 9px rgba(31,55,43,.08);transform:translateY(-1px)}
+.button:active:not(:disabled),.icon-button:active:not(:disabled),.text-link:active:not(:disabled),.area-nav button:active,.queue-switch button:active,.mode-tabs button:active{transform:translateY(1px);box-shadow:none}
+.button.primary{box-shadow:0 3px 8px rgba(24,63,53,.17)}
+.button.primary:hover:not(:disabled){background:#244e41;border-color:#244e41;box-shadow:0 5px 12px rgba(24,63,53,.2)}
+.button.text-button{background:transparent;box-shadow:none}.button.text-button:hover:not(:disabled){transform:none;box-shadow:none}
+.icon-button{width:34px;height:34px;border-radius:9px}.icon-button:hover:not(:disabled),.icon-button.is-on{background:#e8f0e7;color:var(--green);box-shadow:0 2px 8px rgba(31,55,43,.08)}
+.text-link{border-radius:6px;padding:5px 6px;margin:-5px -6px}.text-link:hover:not(:disabled){background:#eaf1e8;color:var(--green)}
+
+.workbench,.learning-area{border-color:var(--line-strong);border-radius:16px;box-shadow:var(--shadow-soft)}
+.queue-panel,.learning-side{background:#fafbf8}
+.queue-heading{padding:20px 18px 15px}.queue-heading h2{letter-spacing:.1px}
+.search-box{margin:0 16px 14px}.search-box input{height:36px;border-radius:9px;background:#f1f4ee;box-shadow:inset 0 1px 2px rgba(31,55,43,.025)}
+.search-box input:hover{background:#edf2eb}
+.queue-switch,.mode-tabs,.area-nav{background:#edf1e9;border:1px solid #e5eae1;box-shadow:inset 0 1px 1px rgba(31,55,43,.025)}
+.queue-switch{margin:0 16px 12px;padding:3px;border-radius:10px}.queue-switch button{min-height:36px;border-radius:8px;padding:8px 3px}.queue-switch button.active,.mode-tabs button.active,.area-nav button.active{box-shadow:0 2px 7px rgba(31,55,43,.1),0 0 0 1px rgba(255,255,255,.7)}
+.queue-switch button:hover:not(.active),.mode-tabs button:hover:not(.active),.area-nav button:hover:not(.active){background:rgba(255,255,255,.45);color:#536b57}
+.queue-switch .count{transition:background-color .18s ease,color .18s ease,transform .18s ease}.queue-switch button:hover .count{transform:scale(1.04)}
+.queue-tabs{margin:0 17px 12px}.queue-tabs button{padding:7px 0 10px}.queue-tabs button:hover{color:var(--green)}
+.queue-list{padding-inline:10px}.queue-item{border-radius:10px;padding:13px 11px;margin-bottom:6px}.queue-item:hover{background:#f1f4ed;box-shadow:0 2px 9px rgba(31,55,43,.04)}
+.queue-item.selected{border-color:#b9cfb9;background:#edf4eb;box-shadow:inset 3px 0 0 #6f946b,0 3px 10px rgba(31,55,43,.05)}
+.queue-item:active{transform:scale(.992)}.queue-item-top{margin-bottom:11px}.queue-item footer{margin-top:13px}
+.queue-avatar{box-shadow:0 1px 2px rgba(31,55,43,.04)}
+.queue-footer{padding:16px 18px;background:#f8faf6}
+
+.area-nav{margin:0 28px 14px;padding:3px;border-radius:10px}
+.area-nav button{min-height:38px;border-radius:8px;font-size:12px;color:#748274}
+.area-nav button.active{color:var(--green);background:var(--surface)}
+.learning-area{min-height:700px}
+.learning-main{background:#f7f8f3;padding:20px 22px;gap:14px}
+.learning-side{border-right-color:var(--line-soft)}
+.card{border-color:var(--line-soft);border-radius:12px;padding:17px 19px;box-shadow:0 1px 2px rgba(31,55,43,.02)}
+.card:hover{border-color:#dfe7dc;box-shadow:var(--shadow-soft)}
+.card .section-heading{margin-bottom:3px}.card-title{letter-spacing:.05px}
+.pending-note,.notice-strip,.gate,.job-card,.draw-hint{border:1px solid transparent;box-shadow:0 1px 2px rgba(31,55,43,.025)}
+
+/* Review workbench: separate the primary decision from supporting evidence. */
+.document-panel{background:#f7f8f3}.document-heading{padding:20px 23px 16px;background:rgba(255,254,250,.9)}
+.document-heading h2{letter-spacing:.1px}.help-quote{margin:16px 20px 7px;border-radius:9px;padding:12px 15px}
+.image-toolbar{padding:10px 22px}.paper-stage{padding:3px 28px 24px}
+.paper-wrap{border-radius:8px;box-shadow:var(--shadow-raised);overflow:hidden}
+.review-panel{background:var(--surface-raised);border-left-color:var(--line-soft)}
+.panel-section{padding:19px 18px;border-bottom-color:var(--line-soft)}
+.section-heading{margin-bottom:15px}.section-heading small{letter-spacing:.1px}
+.candidate-section h2{font-size:18px}.evidence-note{margin-top:14px;padding-left:11px}.timeline li{padding-bottom:18px}
+.decision-card{border-radius:10px}.decision-card.decision-candidate{background:#fdfaf1}.decision-card.decision-confirmed{background:#f0f7f0}
+.review-form{gap:13px}.preview-note{border:1px solid #e7ebe1;background:#f5f7f1;border-radius:8px}
+.review-empty{padding:42px 25px}.review-empty h2{margin:18px 0 11px}.principle{padding:16px 0}
+.status-message{min-height:47px;border:1px solid transparent;border-radius:10px;margin:0 28px 12px;padding:10px 14px;box-shadow:var(--shadow-soft);animation:status-enter .22s ease both}
+.status-message.error{background:#fbf2ea;border-color:#f0dfd1;color:#8c6647}.status-message.success{background:#edf6ec;border-color:#dcebdd;color:#50734e}
+.status-message>button{border-radius:7px;padding:5px}.status-message>button:hover{background:rgba(255,255,255,.55)}
+@keyframes status-enter{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+
+/* Lower-frequency tools stay available, but visually recede until needed. */
+.mode-tabs{margin:12px 20px 0;padding:3px;border-radius:10px}.mode-tabs button{min-height:36px;border-radius:8px}
+.tool-panel{background:#fafbf8;border-top-color:var(--line-soft);padding:17px 21px 20px}
+.replacement,.run-card,.evidence-row,.help-list li,.hint-list li,.link-list li{border-radius:9px;border-color:#e7ebe3}
+.replacement:hover,.run-card:hover,.evidence-row:hover{border-color:#d5e0d2;box-shadow:0 2px 8px rgba(31,55,43,.045)}
+.job-card{border-radius:9px;margin:0 20px 16px;padding:11px 14px}
+.expanded-document{border-radius:16px;box-shadow:0 0 0 100vmax rgba(19,39,31,.68),var(--shadow-raised)}
+.modal-backdrop{background:rgba(20,39,31,.5);backdrop-filter:blur(8px)}
+.connection-dialog,.auth-card{border-radius:16px;box-shadow:var(--shadow-raised)}
+
+/* Dense tablet widths: preserve the three-level workflow without tiny targets. */
+@media(max-width:1150px){
+  .app-header{padding-inline:24px}.workspace-heading{padding-inline:25px}
+  .workbench{grid-template-columns:minmax(185px,.72fr) minmax(285px,1.12fr) minmax(265px,1fr);margin-inline:20px;border-radius:14px}
+  .learning-area{margin-inline:20px;border-radius:14px}.area-nav{margin-inline:20px}.panel-section{padding:20px}
+  .review-panel{grid-column:auto;border-top:0;background:var(--surface)}.learning-main{padding:19px 20px}
+}
+@media(max-width:760px){
+  .app-header{min-height:68px;padding:13px 16px}.brand-mark{width:34px;height:34px}
+  .workspace-heading{padding:21px 18px 17px}.workspace-heading h1{font-size:21px}
+  .workbench,.learning-area{margin-inline:10px;border-radius:13px}.area-nav{margin-inline:10px}
+  .area-nav button{flex:1 1 42%;min-height:40px}.queue-panel{border-bottom-color:var(--line-soft)}
+  .queue-list{padding-inline:8px}.queue-item{padding:12px 10px}
+  .learning-main{padding:14px 11px}.card{padding:15px 14px;border-radius:10px}
+  .status-message{margin-inline:10px;padding:10px 12px}.paper-stage{padding-inline:15px}
+  .document-heading{padding:18px 16px 15px}.review-panel .panel-section{padding:17px 15px}
+  .button{min-height:40px}.button-row{flex-wrap:wrap}
+}
+
+@media(min-width:761px) and (max-width:850px){
+  .workbench{grid-template-columns:minmax(180px,.72fr) minmax(0,1.28fr)}
+  .review-panel{grid-column:2;grid-row:auto;border-top:1px solid var(--line-soft)}
+}
+
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}
+  .button:hover:not(:disabled),.queue-item:active,.button:active:not(:disabled),.icon-button:active:not(:disabled),.text-link:active:not(:disabled),.area-nav button:active,.queue-switch button:active,.mode-tabs button:active{transform:none}
+}
+
+/* Top-level work areas: keep the frequent queue actions visible and reveal
+   the less frequent learning tools without changing their availability. */
+.area-nav{align-items:stretch}
+.queue-shortcuts{display:flex;flex:1 1 390px;gap:4px;min-width:0}
+.queue-shortcuts button,.learning-menu-toggle{position:relative;display:flex;align-items:center;justify-content:center;gap:6px;min-height:38px;border:0;background:transparent;border-radius:8px;color:#748274;font-size:12px;white-space:nowrap;padding:0 10px}
+.queue-shortcuts button{flex:1}
+.queue-shortcuts button.active,.learning-menu-toggle.active{color:var(--green);background:var(--surface);box-shadow:0 2px 7px rgba(31,55,43,.1),0 0 0 1px rgba(255,255,255,.7)}
+.queue-shortcuts button:hover:not(.active),.learning-menu-toggle:hover:not(.active){background:rgba(255,255,255,.45);color:#536b57}
+.queue-shortcut-count{min-width:14px;padding:1px 4px;border-radius:10px;background:#e1e8da;color:#5f7a58;font-size:10px;line-height:1.3}
+.queue-shortcuts button.active .queue-shortcut-count{background:var(--green);color:#fff}
+.learning-menu-toggle-wrap{display:flex;flex:1 1 120px;min-width:120px}
+.learning-menu-toggle{width:100%}
+.learning-menu-toggle svg{transition:transform .18s ease}
+.learning-menu-toggle svg.rotated{transform:rotate(180deg)}
+.learning-area-menu{display:flex;flex:1 1 100%;gap:4px;flex-wrap:wrap;max-height:0;overflow:hidden;padding-top:0;border-top:1px solid transparent;opacity:0;transition:max-height .2s ease,padding-top .2s ease,border-color .2s ease,opacity .15s ease}
+.learning-area-menu.is-open{max-height:180px;padding-top:4px;border-top-color:var(--line);opacity:1}
+.learning-area-menu button{display:flex;align-items:center;justify-content:center;gap:6px;min-height:38px;flex:1 1 150px;border:0;background:transparent;border-radius:8px;color:#748274;font-size:12px;padding:0 10px;white-space:nowrap}
+.learning-area-menu button:hover:not(.active){background:rgba(255,255,255,.45);color:#536b57}
+.learning-area-menu button.active{color:var(--green);background:var(--surface);box-shadow:0 2px 7px rgba(31,55,43,.1),0 0 0 1px rgba(255,255,255,.7)}
+
+@media(max-width:760px){
+  .area-nav{align-items:stretch}
+  .queue-shortcuts{flex:1 1 100%;order:1}
+  .queue-shortcuts button{min-height:40px;padding-inline:6px}
+  .learning-menu-toggle-wrap{flex:1 1 100%;min-width:0;order:2}
+  .learning-area-menu{order:3}
+  .learning-area-menu button{flex-basis:42%;min-height:40px}
+}
+
+@media(prefers-reduced-motion:reduce){
+  .learning-menu-toggle svg,.learning-area-menu{transition:none}
+}

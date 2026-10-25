@@ -7,7 +7,13 @@ const messages: Record<number, string> = {
   429: '尝试次数较多，请稍后再登录。',
   503: '服务暂不可用，稍后可继续原操作。',
 }
-const codeMessages: Record<string, string> = { invalid_credentials: '账号或密码不正确，请再检查一下。', password_change_required: '请先设置自己的新密码，再打开作业本。', login_rate_limited: '尝试次数较多，请稍后再登录。' }
+const codeMessages: Record<string, string> = {
+  invalid_credentials: '账号或密码不正确，请再检查一下。',
+  password_change_required: '请先设置自己的新密码，再打开作业本。',
+  login_rate_limited: '尝试次数较多，请稍后再登录。',
+  unsafe_asset_url: '照片上传地址与当前页面不匹配或不符合安全要求，已停止上传。请联系管理员检查上传服务地址后重试。',
+  unsafe_upload_header: '照片上传请求头不符合安全要求，已停止上传。请联系管理员检查上传服务配置后重试。',
+}
 export class StudentError extends Error {
   constructor(public code: string, public status = 0, message = codeMessages[code] ?? messages[status] ?? '本次操作未完成，请稍后重试。') { super(message); this.name = 'StudentError' }
 }

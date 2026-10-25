@@ -9,8 +9,8 @@ import {
 
 const clock = (value: string) => new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
 
-export default function QueuePanel({ tab, onTab, help, review, allCases, names, selection, onSelect, loading, busy, onRefresh, onMore, sample }: {
-  tab: QueueTab; onTab: (tab: QueueTab) => void
+export default function QueuePanel({ tab, help, review, allCases, names, selection, onSelect, loading, busy, onRefresh, onMore, sample }: {
+  tab: QueueTab
   help: QueueState<HelpRequest>; review: QueueState<ReviewQueueItem>; allCases: QueueState<ReviewQueueItem>; names: Map<string, string>
   selection: Selection | null; onSelect: (selection: Selection) => void
   loading: boolean; busy: boolean; onRefresh: () => void; onMore: (tab: QueueTab) => void; sample: boolean
@@ -26,11 +26,6 @@ export default function QueuePanel({ tab, onTab, help, review, allCases, names, 
   return <aside className="queue-panel" aria-label="求助与待核实队列">
     <div className="queue-heading"><div><h2>今日待办</h2><p>{sample ? '合成记录 · 不调用后台' : '当前账号授权校区内的记录'}</p></div>
       <button className="icon-button" aria-label="刷新队列" title="刷新队列" disabled={sample || loading || busy} onClick={onRefresh}><RefreshCw size={17} className={loading ? 'spin' : ''} /></button></div>
-    <div className="queue-switch" role="tablist" aria-label="队列">
-      <button role="tab" aria-selected={tab === 'help'} className={tab === 'help' ? 'active' : ''} onClick={() => onTab('help')}>求助<span className="count">{help.items.length}{help.cursor ? '+' : ''}</span></button>
-      <button role="tab" aria-selected={tab === 'review'} className={tab === 'review' ? 'active' : ''} onClick={() => onTab('review')}>待核实<span className="count">{review.items.length}{review.cursor ? '+' : ''}</span></button>
-      <button role="tab" aria-selected={tab === 'all'} className={tab === 'all' ? 'active' : ''} onClick={() => onTab('all')}>全部题</button>
-    </div>
     <label className="search-box"><Search size={16} /><input aria-label="搜索学生、作业或内容" placeholder={tab === 'help' ? '搜索学生或求助内容' : '搜索学生或作业'} value={search} onChange={event => setSearch(event.target.value)} /></label>
     {tab === 'help' && <div className="queue-tabs" aria-label="筛选求助状态">{([['all', '全部'], ['waiting', '待接手'], ['claimed', '处理中']] as const).map(([value, label]) =>
       <button key={value} aria-pressed={filter === value} className={filter === value ? 'active' : ''} onClick={() => setFilter(value)}>{label}</button>)}</div>}

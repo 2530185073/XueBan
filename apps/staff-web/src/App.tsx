@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Brain, BookOpen, CircleHelp, ClipboardCheck, Eye, FileText, Library, LoaderCircle, LockKeyhole, LogOut, MessageSquareText, Network, ShieldCheck, Sparkles, UserRound, X } from 'lucide-react'
+import { Brain, BookOpen, ChevronDown, CircleHelp, ClipboardCheck, Eye, FileText, Library, LoaderCircle, LockKeyhole, LogOut, MessageSquareText, Network, ShieldCheck, Sparkles, UserRound, X } from 'lucide-react'
 import { ApiError, errorMessage, isConflict, StaffApi } from './api/client'
 import { LearningApi } from './api/learning'
 import type { AttemptCondition } from './api/learningTypes'
@@ -26,8 +26,6 @@ import { attemptChain } from './workspace'
 
 type Phase = 'login' | 'password' | 'ready' | 'sample'
 type Area = 'desk' | 'links' | 'profile' | 'memory' | 'daily' | 'reports' | 'practice'
-const areas: [Area, string, typeof BookOpen][] = [['desk', '坐班工作台', ClipboardCheck], ['links', '知识点映射确认', Network], ['profile', '学员画像', UserRound],
-  ['memory', '学伴记忆', Brain], ['daily', '每日反馈', MessageSquareText], ['reports', '半月报告', FileText], ['practice', '题库审核与选做', Library]]
 const STAFF_ROLES = ['sitting_teacher', 'campus_admin']
 // setTimeout delays above 2^31-1 ms overflow and fire immediately.
 const MAX_TIMER = 2_147_000_000
@@ -55,6 +53,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [area, setArea] = useState<Area>('desk')
+  const [learningMenuOpen, setLearningMenuOpen] = useState(false)
   const [studentId, setStudentId] = useState<string | null>(null)
   const [dataVersion, setDataVersion] = useState(0)
   const [conditions, setConditions] = useState<Map<string, AttemptCondition>>(new Map())
@@ -76,7 +75,7 @@ export default function App() {
     selectionRef.current = null
     setPhase(next); setExpiresAt(null); setIdentity(null); setHelp(emptyQueue()); setReview(emptyQueue()); setAllCases(emptyQueue()); setNames(new Map())
     setSelection(null); setWs(null); setAttemptId(''); setQueueLoading(false); setWsLoading(false); setBusy(false); setWriteUncertain(false); setRepair(null)
-    setArea('desk'); setStudentId(null); setConditions(new Map())
+    setArea('desk'); setLearningMenuOpen(false); setStudentId(null); setConditions(new Map())
     setNotice(null); setError(message)
   }, [dropImages])
 
@@ -335,7 +334,33 @@ export default function App() {
     <KnowledgeLinkEditor key={ws.question.record.question_id} ctx={ctx} questionId={ws.question.record.question_id}
       locked={ws.correction.lifecycle !== 'active' ? '此题已被替代，请在新题上确认知识点。' : ws.homework.processing_blocked ? '这份作业已停止处理，不能继续操作。' : null} />
   </> : null
-  const openCase = (caseId: string) => { setArea('desk'); select({ caseId, helpId: null }) }
+  const clearFeedback = () => { setError(null); setNotice(null) }
+  const goToArea = (next: Area) => {
+    setArea(next)
+    clearFeedback()
+    setLearningMenuOpen(next !== 'desk')
+  }
+  const goToQueue = (next: QueueTab) => {
+    setArea('desk')
+    setTab(next)
+    setLearningMenuOpen(false)
+    clearFeedback()
+  }
+  const openCase = (caseId: string) => { goToArea('desk'); select({ caseId, helpId: null }) }
+
+  const queueShortcuts: [QueueTab, string, typeof MessageSquareText, string][] = [
+    ['help', '求助', MessageSquareText, `${help.items.length}${help.cursor ? '+' : ''}`],
+    ['review', '待核实', ShieldCheck, `${review.items.length}${review.cursor ? '+' : ''}`],
+    ['all', '全部题', ClipboardCheck, ''],
+  ]
+  const learningAreas: [Area, string, typeof BookOpen][] = [
+    ['links', '知识点映射确认', Network],
+    ['profile', '学员画像', UserRound],
+    ['memory', '学伴记忆', Brain],
+    ['daily', '每日反馈', MessageSquareText],
+    ['reports', '半月报告', FileText],
+    ['practice', '题库审核与选做', Library],
+  ]
 
   return <div className="app-shell">
     <header className="app-header">
@@ -357,8 +382,26 @@ export default function App() {
       <div className="auth-intro"><p className="eyebrow">让孩子继续自己的作业</p><h1>每一次卡住，<br />都有人接住。</h1><p>对照原图核实 AI 判断、接手孩子的求助、修订识别与切题。所有结论都记录依据，并与 AI 候选分开保存。</p></div>
       {phase === 'password' ? <PasswordScreen busy={busy} username={username} onChange={changePassword} onLogout={() => void logout()} /> : <LoginScreen busy={busy} onLogin={login} onSample={startSample} />}
     </main> : <>
-    {ready && <nav className="area-nav" aria-label="工作区">{areas.map(([value, text, Icon]) =>
-      <button key={value} aria-current={area === value ? 'page' : undefined} className={area === value ? 'active' : ''} onClick={() => { setArea(value); setError(null); setNotice(null) }}><Icon size={15} />{text}</button>)}</nav>}
+    {ready && <nav className="area-nav" aria-label="坐班工作区">
+      <button aria-current={area === 'desk' ? 'page' : undefined} className={area === 'desk' ? 'active' : ''} onClick={() => goToArea('desk')}>
+        <ClipboardCheck size={15} />工作台
+      </button>
+      <div className="queue-shortcuts" role="group" aria-label="审核队列">
+        {queueShortcuts.map(([value, text, Icon, count]) => <button key={value} aria-current={area === 'desk' && tab === value ? 'page' : undefined} className={area === 'desk' && tab === value ? 'active' : ''} onClick={() => goToQueue(value)}>
+          <Icon size={15} />{text}{count && <span className="queue-shortcut-count" aria-label={`${count}条`}>{count}</span>}
+        </button>)}
+      </div>
+      <div className="learning-menu-toggle-wrap">
+        <button aria-expanded={learningMenuOpen} aria-controls="learning-area-menu" className={`learning-menu-toggle ${area !== 'desk' || learningMenuOpen ? 'active' : ''}`} onClick={() => setLearningMenuOpen(open => !open)}>
+          <BookOpen size={15} />学习与审核<ChevronDown className={learningMenuOpen ? 'rotated' : ''} size={14} aria-hidden="true" />
+        </button>
+      </div>
+      <div id="learning-area-menu" className={`learning-area-menu ${learningMenuOpen ? 'is-open' : ''}`} role="group" aria-label="学习与审核功能" aria-hidden={!learningMenuOpen}>
+        {learningAreas.map(([value, text, Icon]) => <button key={value} tabIndex={learningMenuOpen ? 0 : -1} aria-current={area === value ? 'page' : undefined} className={area === value ? 'active' : ''} onClick={() => goToArea(value)}>
+          <Icon size={15} />{text}
+        </button>)}
+      </div>
+    </nav>}
     {ready && area === 'links' ? <KnowledgeLinkArea ctx={ctx} onOpenCase={openCase} />
     : ready && area === 'profile' ? <StudentProfileArea ctx={ctx} studentId={student} onStudent={setStudentId} onOpenCase={openCase} />
     : ready && area === 'memory' ? <MemoryArea ctx={ctx} studentId={student} onStudent={setStudentId} />
@@ -366,7 +409,7 @@ export default function App() {
     : ready && area === 'reports' ? <ReportArea ctx={ctx} studentId={student} onStudent={setStudentId} />
     : ready && area === 'practice' ? <PracticeArea ctx={ctx} studentId={student} onStudent={setStudentId} />
     : <main id="main" className="workbench">
-      <QueuePanel tab={tab} onTab={setTab} help={help} review={review} allCases={allCases} names={names} selection={selection} onSelect={select} loading={queueLoading} busy={busy} sample={sample}
+      <QueuePanel tab={tab} help={help} review={review} allCases={allCases} names={names} selection={selection} onSelect={select} loading={queueLoading} busy={busy} sample={sample}
         onRefresh={() => { setError(null); void refreshAll() }} onMore={more => void loadQueues(identity, more)} />
       {ws ? <>
         <CaseDesk key={ws.correction.id} ws={ws} studentName={studentName} focus={focus} block={block} busy={busy || writeUncertain} sample={sample} attemptId={attemptId || ws.correction.current_attempt_id}

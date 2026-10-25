@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import examples from '../../../contracts/phase1/examples.json'
 import type { Attempt, CapturedQuestionRevision, CaseDetail, CorrectionCase, Decision, DraftView, Job } from './core/types'
-import { casePresentation, correctionTarget, dateLabel, preferredCase, replacementTarget, stageLabels, studentQuestionText, studentResultState, studentResultUncertain } from './presentation'
+import { casePresentation, correctionTarget, dateLabel, draftProgress, preferredCase, replacementTarget, shouldObserveDraft, stageLabels, studentQuestionText, studentResultState, studentResultUncertain } from './presentation'
 
 const fixture = <T>(name: string) => structuredClone(examples.entries.find(entry => entry.name === name)!.value) as T
 const sample = (): CaseDetail => {
@@ -62,11 +62,11 @@ describe('student-facing evidence states', () => {
   it.each(['queued', 'running', 'retryable_failed'] as const)('shows an actual %s check ahead of an older completed decision', status => {
     const row = sample(), job = fixture<Job>('successful_check_job')
     job.status = status; row.checkJob = job
-    expect(studentResultState(row)).toBe('processing')
-    expect(casePresentation(row).label).toBe('正在检查')
+    expect(studentResultState(row)).toBe(status === 'running' ? 'processing' : 'unprocessed')
+    expect(casePresentation(row).label).toBe({ queued: '排队等待处理', running: '正在检查', retryable_failed: '等待服务重试' }[status])
     row.case.current_decision!.validity = 'needs_review'
-    expect(studentResultState(row)).toBe('processing')
-    expect(casePresentation(row).label).toBe('正在检查')
+    expect(studentResultState(row)).toBe(status === 'running' ? 'processing' : 'unprocessed')
+    expect(casePresentation(row).label).toBe({ queued: '排队等待处理', running: '正在检查', retryable_failed: '等待服务重试' }[status])
   })
   it('shows a needs-revision answer without a verdict as pending, not as uncertain right or wrong', () => {
     const row = sample(); row.case.current_decision = null; row.attempt.recognition_status = 'needs_revision'
@@ -91,6 +91,83 @@ describe('student-facing evidence states', () => {
   it('hides decisions tied to an older answer or input revision', () => { const row = sample(); row.case.current_decision!.input_versions.attempt_id = 'attempt_previous'; expect(casePresentation(row).label).toBe('结果待更新'); const revision = sample(); revision.attempt.recognition_revision = 2; expect(casePresentation(revision).label).toBe('结果待更新'); const other = sample(); other.case.current_decision!.input_versions.question_id = 'question_other'; expect(casePresentation(other).label).toBe('结果待更新') })
   it('does not turn completed processing into a correct verdict', () => { expect(stageLabels.complete).toBe('可查看结果'); const row = sample(); row.case.current_decision = null; expect(casePresentation(row).label).toBe('等待检查') })
   it('renders unavailable dates explicitly', () => { expect(dateLabel('invalid')).toBe('时间待确认') })
+})
+
+describe('explicit unanswered state', () => {
+  const blank = () => {
+    const value = sample()
+    value.attempt.answer_status = 'blank'; value.attempt.answer_text = null
+    value.attempt.recognition_status = 'needs_revision'
+    value.case.current_decision!.validity = 'needs_review'
+    value.case.current_decision!.verdict = 'unable_to_judge'
+    value.question.recognition_uncertainties = ['题目右侧没有拍全']
+    return value
+  }
+  it('shows an explicit blank as unanswered even when the question itself is incomplete', () => {
+    const value = blank(), before = structuredClone(value)
+    expect(studentResultState(value)).toBe('unanswered')
+    expect(studentResultUncertain(value)).toBe(false)
+    expect(casePresentation(value)).toMatchObject({ label: '未作答', tone: 'neutral' })
+    expect(value).toEqual(before)
+  })
+  it('accepts a current usable unanswered verdict without inferring it from missing text', () => {
+    const value = sample()
+    value.case.current_decision!.verdict = 'unanswered'
+    expect(studentResultState(value)).toBe('unanswered')
+  })
+  it.each(['present', 'unclear', undefined] as const)('does not treat missing text with status %s as unanswered', status => {
+    const value = blank(); value.attempt.answer_status = status
+    expect(studentResultState(value)).toBe('uncertain')
+  })
+  it.each(['running', 'queued', 'retryable_failed'] as const)('keeps %s work distinct from the previous blank readback', status => {
+    const value = blank(); value.checkJob = { status } as Job
+    expect(studentResultState(value)).toBe(status === 'running' ? 'processing' : 'unprocessed')
+  })
+  it.each(['pending', 'failed'] as const)('does not reuse a blank while recognition is %s', status => {
+    const value = blank(); value.case.current_decision = null; value.attempt.recognition_status = status
+    expect(studentResultState(value)).toBe(status === 'pending' ? 'processing' : 'service_failure')
+  })
+  it.each(['old_attempt', 'new_question', 'inactive', 'stale_verdict'] as const)('ignores obsolete blank evidence: %s', kind => {
+    const value = blank(); value.case.current_decision = null
+    if (kind === 'old_attempt') value.case.current_attempt_id = 'new_attempt'
+    if (kind === 'new_question') value.case.current_question_revision += 1
+    if (kind === 'inactive') value.case.lifecycle = 'superseded'
+    if (kind === 'stale_verdict') {
+      value.attempt.answer_status = 'present'
+      value.case.current_decision = sample().case.current_decision
+      value.case.current_decision!.verdict = 'unanswered'; value.case.current_decision!.validity = 'stale'
+    }
+    expect(studentResultState(value)).toBe('unprocessed')
+  })
+})
+
+describe('bounded job observation presentation', () => {
+  const draft = (status: 'queued' | 'running' | 'retryable_failed', paused = false) => ({ stage: 'waiting', observation: { status, paused, phase: 'recognizing', lastProgressAt: 0, jobs: {} } }) as DraftView
+  it('distinguishes queued, running, and retry backoff without claiming queued work is reading', () => {
+    expect(draftProgress(draft('queued'))).toMatchObject({ label: '排队等待处理', spinning: false })
+    expect(draftProgress(draft('running'))).toMatchObject({ label: '读题与作答', spinning: true })
+    const check = draft('running'); check.observation!.phase = 'checking'
+    expect(draftProgress(check).label).toBe('逐题检查')
+    expect(draftProgress(draft('retryable_failed'))).toMatchObject({ label: '等待服务重试', spinning: false })
+  })
+  it('pauses the whole draft and running cards without discarding existing decisions', () => {
+    const paused = draft('running', true), row = sample()
+    row.checkJob = { ...fixture<Job>('successful_check_job'), status: 'running' }; row.observationPaused = true
+    expect(draftProgress(paused)).toMatchObject({ label: '进度已保留', spinning: false })
+    expect(draftProgress(paused).note).toContain('服务可能暂不可用')
+    expect(shouldObserveDraft(paused)).toBe(false)
+    expect(studentResultState(row)).toBe('unprocessed')
+    expect(casePresentation(row).label).toBe('进度已保留')
+    expect(row.case.current_decision).not.toBeNull()
+    expect(shouldObserveDraft(draft('queued'))).toBe(true)
+  })
+  it('observes legacy drafts once but does not auto-run missing checks without an active job', () => {
+    const old = { stage: 'recognizing' } as DraftView
+    expect(shouldObserveDraft(old)).toBe(true)
+    expect(draftProgress(old).spinning).toBe(false)
+    const noJob = draft('queued'); noJob.observation!.status = null
+    expect(shouldObserveDraft(noJob)).toBe(false)
+  })
 })
 
 describe('correction photo intent', () => {

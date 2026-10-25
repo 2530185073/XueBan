@@ -78,7 +78,9 @@ def install_governance(app, engine, cfg, database_session, current_actor):
             raise Problem(409, "conflict", "deletion_already_requested", "该学员已有删除请求，请读取其执行状态。", existing.revision)
         timestamp = now()
         homeworks = list(session.scalars(select(Homework).where(Homework.student_id == student.id, Homework.tenant_id == student.tenant_id).with_for_update()))
-        has_assets = bool(homeworks) and session.scalar(select(Asset.id).where(Asset.homework_id.in_([h.id for h in homeworks])).limit(1)) is not None
+        from .practice_photo import practice_photo_asset_ids
+        has_assets = (bool(homeworks) and session.scalar(select(Asset.id).where(Asset.homework_id.in_([h.id for h in homeworks])).limit(1)) is not None
+                      or bool(practice_photo_asset_ids(session, student.tenant_id, student.id)))
         row = DeletionRequest(id=new_id("deletion"), tenant_id=student.tenant_id, campus_id=student.campus_id, student_id=student.id, revision=1, status="accepted",
             targets={"original_assets": "pending" if has_assets else "not_applicable", "derived_assets": "not_applicable", "sensitive_records": "pending", "device_caches": "pending", "backup_tombstone": "pending"},
             requested_by=actor.id, reason_hash=_digest(payload["reason"]), idempotency_key_hash=key_hash, requested_at=timestamp)
@@ -123,7 +125,8 @@ def purge_student(session: Session, store: LocalAssetStore, tenant_id: str, stud
     for the deletion record.
     """
     homework_ids = list(session.scalars(select(Homework.id).where(Homework.student_id == student_id, Homework.tenant_id == tenant_id)))
-    asset_ids = set(extra_asset_ids)
+    from .practice_photo import practice_photo_asset_ids
+    asset_ids = set(extra_asset_ids) | set(practice_photo_asset_ids(session, tenant_id, student_id))
     if homework_ids:
         asset_ids |= set(session.scalars(select(Asset.id).where(Asset.homework_id.in_(homework_ids))))
     for asset_id in sorted(asset_ids):
@@ -250,7 +253,9 @@ class DeletionExecutor:
                 if row.lease_token != token:
                     return True
                 homework_ids = list(session.scalars(select(Homework.id).where(Homework.student_id == row.student_id)))
-                asset_ids = sorted(session.scalars(select(Asset.id).where(Asset.homework_id.in_(homework_ids)))) if homework_ids else []
+                from .practice_photo import practice_photo_asset_ids
+                asset_ids = set(session.scalars(select(Asset.id).where(Asset.homework_id.in_(homework_ids)))) if homework_ids else set()
+                asset_ids = sorted(asset_ids | set(practice_photo_asset_ids(session, row.tenant_id, row.student_id)))
                 if not self.ledger.contains(row.id):
                     self.ledger.append({"deletion_id": row.id, "tenant_id": row.tenant_id, "student_id": row.student_id, "asset_ids": asset_ids, "requested_at": iso(row.requested_at)})
                 row.targets = {**row.targets, "backup_tombstone": "done"}

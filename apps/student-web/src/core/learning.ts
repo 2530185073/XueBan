@@ -1,3 +1,5 @@
+import type { NormalizedPhoto } from './types'
+
 /**
  * Later-phase learning DTOs (knowledge map, agent memory, voluntary practice).
  * They are not in the generated phase-one contracts, so every field the UI
@@ -24,6 +26,8 @@ export const PRACTICE_ANSWER_MAX = 4000
 export const MAX_PRACTICE_ITEMS = 3
 export const variantGenerationStatuses = ['queued', 'generating', 'verifying', 'ready', 'failed', 'superseded'] as const
 export type VariantGenerationStatus = (typeof variantGenerationStatuses)[number]
+export const variantNotebookStatuses = ['uncorrected', 'submitted', 'correct', 'needs_practice', 'check_failed'] as const
+export type VariantNotebookStatus = (typeof variantNotebookStatuses)[number]
 export const practiceQuestionTypes = ['single_choice', 'multiple_choice', 'fill_blank', 'calculation', 'application', 'proof', 'unknown'] as const
 export type PracticeQuestionType = (typeof practiceQuestionTypes)[number]
 
@@ -118,7 +122,19 @@ export interface VariantGeneration {
   item_id: string | null; failure_code: string | null; notice: string; session_id?: string | null
 }
 export interface VariantGenerationList { student_id: string; items: VariantGeneration[] }
-export interface GenerateVariant { source_case_id: string; willing: true; count: 1; knowledge_id?: string }
+export interface VariantNotebookQuestion {
+  case_id: string; question_id: string; question_text: string | null; homework_title: string | null
+  occurred_at: string; status: VariantNotebookStatus; practiced: boolean
+  generation_id: string | null; session_id: string | null
+  generation_status?: VariantGenerationStatus | null
+}
+export interface VariantNotebook { student_id: string; items: VariantNotebookQuestion[] }
+export interface VariantNotebookDraft {
+  generation_id: string | null; session_id: string | null; regenerate_token: string | null
+  input: { text: string; selected: string[]; fields: Record<string, string> }
+  photo: NormalizedPhoto | null
+}
+export interface GenerateVariant { source_case_id: string; willing: true; count: 1; knowledge_id?: string; regenerate_token?: string }
 export interface PracticeSubmission {
   answer_text: string
   selected_options?: string[]
@@ -140,7 +156,7 @@ export interface PracticeItem {
 export interface PreviewTarget { id: string; name: string; objective: string | null; prerequisites: RelatedKnowledge[] }
 export interface PracticeSession {
   id: string; student_id: string; purpose: 'variant' | 'preview'; knowledge_ids: string[]; status: PracticeStatus; exit_reason: ExitReason | null
-  graph_version?: string | null
+  graph_version?: string | null; no_expiry?: boolean
   items: PracticeItem[]; started_at: string; budget_ends_at: string; ended_at: string | null; hints_allowed: boolean; notice: string; targets?: PreviewTarget[]
 }
 export interface PracticeSessionList { items: PracticeSession[] }
@@ -148,6 +164,7 @@ export interface CompletedPracticeAnswer { item_id: string; result: PracticeResu
 export interface PendingPracticeAnswer { item_id: string; result: 'pending'; assessment_id: string; solution_text: null; session_status: 'active'; feedback: string }
 export type PracticeAnswer = CompletedPracticeAnswer | PendingPracticeAnswer
 export interface PracticeHint { item_id: string; hint_text: string }
+export type PracticeSolution = { item_id: string; answer_text: string; solution_text: string }
 export type StartPractice =
   | { purpose: 'variant'; willing: true; knowledge_id: string; count: number; source_case_id?: string }
   | { purpose: 'variant'; willing: true; generation_job_id: string; count: 1 }
@@ -227,6 +244,38 @@ const generationShape = shape<VariantGeneration>({
 export const isVariantGeneration: Guard<VariantGeneration> = (value): value is VariantGeneration =>
   generationShape(value) && (value.status !== 'ready' || value.item_id !== null)
 export const isVariantGenerationList = shape<VariantGenerationList>({ student_id: id, items: list(isVariantGeneration, 20) })
+export const isVariantNotebookQuestion = shape<VariantNotebookQuestion>({
+  case_id: id, question_id: id, question_text: nullable(text), homework_title: nullable(text), occurred_at: date,
+  status: oneOf(variantNotebookStatuses), practiced: v => typeof v === 'boolean', generation_id: nullable(id), session_id: nullable(id),
+  generation_status: optional(nullable(oneOf(variantGenerationStatuses))),
+})
+export const isVariantNotebook = shape<VariantNotebook>({ student_id: id, items: list(isVariantNotebookQuestion, Number.MAX_SAFE_INTEGER) })
+// Drafts allow partially completed answers, including empty text/options/fields.
+const draftText = (value: unknown): value is string => text(value, PRACTICE_ANSWER_MAX * 2) && [...value].length <= PRACTICE_ANSWER_MAX
+const submissionShape = shape<PracticeSubmission>({
+  answer_text: draftText,
+  selected_options: optional(list((value): value is string => id(value) && value.length <= 8 && !!value.trim(), 10)),
+  answers: optional(list(shape({ field_id: v => id(v) && v.length <= 40, answer_text: draftText }), 12)),
+})
+export const isPracticeSubmission: Guard<PracticeSubmission> = (value): value is PracticeSubmission => submissionShape(value)
+  && (!value.selected_options || new Set(value.selected_options).size === value.selected_options.length)
+  && (!value.answers || new Set(value.answers.map(part => part.field_id)).size === value.answers.length)
+export const isNormalizedPracticePhoto = shape<NormalizedPhoto>({
+  blob: value => value instanceof Blob && value.type === 'image/jpeg' && value.size > 0 && value.size <= 4_194_304,
+  width: value => Number.isInteger(value) && (value as number) > 0 && (value as number) <= 2400,
+  height: value => Number.isInteger(value) && (value as number) > 0 && (value as number) <= 2400,
+  mime: value => value === 'image/jpeg', sha256: value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value),
+  size: value => Number.isInteger(value) && (value as number) > 0 && (value as number) <= 4_194_304,
+})
+const variantDraftShape = shape<VariantNotebookDraft>({
+  generation_id: nullable(id), session_id: nullable(id), regenerate_token: nullable((v): v is string => id(v) && v.length <= 128 && !!v.trim()),
+  input: shape({ text: draftText, selected: list((v): v is string => id(v) && v.length <= 8 && !!v.trim(), 10),
+    fields: v => record(v) && Object.keys(v).length <= 12 && Object.entries(v).every(([key, value]) => id(key) && key.length <= 40 && draftText(value)) }),
+  photo: nullable(isNormalizedPracticePhoto),
+})
+export const isVariantNotebookDraft: Guard<VariantNotebookDraft> = (value): value is VariantNotebookDraft => variantDraftShape(value)
+  && new Set(value.input.selected).size === value.input.selected.length
+  && (!value.photo || value.photo.size === value.photo.blob.size)
 const isPracticeAssessmentShape = shape<PracticeAssessment>({
   assessment_id: id, student_id: id, session_id: id, item_id: id, status: oneOf(practiceAssessmentStatuses),
   result: nullable(oneOf(practiceResults)), feedback: text, solution_text: nullable(text), retryable: v => typeof v === 'boolean',
@@ -249,7 +298,7 @@ const isItem = shape<PracticeItem>({
 const isTarget = shape<PreviewTarget>({ id, name: text, objective: nullable(text), prerequisites: list(isRelated, 50) })
 const isPracticeSessionShape = shape<PracticeSession>({
   id, student_id: id, purpose: oneOf(['variant', 'preview'] as const), knowledge_ids: list(id, 20), status: oneOf(practiceStatuses), exit_reason: nullable(oneOf(exitReasons)),
-  graph_version: optional(nullable(id)),
+  graph_version: optional(nullable(id)), no_expiry: optional(v => typeof v === 'boolean'),
   items: list(isItem, 20), started_at: date, budget_ends_at: date, ended_at: nullable(date), hints_allowed: v => typeof v === 'boolean', notice: text, targets: optional(list(isTarget, 20)),
 })
 export const isPracticeSession: Guard<PracticeSession> = (value): value is PracticeSession => isPracticeSessionShape(value) &&
@@ -259,3 +308,9 @@ const isCompletedPracticeAnswer = shape<CompletedPracticeAnswer>({ item_id: id, 
 const isPendingPracticeAnswer = shape<PendingPracticeAnswer>({ item_id: id, result: oneOf(['pending'] as const), solution_text: v => v === null, session_status: oneOf(['active'] as const), assessment_id: id, feedback: text })
 export const isPracticeAnswer: Guard<PracticeAnswer> = (value): value is PracticeAnswer => isCompletedPracticeAnswer(value) || isPendingPracticeAnswer(value)
 export const isPracticeHint = shape<PracticeHint>({ item_id: id, hint_text: text })
+export const isPracticeSolution = shape<PracticeSolution>({
+  item_id: id,
+  // Up to twelve separately labelled blanks, each with a 1000-character answer.
+  answer_text: value => text(value, 16000) && !!value.trim(),
+  solution_text: value => text(value) && !!value.trim(),
+})

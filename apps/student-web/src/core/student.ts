@@ -3,14 +3,15 @@ import { isRecognitionProgress, type RecognitionProgress } from './recognitionPr
 import type { Account, AdminRequestOptions, AuthSession, Accepted, RecognitionRecoveryStatus, RecognitionRecheckAccepted, AssetAccess, AttemptRead, CaseDetail, CaseRecord, CheckRun, CorrectionCase, CreateCorrection, CreateHelp, DecisionRead, DraftSummary, DraftView, HelpRequest, Hint, HomeworkDetail, HomeworkPage, HomeworkSession, HomeworkSummary, IdentityContext, ImageAsset, InputVersions, Job, JournalEntry, NormalizedPhoto, QuestionRead, RequestHint, Review, StoredDraft, StoredPage, UploadTicket } from './types'
 import { StudentApi } from './api'
 import { StudentError, safeError } from './errors'
-import { DRAFT_FORMAT, DraftStore, LEGACY_PAGE_ID, type PurgeReport } from './store'
-import { editPhoto, normalizePhoto } from './photo'
+import { DRAFT_FORMAT, DraftStore, LEGACY_PAGE_ID, LOCAL_TTL_MS, type PurgeReport } from './store'
+import { editPhoto, imageDimensions, normalizePhoto } from './photo'
 import { applyChange, checkBatch, checkSelection, isIdentity, movePage, pageBudget, removePage, type EditChange, type PageEdit } from './pages'
 import { homeworkPageIds } from './homeworkPages'
 import { valid } from './validation'
 import { bucketOfCase, countBuckets, firstUnresolved, isRetired, orderActiveCases, orderCasesByCreation, orderRowsByPhoto, retiredCases } from './cases'
 import { ObjectUrls } from './objectUrls'
 import { compareCreated } from './chronology'
+import { isNormalizedPracticePhoto, isPracticeSolution, isVariantNotebook, isVariantNotebookDraft, type PracticeSolution, type VariantNotebook, type VariantNotebookDraft } from './learning'
 import { isCurriculumBooks, isCurriculumCatalog, isKnowledgeDetail, isKnowledgeMap, isStudentCurriculum, isVariantPracticeOverview, isVariantGeneration, isVariantGenerationList, isAgentContext, isMemory, isMemoryList, isOptionalActivities, isPracticeAnswer, isPracticeAssessment, isPracticeHint, isPracticeSession, isPracticeSessionList, MEMORY_CONTENT_MAX, MEMORY_CONTENT_MIN, PRACTICE_ANSWER_MAX, type AgentContext, type CurriculumBooks, type CurriculumCatalog, type ExitReason, type GenerateVariant, type VariantGeneration, type VariantGenerationList, type PracticeSubmission, type KnowledgeDetail, type KnowledgeMap, type Memory, type MemoryList, type OptionalActivities, type PracticeAnswer, type PracticeAssessment, type PracticeHint, type PracticeSession, type StartPractice, type StudentCurriculum, type StudentMemoryCategory, type VariantPracticeOverview } from './learning'
 
 export const remoteDraftId = (id: string) => `remote_${id}`
@@ -20,8 +21,10 @@ const encoded = encodeURIComponent
 const active = (job: Job) => ['queued', 'running', 'retryable_failed'].includes(job.status)
 const terminalFailure = (job: Job) => ['failed', 'superseded', 'cancelled'].includes(job.status)
 const JOB_POLL_ROUNDS = 120
+export const NO_PROGRESS_TIMEOUT_MS = 3 * 60_000
 const latestRecognition = (jobs: Job[]) => jobs.filter(job => job.kind === 'recognize_homework').sort(compareCreated).at(-1)
 const matches = (v: InputVersions, row: CaseDetail) => v.question_id === row.case.question_id && v.question_revision === row.case.current_question_revision && v.attempt_id === row.case.current_attempt_id && v.attempt_recognition_revision === row.attempt.recognition_revision
+const hasAnswerText = (row: CaseDetail) => typeof row.attempt.answer_text === 'string' && row.attempt.answer_text.trim().length > 0
 export function effectiveDecision(row: CaseDetail) { const d = row.case.current_decision; return !isRetired(row.case) && d && !['stale', 'retracted'].includes(d.validity) && matches(d.input_versions, row) ? d : null }
 /** Requests a student may raise on the current answer; an appeal needs a result to question. */
 export function canAppeal(row: CaseDetail) { const d = effectiveDecision(row); return d != null && ['candidate', 'needs_review', 'confirmed'].includes(d.validity) || !isRetired(row.case) && row.case.progress === 'verified_resolved' }
@@ -52,7 +55,7 @@ export function decisionLabel(row: CaseDetail): string {
 interface Context { scope: string; student: string; epoch: number; detailSession?: Session }
 interface Session { access_token: string; expires_at: string; kind: 'account' }
 interface PendingAuth { body: string; key: string }
-export interface ClientOptions { detailSnapshotEnabled?: boolean; origin?: string; transport?: typeof fetch; storage?: Storage; store?: DraftStore; normalize?: (file: Blob, maxBytes?: number) => Promise<NormalizedPhoto>; edit?: (source: NormalizedPhoto, edit: PageEdit, maxBytes?: number) => Promise<NormalizedPhoto>; sleep?: (ms: number) => Promise<void> }
+export interface ClientOptions { detailSnapshotEnabled?: boolean; origin?: string; transport?: typeof fetch; storage?: Storage; store?: DraftStore; normalize?: (file: Blob, maxBytes?: number) => Promise<NormalizedPhoto>; edit?: (source: NormalizedPhoto, edit: PageEdit, maxBytes?: number) => Promise<NormalizedPhoto>; sleep?: (ms: number) => Promise<void>; now?: () => number }
 export class StudentClient {
   private session: Session | null = null
   private currentAccount: Account | null = null
@@ -70,11 +73,15 @@ export class StudentClient {
   private detailSnapshotEnabled: boolean
   private store: DraftStore
   private storage: Storage
+  private variantDraftFences = new Map<string, Context>()
+  private variantDraftWrites = new Map<string, Promise<void>>()
   private origin: string
   private normalize: (file: Blob, maxBytes?: number) => Promise<NormalizedPhoto>
   private edit: (source: NormalizedPhoto, edit: PageEdit, maxBytes?: number) => Promise<NormalizedPhoto>
   private sleep: (ms: number) => Promise<void>
+  private now: () => number
   private runs = new Map<string, Promise<DraftView>>()
+  private observationReads = new Map<string, number>()
   private images = new Map<string, Promise<Blob>>()
   private urls = new ObjectUrls()
   private housekeeping: Promise<PurgeReport | null>
@@ -85,6 +92,7 @@ export class StudentClient {
     if (url.origin !== this.origin || !['http:', 'https:'].includes(url.protocol)) throw new StudentError('invalid_origin', 422)
     this.storage = options.storage ?? sessionStorage; this.store = options.store ?? new DraftStore()
     this.normalize = options.normalize ?? normalizePhoto; this.edit = options.edit ?? editPhoto; this.sleep = options.sleep ?? (ms => new Promise(resolve => setTimeout(resolve, ms)))
+    this.now = options.now ?? Date.now
     this.api = new StudentApi(this.origin, () => this.token(), () => this.disconnect(), options.transport, () => { const epoch = this.epoch, session = this.session; return () => this.currentSession(epoch, session) })
     this.housekeeping = this.store.purgeExpired().catch(() => null)
   }
@@ -229,11 +237,13 @@ export class StudentClient {
     this.acceptSession(result)
     return this.readyAccount()
   }
-  async changePassword(currentPassword: string, newPassword: string): Promise<IdentityContext | null> {
+  async changePassword(currentPassword: string | null, newPassword: string): Promise<IdentityContext | null> {
     if (!this.session) throw new StudentError('authentication_required', 401)
-    if (!currentPassword || [...currentPassword].length > 128 || new TextEncoder().encode(currentPassword).length > 512 || [...newPassword].length < 15 || [...newPassword].length > 128 || new TextEncoder().encode(newPassword).length > 512) throw new StudentError('invalid_password', 422, '新密码请使用 15–128 个字符，可以包含空格；当前密码也需要填写。')
+    const firstLogin = this.currentAccount?.must_change_password === true
+    if (!/^[A-Za-z0-9]{3,15}$/.test(newPassword) || (!firstLogin && (!currentPassword || [...currentPassword].length > 128 || new TextEncoder().encode(currentPassword).length > 512))) throw new StudentError('invalid_password', 422, '新密码请使用3–15位英文字母或数字。普通改密还需要填写当前密码。')
     const epoch = this.epoch
-    const result = await this.authWrite<AuthSession>('/v1/auth/change-password', { current_password: currentPassword, new_password: newPassword }, 'AuthSession')
+    const payload = firstLogin ? { new_password: newPassword } : { current_password: currentPassword, new_password: newPassword }
+    const result = await this.authWrite<AuthSession>('/v1/auth/change-password', payload, 'AuthSession')
     if (epoch !== this.epoch) throw new StudentError('session_changed', 401)
     this.epoch++; this.currentIdentity = null; this.student = null; this.dropMedia(); this.acceptSession(result)
     return this.readyAccount()
@@ -302,11 +312,49 @@ export class StudentClient {
   }
   private view(d: StoredDraft): DraftView {
     const pages = d.pages.map(p => ({ id: p.id, blob: p.photo.blob, width: p.photo.width, height: p.photo.height, size: p.photo.size, edited: !!p.original, assetId: p.assetId, uploaded: p.uploaded }))
-    return { id: d.id, title: d.title, stage: d.stage, createdAt: d.createdAt, updatedAt: d.updatedAt, homeworkId: d.homeworkId, error: d.error, pageCount: pages.length, uploadedCount: pages.filter(p => p.uploaded).length, photo: pages[0]?.blob ?? null, pages, editable: !d.locked, detail: d.detail, recognitionJobId: d.recognitionJobId, curriculum: d.curriculum ?? null, correction: d.correction ? { caseId: d.correction.caseId, parentAttemptId: d.correction.parentAttemptId } : undefined }
+    const observationPaused = !!d.observation && (d.observation.paused || d.observation.status === null && ['waiting', 'checking'].includes(d.stage))
+    const detail = d.detail && { ...d.detail, cases: d.detail.cases.map(row => ({ ...row, observationPaused })) }
+    return { id: d.id, title: d.title, stage: d.stage, createdAt: d.createdAt, updatedAt: d.updatedAt, homeworkId: d.homeworkId, error: d.error, pageCount: pages.length, uploadedCount: pages.filter(p => p.uploaded).length, photo: pages[0]?.blob ?? null, pages, editable: !d.locked, detail, recognitionJobId: d.recognitionJobId, observation: d.observation, curriculum: d.curriculum ?? null, correction: d.correction ? { caseId: d.correction.caseId, parentAttemptId: d.correction.parentAttemptId } : undefined }
   }
   async listDrafts(): Promise<DraftSummary[]> { const ctx = await this.authorize(); const drafts = await this.store.drafts(ctx.scope); this.check(ctx); return drafts.map(d => { const { photo: _p, detail: _d, pages: _pages, editable: _e, ...summary } = this.view(d); return summary }) }
   async getDraft(id: string) { const ctx = await this.authorize(); const d = await this.store.draft(ctx.scope, id); this.check(ctx); return this.view(d) }
   private async save(ctx: Context, d: StoredDraft) { this.check(ctx); d.updatedAt = new Date().toISOString(); await this.store.saveDraft(d); this.check(ctx); this.changed() }
+  private resetObservation(d: StoredDraft) {
+    d.observation = { lastProgressAt: this.now(), jobs: { ...d.observation?.jobs }, paused: false, status: null, phase: null }
+  }
+  /** Local saves/poll attempts are not progress; only changed server job versions are. */
+  private observeJobs(d: StoredDraft, jobs: Job[]) {
+    if (!d.observation) this.resetObservation(d)
+    const observation = d.observation!
+    for (const job of jobs) {
+      const version = `${job.revision}:${job.status}`
+      if (observation.jobs[job.id] !== version) {
+        observation.jobs[job.id] = version
+        observation.lastProgressAt = this.now()
+        observation.paused = false
+      }
+    }
+    const pending = jobs.filter(active)
+    const job = pending.find(job => job.status === 'running') ?? pending.find(job => job.status === 'queued') ?? pending[0]
+    observation.status = job ? job.status as 'queued' | 'running' | 'retryable_failed' : null
+    observation.phase = job ? job.kind === 'check' ? 'checking' : 'recognizing' : null
+    observation.paused = !!job && (observation.paused || this.now() - observation.lastProgressAt >= NO_PROGRESS_TIMEOUT_MS)
+  }
+  private observedState(d: StoredDraft, hasPendingWrite: boolean) {
+    const detail = d.detail!
+    const recognition = d.correction ? detail.jobs.find(job => job.id === d.recognitionJobId) : latestRecognition(detail.jobs)
+    const rows = detail.cases.filter(row => !d.correction || row.case.id === d.correction.caseId)
+    const jobs = [...(recognition ? [recognition] : []), ...rows.flatMap(row => row.checkJob ? [row.checkJob] : []),
+      ...detail.jobs.filter(job => job.kind === 'recognition_recheck' && active(job))]
+    this.observeJobs(d, jobs)
+    if (d.pages.some(page => !page.uploaded) || !recognition && !rows.length || hasPendingWrite) d.stage = d.stage === 'failed' ? 'failed' : 'waiting'
+    else if (recognition && terminalFailure(recognition)) d.stage = 'failed'
+    else if (jobs.some(active)) d.stage = 'waiting'
+    else if (rows.some(row => row.checkJob && terminalFailure(row.checkJob) || row.attempt.recognition_status === 'failed')) d.stage = 'failed'
+    else if (rows.every(row => effectiveDecision(row) || d.correction && row.attempt.recognition_status === 'needs_revision' && !hasAnswerText(row))) d.stage = 'complete'
+    else d.stage = 'waiting'
+    if (d.stage !== 'failed') d.error = null
+  }
   /** Re-encodes a whole selection or none of it, sharing the remaining batch bytes between the new pages. */
   private async importPages(files: Blob[], existing: StoredPage[]): Promise<StoredPage[]> {
     const pages: StoredPage[] = []
@@ -581,17 +629,43 @@ export class StudentClient {
     d.detail = detail
     const hasPendingWrite = await this.store.hasPending(ctx.scope, `${d.journalId ?? d.id}:`)
     if (recognition && d.pages.every(page => page.uploaded) && !hasPendingWrite) d.recognitionJobId = recognition.id
-    // Pages not yet received, or no recognition started yet, is unfinished work and never shown as complete.
-    if (d.pages.some(page => !page.uploaded) || !recognition && !detail.cases.length) d.stage = d.stage === 'failed' ? 'failed' : 'waiting'
-    else if (recognition?.status === 'failed') d.stage = 'failed'
-    else if (detail.jobs.some(active)) d.stage = 'waiting'
-    else if (detail.cases.every(row => effectiveDecision(row) || row.attempt.recognition_status === 'needs_revision')) d.stage = 'complete'
-    else if (detail.jobs.some(terminalFailure)) d.stage = 'failed'
-    else d.stage = 'waiting'
-    if (d.stage === 'complete' && !hasPendingWrite) d.error = null
+    this.resetObservation(d)
+    this.observedState(d, hasPendingWrite)
     detail.draftId = d.id
     await this.save(ctx, d)
-    return detail
+    return this.view(d).detail!
+  }
+  /** GET-only observation. Never replays a journal, uploads, or submits model work. */
+  async observeDraft(id: string, resetWait = false): Promise<DraftView> {
+    const ctx = await this.authorize(), key = `${ctx.epoch}:${id}`
+    // An explicitly started mutation owns its draft until its bounded run exits.
+    const running = this.runs.get(key)
+    if (running) { await running; this.check(ctx) }
+    const version = (this.observationReads.get(key) ?? 0) + 1
+    this.observationReads.set(key, version)
+    let d = await this.store.draft(ctx.scope, id); this.check(ctx)
+    if (!d.homeworkId) return this.view(d)
+    if (d.observation?.paused && !resetWait) return this.view(d)
+    if (resetWait || !d.observation) { this.resetObservation(d); await this.save(ctx, d) }
+    try {
+      const detail = await this.detail(ctx, d.homeworkId)
+      d = await this.store.draft(ctx.scope, id); this.check(ctx)
+      if (this.observationReads.get(key) !== version) return this.view(d)
+      d.detail = { ...detail, draftId: id }
+      const hasPendingWrite = await this.store.hasPending(ctx.scope, `${d.journalId ?? id}:`)
+      if (!d.correction && !hasPendingWrite && d.pages.every(page => page.uploaded)) d.recognitionJobId = latestRecognition(detail.jobs)?.id ?? d.recognitionJobId
+      this.observedState(d, hasPendingWrite)
+    } catch (error) {
+      this.check(ctx)
+      d = await this.store.draft(ctx.scope, id); this.check(ctx)
+      if (this.observationReads.get(key) !== version) return this.view(d)
+      d.error = safeError(error)
+      // A failed GET also consumes the window; it must not clear photos/cards or
+      // silently turn an observation failure into a new paid job.
+      if (d.observation && this.now() - d.observation.lastProgressAt >= NO_PROGRESS_TIMEOUT_MS) d.observation.paused = true
+    }
+    await this.save(ctx, d)
+    return this.view(d)
   }
   /** Refresh the currently opened cache, including a correction-photo draft.
    * GET only: never resumes uploads/checks or creates a replacement draft.
@@ -641,17 +715,26 @@ export class StudentClient {
     return value
   }
 
-  private async pollJobs(ctx: Context, ids: string[]): Promise<Job[]> {
+  private async pollJobs(ctx: Context, ids: string[], draft?: StoredDraft): Promise<Job[]> {
     const latest = new Map<string, Job>(), uniqueIds = unique(ids)
     for (let count = 0; count < JOB_POLL_ROUNDS; count++) {
       const pending = uniqueIds.filter(id => !latest.has(id) || active(latest.get(id)!))
       if (!pending.length) return [...latest.values()]
       const current = await Promise.all(pending.map(id => this.read<Job>(ctx, `/v1/jobs/${encoded(id)}`, 'Job')))
       current.forEach(job => latest.set(job.id, job))
+      if (draft) {
+        const before = JSON.stringify(draft.observation)
+        this.observeJobs(draft, [...latest.values()])
+        const observation = draft.observation!
+        if (observation.status) draft.stage = observation.status === 'running' && !observation.paused ? observation.phase! : 'waiting'
+        if (before !== JSON.stringify(observation)) await this.save(ctx, draft)
+        if (observation.paused) return [...latest.values()]
+      }
       if (![...latest.values()].some(active)) return [...latest.values()]
       const delay = Math.min(5000, Math.max(1000, Math.max(...current.map(job => job.retry_after_seconds ?? 2)) * 1000))
       await this.sleep(delay); this.check(ctx)
     }
+    if (draft) this.observeJobs(draft, [...latest.values()])
     return [...latest.values()]
   }
   private async awaitJob(ctx: Context, id: string): Promise<Job> {
@@ -669,6 +752,9 @@ export class StudentClient {
   }
   private async process(ctx: Context, id: string, options: { retryFailed?: boolean; rerecognize?: boolean; forceCheckCaseIds?: string[]; forceCheckToken?: string }): Promise<DraftView> {
     const d = await this.store.draft(ctx.scope, id); this.check(ctx)
+    // Only explicit runDraft calls resume mutation work. Background observation
+    // never reaches this method and cannot rotate an idempotency generation.
+    this.resetObservation(d)
     const journalId = d.journalId ?? id
     const post = <T>(name: string, path: string, body: unknown, shape: string, requestShape: string) => this.write<T>(ctx, `${journalId}:${name}`, path, body, shape, requestShape)
     try {
@@ -714,7 +800,8 @@ export class StudentClient {
       if (hw.scope.student_id !== ctx.student || hw.processing_blocked) throw new StudentError('access_denied', 403)
       if (d.pages.length) {
         if (!d.locked) checkBatch(d.pages.map(page => page.photo.size))
-        d.stage = 'uploading'; d.locked = true; await this.save(ctx, d)
+        if (d.pages.some(page => !page.uploaded)) d.stage = 'uploading'
+        d.locked = true; await this.save(ctx, d)
         // Pages go one by one in the saved order; each page's own journal makes a retry resume where it stopped.
         for (const [index, page] of d.pages.entries()) {
           if (page.uploaded) continue
@@ -750,7 +837,7 @@ export class StudentClient {
           d.recognitionJobId = latestRecognition(jobs)?.id
         }
         if (!d.recognitionJobId) {
-          d.stage = 'recognizing'; await this.save(ctx, d)
+          d.stage = 'waiting'; await this.save(ctx, d)
           let accepted: Accepted
           if (d.correction) {
             const c = (await this.caseDetail(ctx, d.correction.caseId)).case
@@ -763,59 +850,68 @@ export class StudentClient {
         await this.save(ctx, d)
       }
       if (d.recognitionJobId) {
-        d.stage = 'recognizing'; await this.save(ctx, d)
-        const [recognitionJob] = await this.pollJobs(ctx, [d.recognitionJobId])
+        const [recognitionJob] = await this.pollJobs(ctx, [d.recognitionJobId], d)
         if (!recognitionJob || active(recognitionJob)) {
           d.error = null; d.stage = 'waiting'; d.detail = await this.detail(ctx, d.homeworkId); await this.save(ctx, d); return this.view(d)
         }
         this.jobSucceeded(recognitionJob)
       }
       d.detail = await this.detail(ctx, d.homeworkId)
+      this.observeJobs(d, d.detail.jobs)
       // Recovery is a server-owned original-image task, not a new /checks request.
       if (d.detail.jobs.some(job => job.kind === 'recognition_recheck' && active(job))) { d.stage = 'waiting'; d.error = null; await this.save(ctx, d); return this.view(d) }
-      d.stage = 'checking'; await this.save(ctx, d)
+      d.stage = 'waiting'; await this.save(ctx, d)
       const forced = new Set(options.forceCheckCaseIds ?? [])
-      const ids = forced.size ? [...forced] : d.correction ? [d.correction.caseId] : d.detail.cases.map(row => row.case.id)
+      const ids = d.correction ? [d.correction.caseId] : forced.size ? [...forced] : d.detail.cases.map(row => row.case.id)
       const knownJobs = new Map(d.detail.jobs.map(job => [job.id, job]))
       const checkJobs = new Map<string, Job>()
       const skipped = new Set<string>()
       for (const caseId of ids) {
         let row: CaseDetail
         try { row = await this.caseDetail(ctx, caseId) } catch (e) { if (!d.correction && e instanceof StudentError && ['case_superseded', 'case_unavailable'].includes(e.code)) continue; throw e }
-        if (effectiveDecision(row) && !forced.has(caseId)) continue
-        const answerTextPresent = typeof row.attempt.answer_text === 'string' && row.attempt.answer_text.trim().length > 0
-        if (row.attempt.recognition_status === 'pending' || row.attempt.recognition_status === 'failed'
-          || row.attempt.recognition_status === 'needs_revision' && (!forced.has(caseId) || !answerTextPresent)) {
-          skipped.add(caseId); continue
-        }
         let job: Job | undefined
+        let retryCheck = false
         const checks = await mapLimit(row.case.check_ids, 3, checkId => this.read<CheckRun>(ctx, `/v1/checks/${encoded(checkId)}`, 'CheckRun'))
         for (const check of checks.sort(compareCreated).reverse()) {
           if (matches(check.input_versions, row)) {
             const candidate = knownJobs.get(check.job_id) ?? await this.read<Job>(ctx, `/v1/jobs/${encoded(check.job_id)}`, 'Job')
-            if (active(candidate)) { job = candidate; break }
-            if (candidate.status === 'failed' && !options.retryFailed) { job = candidate; break }
+            if (active(candidate) || terminalFailure(candidate) && !options.retryFailed) job = candidate
+            retryCheck = terminalFailure(candidate) && !!options.retryFailed
+            // Only the latest check of these inputs owns their current state.
+            break
           }
         }
         if (!job) {
+          // Existing work must be observed even with an older decision or no
+          // readable answer. Only new checks require usable recognition input.
+          if (effectiveDecision(row) && !forced.has(caseId) && !retryCheck) continue
+          if (row.attempt.recognition_status === 'pending' || row.attempt.recognition_status === 'failed'
+            || row.attempt.recognition_status === 'needs_revision' && !hasAnswerText(row)) {
+            skipped.add(caseId); continue
+          }
           const version = `${row.attempt.id}-${row.case.current_question_revision}-${row.attempt.recognition_revision}`
           const accepted = await post<Accepted>(`check-${caseId}-${version}-${d.generation}${forced.has(caseId) ? `-${options.forceCheckToken ?? crypto.randomUUID()}` : ''}`, `/v1/cases/${encoded(caseId)}/checks`, { expected_revision: row.case.revision, attempt_id: row.attempt.id, question_revision: row.case.current_question_revision, attempt_recognition_revision: row.attempt.recognition_revision }, 'Accepted', 'StartCheck')
           job = accepted.job
         }
         d.checkJobs[caseId] = job.id; checkJobs.set(caseId, job); await this.save(ctx, d)
       }
-      const polled = await this.pollJobs(ctx, [...checkJobs.values()].map(job => job.id))
+      const polled = await this.pollJobs(ctx, [...checkJobs.values()].map(job => job.id), d)
       d.detail = await this.detail(ctx, d.homeworkId)
-      if (polled.some(active)) { d.error = null; d.stage = 'waiting'; await this.save(ctx, d); return this.view(d) }
-      const failure = polled.find(job => job.status !== 'succeeded')
+      const rows = d.detail.cases.filter(row => !d.correction || row.case.id === d.correction.caseId)
+      const currentJobs = rows.flatMap(row => row.checkJob ? [row.checkJob] : [])
+      this.observeJobs(d, [...polled, ...currentJobs])
+      // A check may have started after the initial read, including on another
+      // device. Fresh row jobs also participate in the completion gate.
+      if (polled.some(active) || currentJobs.some(active)) { d.error = null; d.stage = 'waiting'; await this.save(ctx, d); return this.view(d) }
+      const failure = polled.find(job => job.status !== 'succeeded') ?? currentJobs.find(terminalFailure)
       if (failure) this.jobSucceeded(failure)
-      const unresolved = d.detail.cases.filter(row => (!d.correction || row.case.id === d.correction.caseId) && !effectiveDecision(row))
+      const unresolved = rows.filter(row => !effectiveDecision(row))
       if (unresolved.length) {
         if (unresolved.some(row => row.attempt.recognition_status === 'failed')) throw new StudentError('recognition_failed', 0, '部分题目的识别服务未完成，未生成判断；请重试或请坐班老师核实。')
         // A correction photo can finish recognition without enough answer
         // evidence for a second-pass judgment. Keep the case visible for
         // review, but do not turn a completed recognition into a false error.
-        if (unresolved.every(row => row.attempt.recognition_status === 'needs_revision')) { d.stage = 'complete'; await this.save(ctx, d); return this.view(d) }
+        if (d.correction && unresolved.every(row => row.attempt.recognition_status === 'needs_revision' && !hasAnswerText(row))) { d.stage = 'complete'; await this.save(ctx, d); return this.view(d) }
         // A pending attempt or a server-side queued check is unfinished work.
         d.error = null; d.stage = skipped.size ? 'waiting' : 'checking'; await this.save(ctx, d); return this.view(d)
       }
@@ -876,7 +972,11 @@ export class StudentClient {
    * after an unknown outcome instead of replaying.
    */
   private async learning<T>(path: (student: string) => string, guard: (value: unknown) => value is T, body?: unknown, method?: 'PUT'): Promise<{ value: T; student: string }> {
-    const ctx = await this.authorize()
+    const ctx = { ...await this.authorize(), detailSession: this.session! }
+    return this.learningInContext(ctx, path, guard, body, method)
+  }
+  private async learningInContext<T>(ctx: Context, path: (student: string) => string, guard: (value: unknown) => value is T, body?: unknown, method?: 'PUT'): Promise<{ value: T; student: string }> {
+    this.check(ctx)
     const value = await this.api.request<unknown>(path(encoded(ctx.student)), 'Learning', body === undefined ? undefined : JSON.stringify(body), body === undefined ? undefined : crypto.randomUUID(), false, method)
     this.check(ctx)
     if (!guard(value)) throw new StudentError('invalid_response', 502)
@@ -931,7 +1031,50 @@ export class StudentClient {
   async retractMemory(memoryId: string): Promise<Memory> { return (await this.learning(() => `/v1/memories/${encoded(memoryId)}/retract`, isMemory, {})).value }
   async optionalActivities(): Promise<OptionalActivities> { return (await this.learning(s => `/v1/students/${s}/optional-activities`, isOptionalActivities)).value }
   async variantPractice(): Promise<VariantPracticeOverview> { return this.owned(await this.learning(s => `/v1/students/${s}/variant-practice`, isVariantPracticeOverview)) }
+  async variantNotebook(): Promise<VariantNotebook> { return this.owned(await this.learning(s => `/v1/students/${s}/variant-notebook`, isVariantNotebook)) }
+  private variantDraftContext(): Context | null {
+    if (!this.token() || !this.session || !this.student || !this.currentIdentity || !this.currentAccount || this.currentAccount.must_change_password
+      || this.currentAccount.student_id !== this.student || !this.currentIdentity.authorized_students.some(s => s.student_id === this.student)) return null
+    return { scope: JSON.stringify([this.origin, this.currentIdentity.actor_id, this.student]), student: this.student, epoch: this.epoch, detailSession: this.session }
+  }
+  /** Call on entry to bind autosaves to this signed-in session. Blobs stay in IndexedDB. */
+  async variantDraft(caseId: string): Promise<VariantNotebookDraft | null> {
+    const ctx = this.variantDraftContext(); if (!ctx || !caseId || caseId.length > 200) return null
+    this.variantDraftFences.set(caseId, ctx)
+    await this.housekeeping; this.check(ctx)
+    const id = `variant-notebook-draft:${caseId}`
+    await this.variantDraftWrites.get(JSON.stringify([ctx.scope, id])); this.check(ctx)
+    const entry = await this.store.operation(ctx.scope, id); this.check(ctx)
+    if (!entry) return null
+    if (entry.scope !== ctx.scope || entry.id !== id || entry.shape !== 'VariantNotebookDraft' || entry.path !== 'local:variant-notebook-draft'
+      || !entry.updatedAt || !Number.isFinite(Date.parse(entry.updatedAt)) || this.now() - Date.parse(entry.updatedAt) > LOCAL_TTL_MS
+      || !isVariantNotebookDraft(entry.response)) return null
+    return entry.response
+  }
+  async saveVariantDraft(caseId: string, draft: VariantNotebookDraft | null): Promise<void> {
+    const ctx = this.variantDraftContext(); if (!ctx) throw new StudentError('authentication_required', 401)
+    const previous = this.variantDraftFences.get(caseId)
+    if (previous && (previous.scope !== ctx.scope || previous.epoch !== ctx.epoch || previous.detailSession !== ctx.detailSession)) throw new StudentError('session_changed', 401)
+    if (!caseId || caseId.length > 200 || draft !== null && !isVariantNotebookDraft(draft)) throw new StudentError('invalid_request', 422)
+    this.variantDraftFences.set(caseId, ctx)
+    const snapshot: VariantNotebookDraft | null = draft && { generation_id: draft.generation_id, session_id: draft.session_id, regenerate_token: draft.regenerate_token,
+      input: { text: draft.input.text, selected: [...draft.input.selected], fields: { ...draft.input.fields } }, photo: draft.photo && { ...draft.photo } }
+    const id = `variant-notebook-draft:${caseId}`, key = JSON.stringify([ctx.scope, id])
+    // Persist identifiers only, so account-loss cleanup can find drafts after reload.
+    try { this.storage.setItem(this.storageKey('scope'), JSON.stringify({ actor: this.currentIdentity!.actor_id, student: ctx.student })) } catch { /* Best-effort cleanup hint. */ }
+    const writing = (this.variantDraftWrites.get(key) ?? Promise.resolve()).catch(() => undefined).then(async () => {
+      await this.housekeeping; this.check(ctx)
+      if (snapshot === null) await this.store.removeOperation(ctx.scope, id)
+      // Local-only, completed journal records share existing TTL/purge and Blob support.
+      // They have no HTTP path or pending request body and must never be replayed.
+      else await this.store.saveOperation({ scope: ctx.scope, id, key: id, path: 'local:variant-notebook-draft', body: '', shape: 'VariantNotebookDraft', response: snapshot })
+      this.check(ctx)
+    })
+    this.variantDraftWrites.set(key, writing)
+    try { await writing } finally { if (this.variantDraftWrites.get(key) === writing) this.variantDraftWrites.delete(key) }
+  }
   async generateVariant(request: GenerateVariant): Promise<VariantGeneration> {
+    if (request.regenerate_token !== undefined && (typeof request.regenerate_token !== 'string' || !request.regenerate_token.trim() || request.regenerate_token.length > 128)) throw new StudentError('invalid_request', 422)
     const value = this.owned(await this.learning(s => `/v1/students/${s}/variant-generations`, isVariantGeneration, request))
     if (value.source_case_id !== request.source_case_id) throw new StudentError('invalid_response', 502)
     return value
@@ -952,6 +1095,10 @@ export class StudentClient {
     if (value.id !== sessionId) throw new StudentError('invalid_response', 502)
     return value
   }
+  /** The backend returns the idempotent retry session and retains the original answer. */
+  async retryPractice(sessionId: string): Promise<PracticeSession> {
+    return this.owned(await this.learning(() => `/v1/practice-sessions/${encoded(sessionId)}/retry`, isPracticeSession, {}))
+  }
   async practiceAssessment(assessmentId: string, sessionId: string, itemId: string): Promise<PracticeAssessment> {
     const value = this.owned(await this.learning(() => `/v1/practice-assessments/${encoded(assessmentId)}`, isPracticeAssessment))
     if (value.assessment_id !== assessmentId || value.session_id !== sessionId || value.item_id !== itemId) throw new StudentError('invalid_response', 502)
@@ -960,7 +1107,31 @@ export class StudentClient {
   /** The student's unfinished activity, if any (e.g. after a reload or an unconfirmed start). */
   async activePractice(): Promise<PracticeSession | null> {
     const { value, student } = await this.learning(s => `/v1/students/${s}/practice-sessions`, isPracticeSessionList)
-    return value.items.find(item => item.student_id === student && item.status === 'active' && Date.parse(item.budget_ends_at) > Date.now()) ?? null
+    return value.items.find(item => item.student_id === student && item.status === 'active'
+      && (item.purpose === 'variant' && item.no_expiry === true || Date.parse(item.budget_ends_at) > this.now())) ?? null
+  }
+  async answerPracticePhoto(sessionId: string, itemId: string, file: Blob | NormalizedPhoto): Promise<PracticeAnswer> {
+    const ctx = { ...await this.authorize(), detailSession: this.session! }
+    const session = this.owned(await this.learningInContext(ctx, () => `/v1/practice-sessions/${encoded(sessionId)}`, isPracticeSession))
+    if (session.id !== sessionId) throw new StudentError('invalid_response', 502)
+    if (!session.items.some(item => item.id === itemId)) throw new StudentError('access_denied', 403)
+    const suppliedPhoto = !(file instanceof Blob)
+    const photo = suppliedPhoto ? file : await this.normalize(file); this.check(ctx)
+    if (!isNormalizedPracticePhoto(photo) || photo.blob.size !== photo.size) throw new StudentError('invalid_photo', 422)
+    const bytes = new Uint8Array(await photo.blob.arrayBuffer()); this.check(ctx)
+    if (suppliedPhoto) {
+      const dimensions = imageDimensions(bytes), digest = await crypto.subtle.digest('SHA-256', bytes); this.check(ctx)
+      const sha256 = Array.from(new Uint8Array(digest), n => n.toString(16).padStart(2, '0')).join('')
+      if (bytes[0] !== 255 || bytes[1] !== 216 || dimensions.width !== photo.width || dimensions.height !== photo.height || sha256 !== photo.sha256) throw new StudentError('invalid_photo', 422)
+    }
+    // Chunk the conversion so a full-resolution page never overflows the call stack.
+    let binary = ''
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
+    const { value } = await this.learningInContext(ctx, () => `/v1/practice-sessions/${encoded(sessionId)}/photo-responses`, isPracticeAnswer, {
+      item_id: itemId, image: { data_base64: btoa(binary), mime_type: photo.mime, width: photo.width, height: photo.height, sha256: photo.sha256, byte_size: photo.size },
+    })
+    if (value.item_id !== itemId) throw new StudentError('invalid_response', 502)
+    return value
   }
   async answerPractice(sessionId: string, itemId: string, answer: string | PracticeSubmission): Promise<PracticeAnswer> {
     const submission = typeof answer === 'string' ? { answer_text: answer } : answer
@@ -976,6 +1147,15 @@ export class StudentClient {
   }
   async practiceHint(sessionId: string, itemId: string): Promise<PracticeHint> {
     const { value } = await this.learning(() => `/v1/practice-sessions/${encoded(sessionId)}/items/${encoded(itemId)}/hint`, isPracticeHint, {})
+    if (value.item_id !== itemId) throw new StudentError('invalid_response', 502)
+    return value
+  }
+  async practiceSolution(sessionId: string, itemId: string): Promise<PracticeSolution> {
+    const ctx = { ...await this.authorize(), detailSession: this.session! }
+    const session = this.owned(await this.learningInContext(ctx, () => `/v1/practice-sessions/${encoded(sessionId)}`, isPracticeSession))
+    if (session.id !== sessionId) throw new StudentError('invalid_response', 502)
+    if (!session.items.some(item => item.id === itemId)) throw new StudentError('access_denied', 403)
+    const { value } = await this.learningInContext(ctx, () => `/v1/practice-sessions/${encoded(sessionId)}/items/${encoded(itemId)}/solution`, isPracticeSolution, {})
     if (value.item_id !== itemId) throw new StudentError('invalid_response', 502)
     return value
   }

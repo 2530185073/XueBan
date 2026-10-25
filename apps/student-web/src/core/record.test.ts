@@ -91,6 +91,51 @@ describe('latest page job recovery', () => {
     expect(saved.stage).toBe('waiting'); expect(saved.recognitionJobId).toBe(latest.id)
     expect(s.calls.filter(call => call.init.method === 'POST').map(call => call.path)).toEqual(['/v1/auth/login'])
   })
+  it.each([null, '  ', '3x-6'])('reopens needs-revision homework without a decision as waiting, including cached completion (%s)', async answer => {
+    const s = harness(), { c, a } = s.addCase('case_one'), resolved = s.addCase('case_two')
+    a.recognition_status = 'needs_revision'; a.answer_text = answer
+    resolved.c.current_decision = s.decisionFor(resolved.c, resolved.a)
+    s.hw.case_ids = [c.id, resolved.c.id]
+    const recognition = job('job_recognized', '2026-10-18T09:00:00Z', 'succeeded')
+    s.reads.set(`/v1/jobs/${recognition.id}`, () => recognition); s.hw.job_ids = [recognition.id]
+    await login(s.client)
+    const opened = await s.client.openHomework(s.hw.id), saved = await s.store.draft(scopeOf(), opened.draftId!)
+    expect(saved.stage).toBe('waiting'); expect(opened.cases[0].case.current_decision).toBeNull()
+    saved.stage = 'complete'; await s.store.saveDraft(saved)
+    const restored = new StudentClient(s.options); await restored.restore()
+    const reopened = await restored.openHomework(s.hw.id)
+    expect(reopened.draftId).toBe(saved.id)
+    expect((await s.store.draft(scopeOf(), saved.id)).stage).toBe('waiting')
+    expect(s.calls.filter(call => call.init.method === 'POST').map(call => call.path)).toEqual(['/v1/auth/login'])
+  })
+  it.each(['queued', 'running', 'retryable_failed', 'failed', 'superseded', 'cancelled'] as const)('keeps a current %s check ahead of an older decision when restoring history', async status => {
+    const s = harness(), { c, a } = s.addCase('case_one')
+    c.current_decision = s.decisionFor(c, a); s.hw.case_ids = [c.id]
+    a.recognition_status = 'needs_revision'; a.answer_text = null
+    const recognition = job('job_recognized', '2026-10-18T09:00:00Z', 'succeeded')
+    const checking: Job = { ...job('job_check', '2026-10-18T09:00:01Z', status), kind: 'check' }
+    if (status === 'retryable_failed') checking.failure = { code: 'provider_unavailable', message: '合成失败', retryable: true }
+    const check: CheckRun = { id: 'check_newer', revision: 1, case_id: c.id, job_id: checking.id, input_versions: c.current_decision.input_versions, model_version: null, rule_version: null, prompt_version: null, decision_ids: [], created_at: checking.created_at }
+    c.check_ids = [check.id]; s.hw.job_ids = [recognition.id, checking.id]
+    s.reads.set(`/v1/jobs/${recognition.id}`, () => recognition); s.reads.set(`/v1/jobs/${checking.id}`, () => checking); s.reads.set(`/v1/checks/${check.id}`, () => check)
+    await login(s.client)
+    const detail = await s.client.openHomework(s.hw.id), saved = await s.store.draft(scopeOf(), detail.draftId!)
+    expect(saved.stage).toBe(['queued', 'running', 'retryable_failed'].includes(status) ? 'waiting' : 'failed')
+    expect(detail.cases[0].checkJob?.id).toBe(checking.id)
+    expect(s.calls.filter(call => call.init.method === 'POST').map(call => call.path)).toEqual(['/v1/auth/login'])
+  })
+  it('restores a completed unable decision without issuing another check', async () => {
+    const s = harness(), { c, a } = s.addCase('case_one')
+    a.recognition_status = 'needs_revision'; a.answer_text = '3x-6'
+    c.current_decision = s.decisionFor(c, a, { validity: 'needs_review', verdict: 'unable_to_judge', reason_code: 'recognition_conflict', correct_answer: null }); s.hw.case_ids = [c.id]
+    const recognition = job('job_recognized', '2026-10-18T09:00:00Z', 'succeeded')
+    s.hw.job_ids = [recognition.id]; s.reads.set(`/v1/jobs/${recognition.id}`, () => recognition)
+    await login(s.client)
+    const detail = await s.client.openHomework(s.hw.id)
+    expect((await s.store.draft(scopeOf(), detail.draftId!)).stage).toBe('complete')
+    expect((await s.client.runDraft(detail.draftId!)).stage).toBe('complete')
+    expect(s.calls.filter(call => call.init.method === 'POST').map(call => call.path)).toEqual(['/v1/auth/login'])
+  })
 })
 
 describe('layout repair: superseded cases', () => {

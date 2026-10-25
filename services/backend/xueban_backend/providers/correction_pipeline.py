@@ -561,6 +561,9 @@ class CorrectionPipeline:
     def from_env(cls, environ: Mapping[str, str] | None = None):
         """Read only explicitly named environment values; never open .env files."""
         env = os.environ if environ is None else environ
+        if env.get("CORRECTION_MODE") == "user_original":
+            from .user_original import UserOriginalCorrectionPipeline
+            return UserOriginalCorrectionPipeline.from_env(env)
         if env.get("CORRECTION_MODE", "single") == "two_model":
             from .two_model import TwoModelWholePagePipeline
             return TwoModelWholePagePipeline.from_env(env)

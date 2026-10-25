@@ -6,6 +6,7 @@ marks it free, and never duplicates the corresponding business records.
 """
 import argparse
 import base64
+import logging
 import sys
 from contextlib import contextmanager
 from copy import deepcopy
@@ -24,7 +25,7 @@ from .correction_api import enqueue_check_task
 from .correction_core import (assets_for, create_task, event, get_entity, input_versions, invalidate, iso,
     new_id, now, save_entity, set_task, update_case)
 from .correction_models import Asset, Entity, Task
-from .db import create_database_engine
+from .db import create_database_engine, database_failure_code
 from .errors import Problem
 from .learning_models import CurriculumGraph, KnowledgeNode, StudentLearningProfile
 from .curriculum_catalog import (canonical_subject, graph_is_usable, node_matches_scope,
@@ -626,10 +627,14 @@ class CorrectionWorker:
                 *attempt.document.get("recognition_uncertainties", []),
                 *doc["uncertainties"],
             ]))[:20]
-            if unresolved or (verification is not None and (
+            # The restored student pipeline performs its own second-pass
+            # evidence checks. Preserve its original verdict-with-star policy;
+            # do not apply the later two-reader consensus gate to that mode.
+            original_policy = getattr(self.pipeline, "uses_original_decision_policy", False) is True
+            if not original_policy and (unresolved or (verification is not None and (
                     verification["status"] not in {"matched", "reviewed"}
                     or verification["reason_codes"]
-                    or not verification["independent_readback"])):
+                    or not verification["independent_readback"]))):
                 doc.update(verdict="unable_to_judge",
                            reason_code="verification_conflict" if usable_answer else "recognition_conflict",
                            uncertainties=unresolved or ["独立核对尚未完成，请核对原图后重试。"])
@@ -638,7 +643,7 @@ class CorrectionWorker:
                 doc.pop("answer_checks", None)
             doc.update(id=new_id("decision"), revision=1, case_id=case.id, check_id=check.id, input_versions=versions, origin="model", validity="needs_review" if doc["verdict"] == "unable_to_judge" else "candidate", confirmation_source=None, confirmed_by=None, confirmed_at=None, replaces_decision_id=(case.document["current_decision"] or {}).get("id"), invalidated_by_event_id=None, created_at=iso())
             save_entity(session, self.contracts, homework.id, "decision", doc)
-            cdoc = {**check.document, "revision": check.revision + 1, "model_version": result.metadata.model or result.metadata.requested_model, "prompt_version": result.prompt_version, "decision_ids": [doc["id"]]}
+            cdoc = {**check.document, "revision": check.revision + 1, "model_version": result.metadata.model or result.metadata.requested_model or None, "prompt_version": result.prompt_version, "decision_ids": [doc["id"]]}
             save_entity(session, self.contracts, homework.id, "check", cdoc, row=check)
             if case.document["current_decision"] is not None:
                 invalidate(session, self.contracts, case, "new_check_decision")
@@ -765,9 +770,48 @@ class CorrectionWorker:
                 project_student(session, homework.tenant_id, homework.student_id)
 
 
+class RoundRunner:
+    """Isolate executor failures and cool down only the failing executor.
+
+    This schedules fresh run_once calls, never retries a claimed task or changes
+    its lease. Task recovery and unknown billing remain the executor's concern.
+    """
+
+    def __init__(self, *runners):
+        self.runners = runners
+        self._backoff = [0.0 for _ in runners]
+        self._retry_at = [0.0 for _ in runners]
+
+    def run_round(self) -> bool:
+        worked = False
+        for index, runner in enumerate(self.runners):
+            if time.monotonic() < self._retry_at[index]:
+                continue
+            try:
+                did_work = bool(runner())
+            except Exception as error:
+                delay = min(30.0, max(1.0, self._backoff[index] * 2))
+                self._backoff[index] = delay
+                self._retry_at[index] = time.monotonic() + delay
+                # Only a numeric slot and allowlisted code; never include the
+                # callable, exception text/type, SQL, params or traceback.
+                logging.getLogger(__name__).error(
+                    "worker_executor_failed: executor=%d category=%s",
+                    index + 1, database_failure_code(error) or "executor_error",
+                )
+            else:
+                self._backoff[index] = self._retry_at[index] = 0.0
+                worked = did_work or worked
+        return worked
+
+    def idle_delay(self) -> float:
+        """Poll idle peers once a second; if all failed, wait for the first due."""
+        return max(1.0, min(self._retry_at, default=0.0) - time.monotonic())
+
+
 def run_round(*runners) -> bool:
-    """Give every executor one turn so a sustained correction backlog cannot starve learning jobs."""
-    return any([runner() for runner in runners])
+    """Give every executor one isolated turn; loops should retain a RoundRunner."""
+    return RoundRunner(*runners).run_round()
 
 
 def main():
@@ -782,13 +826,16 @@ def main():
         deletions = DeletionExecutor(engine, settings)
         with CorrectionPipeline.from_env() as pipeline:
             worker = CorrectionWorker(engine, settings, pipeline)
-            learning = LearningWorker(engine, client=pipeline.client)
+            learning = LearningWorker(engine, client=pipeline.client,
+                                      asset_store=LocalAssetStore(settings.asset_storage_dir),
+                                      fallback_client=getattr(pipeline, "fallback_client", None))
+            runner = RoundRunner(deletions.run_once, worker.run_once, learning.run_once)
             while True:
-                worked = run_round(deletions.run_once, worker.run_once, learning.run_once)
+                worked = runner.run_round()
                 if args.once:
                     break
                 if not worked:
-                    time.sleep(1)
+                    time.sleep(runner.idle_delay())
     finally:
         engine.dispose()
 
@@ -796,8 +843,6 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except KeyboardInterrupt:
-        pass
     except Exception:
         # A final database failure can itself prevent writing the failure ledger.
         # Do not dump SQL parameters, configuration, or student data to a traceback.

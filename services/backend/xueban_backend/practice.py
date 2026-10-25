@@ -23,7 +23,7 @@ from fastapi import Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import delete, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from .auth import Actor
 from .correction_models import Entity
@@ -92,6 +92,56 @@ def grade(item: PracticeItem, answer: str) -> str:
     return "correct" if given in {_normalize(v) for v in item.answer_values} else "incorrect"
 
 
+def _solution_answer_text(item: PracticeItem) -> str | None:
+    """Format the saved reference without guessing missing answers or steps."""
+    def first_value(values):
+        if isinstance(values, list) and values and isinstance(values[0], str):
+            return values[0].strip() or None
+        return None
+
+    if item.question_kind == "fill_blank":
+        fields, answers = item.answer_fields, item.field_answers
+        if not isinstance(fields, list) or not fields or not isinstance(answers, list):
+            return None
+        by_id = {}
+        for answer in answers:
+            if not isinstance(answer, dict) or not isinstance(answer.get("field_id"), str):
+                return None
+            field_id = answer["field_id"]
+            value = first_value(answer.get("answer_values"))
+            if not field_id or field_id in by_id or value is None:
+                return None
+            by_id[field_id] = value
+        lines, seen = [], set()
+        for field in fields:
+            if not isinstance(field, dict) or not isinstance(field.get("id"), str):
+                return None
+            field_id, label = field["id"], field.get("label")
+            if field_id in seen or field_id not in by_id or not isinstance(label, str) or not label.strip():
+                return None
+            seen.add(field_id)
+            lines.append(f"{label.strip()}：{by_id[field_id]}")
+        return "\n".join(lines) if seen == set(by_id) else None
+    if item.answer_kind == "choice":
+        values = item.answer_values
+        if not isinstance(values, list) or not values or any(not isinstance(v, str) or not v.strip() for v in values):
+            return None
+        if item.question_kind == "choice":
+            options = item.options
+            if not isinstance(options, list) or any(not isinstance(o, dict) or not isinstance(o.get("label"), str) for o in options):
+                return None
+            labels = [o["label"] for o in options]
+            if len(labels) != len(set(labels)) or not set(values) <= set(labels):
+                return None
+            return "、".join(label for label in labels if label in values)
+        # The original bank stores A-D labels, including compact values like AC.
+        labels = unicodedata.normalize("NFKC", "".join(values)).upper()
+        return "、".join(sorted(set(labels))) if re.fullmatch(r"[A-D]+", labels) else None
+    if item.answer_kind in ("number", "text"):
+        return first_value(item.answer_values)
+    return None
+
+
 def item_dict(item: PracticeItem, *, staff=False):
     body = {"id": item.id, "knowledge_id": item.knowledge_id, "graph_version": item.graph_version,
             "stem_text": item.stem_text, "answer_kind": item.answer_kind,
@@ -152,6 +202,8 @@ def gate_status(session, student_id, at=None):
     used = 0.0
     for row in session.scalars(select(PracticeSession).where(PracticeSession.student_id == student_id,
                                                              PracticeSession.started_at >= start_of_day)):
+        if _generated_variant(row):
+            continue
         end = min(utc(row.ended_at) if row.ended_at else at, utc(row.budget_ends_at))
         used += max(0.0, (end - utc(row.started_at)).total_seconds() / 60)
     remaining = max(0, int(budget - used))
@@ -365,6 +417,7 @@ def session_dict(session, row: PracticeSession, *, staff=False):
             "graph_version": row.graph_version,
             "status": row.status, "exit_reason": row.exit_reason, "items": entries, "started_at": iso(row.started_at),
             "budget_ends_at": iso(row.budget_ends_at), "ended_at": iso(row.ended_at),
+            "no_expiry": bool(_generated_variant(row) and row.gate.get("no_expiry") is True),
             "hints_allowed": row.purpose == "variant",
             "notice": "这是自愿活动，可以随时结束；不做或中途结束都不会记欠账，也不影响知识地图。"}
     if row.purpose == "preview":
@@ -374,9 +427,21 @@ def session_dict(session, row: PracticeSession, *, staff=False):
     return body
 
 
+def _generated_variant(row):
+    return row.purpose == "variant" and bool(row.gate.get("generation_job_id"))
+
+
 def _expire(row: PracticeSession, at):
+    before = (row.status, row.ended_at, row.gate)
+    if _generated_variant(row):
+        if session := object_session(row):
+            from .practice_generation import upgrade_generated_session
+            upgrade_generated_session(session, row)
+        if row.gate.get("no_expiry") is True:
+            return before != (row.status, row.ended_at, row.gate)
     if row.status == "active" and utc(row.budget_ends_at) <= at:
         row.status, row.ended_at = "time_up", row.budget_ends_at
+    return before != (row.status, row.ended_at, row.gate)
 
 
 @register_report_section
@@ -532,6 +597,10 @@ class ExitInput(Strict):
     reason: Literal["tired", "not_now", "done", "other"] = "not_now"
 
 
+class RetryInput(Strict):
+    pass
+
+
 def install_practice(app, engine, cfg, database_session, current_actor):
     from .app import require_student
     ActorDep = Annotated[Actor, Depends(current_actor)]
@@ -552,11 +621,15 @@ def install_practice(app, engine, cfg, database_session, current_actor):
         return item
 
     def load_session(session, actor, session_id, lock=False):
-        query = select(PracticeSession).where(PracticeSession.id == session_id)
-        row = session.scalar(query.with_for_update() if lock else query)
+        query = select(PracticeSession).where(PracticeSession.id == session_id, PracticeSession.tenant_id == actor.tenant_id)
+        row = session.scalar(query)
         if row is None:
             raise Problem(404, "not_found", "not_found", "资源不存在或不可访问。")
         require_student(session, actor, row.student_id)
+        if lock:
+            # Match generation and assessment workers: student before session.
+            session.scalar(select(Student).where(Student.id == row.student_id).with_for_update())
+            row = session.scalar(query.with_for_update().execution_options(populate_existing=True))
         return row
 
     def bank_graph(session, actor, graph_version=None, student_id=None):
@@ -741,8 +814,10 @@ def install_practice(app, engine, cfg, database_session, current_actor):
                                          payload.model_dump(mode="json"), result)
             session.commit()
             return result
-        if session.scalar(select(PracticeSession.id).where(PracticeSession.student_id == student_id, PracticeSession.status == "active")):
-            active = session.scalar(select(PracticeSession).where(PracticeSession.student_id == student_id, PracticeSession.status == "active"))
+        for active in session.scalars(select(PracticeSession).where(
+                PracticeSession.student_id == student_id, PracticeSession.status == "active")):
+            if _generated_variant(active):
+                continue
             _expire(active, now())
             if active.status == "active":
                 raise Problem(409, "conflict", "practice_active", "已有进行中的活动，请先完成或结束。")
@@ -819,21 +894,37 @@ def install_practice(app, engine, cfg, database_session, current_actor):
         rows = list(session.scalars(select(PracticeSession).where(PracticeSession.student_id == student_id)
                                     .order_by(PracticeSession.started_at.desc()).limit(50)))
         at = now()
-        if any(r.status == "active" and utc(r.budget_ends_at) <= at for r in rows):
-            for row in session.scalars(select(PracticeSession).where(PracticeSession.student_id == student_id,
-                                                                    PracticeSession.status == "active").with_for_update()):
-                _expire(row, at)
+        changed = False
+        for row in rows:
+            changed = _expire(row, at) or changed
+        if changed:
             session.commit()
         return {"items": [session_dict(session, r, staff=is_staff(actor)) for r in rows]}
 
     @app.get("/v1/practice-sessions/{session_id}", operation_id="getPracticeSession")
     def get_session(session_id: str, actor: ActorDep, session: SessionDep):
         row = load_session(session, actor, session_id)
-        if row.status == "active" and utc(row.budget_ends_at) <= now():
-            row = load_session(session, actor, session_id, lock=True)
-            _expire(row, now())
+        if _expire(row, now()):
             session.commit()
         return session_dict(session, row, staff=is_staff(actor))
+
+    @app.post("/v1/practice-sessions/{session_id}/retry", status_code=201, operation_id="retryPracticeSession")
+    def retry(session_id: str, payload: RetryInput, actor: ActorDep, session: SessionDep,
+              idempotency_key: OptionalKey = None):
+        from .practice_generation import retry_generated
+        row = load_session(session, actor, session_id)
+        if "student" not in actor.roles:
+            raise Problem(403, "authorization", "forbidden", "由孩子本人选择重新作答。")
+        session.scalar(select(Student).where(Student.id == row.student_id).with_for_update())
+        row = load_session(session, actor, session_id, lock=True)
+        operation = f"POST /v1/practice-sessions/{session_id}/retry"
+        body = payload.model_dump(mode="json")
+        if (replay := replay_idempotent(session, actor, row.student_id, operation, idempotency_key, body)) is not None:
+            return replay
+        result = remember_idempotent(session, actor, row.student_id, operation, idempotency_key, body,
+                                     retry_generated(session, actor, row))
+        session.commit()
+        return result
 
     @app.post("/v1/practice-sessions/{session_id}/items/{item_id}/hint", operation_id="revealPracticeHint")
     def hint(session_id: str, item_id: str, actor: ActorDep, session: SessionDep):
@@ -853,6 +944,39 @@ def install_practice(app, engine, cfg, database_session, current_actor):
             row.hints_used = [*row.hints_used, item_id]
         session.commit()
         return {"item_id": item_id, "hint_text": item.hint_text}
+
+    @app.post("/v1/practice-sessions/{session_id}/items/{item_id}/solution", operation_id="revealPracticeSolution")
+    def solution(session_id: str, item_id: str, actor: ActorDep, session: SessionDep):
+        row = load_session(session, actor, session_id, lock=True)
+        if row.purpose != "variant":
+            raise Problem(409, "conflict", "solutions_disabled", "预习小测不提供参考答案。")
+        if item_id not in row.item_ids:
+            raise Problem(409, "conflict", "revision_conflict", "题目不在本次活动中。")
+        item = load_item(session, actor, item_id, lock=True)
+        if (item.graph_version != row.graph_version or item.owner_student_id not in (None, row.student_id)
+                or (item.status == "ai_verified" and item.owner_student_id != row.student_id)):
+            raise Problem(409, "conflict", "revision_conflict", "题目与本次活动的学员或教材版本不一致。")
+        latest_assessment = session.scalar(select(PracticeAssessment).where(
+            PracticeAssessment.session_id == row.id, PracticeAssessment.item_id == item_id)
+            .order_by(PracticeAssessment.created_at.desc(), PracticeAssessment.id.desc()).limit(1))
+        if latest_assessment and latest_assessment.status in ("queued", "grading"):
+            # Async graders snapshot hints_used on completion, not submission.
+            # A dead outbox is terminal even if its assessment was left queued.
+            job = session.get(LearningOutbox, latest_assessment.outbox_id) if latest_assessment.outbox_id else None
+            if job is None or job.status != "dead":
+                raise Problem(409, "conflict", "solution_pending", "本次作答正在核验，完成后可查看参考答案。")
+        verified = item.status == "approved" or (item.status == "ai_verified"
+                    and isinstance(item.verification, dict) and item.verification.get("status") == "verified")
+        answer_text = _solution_answer_text(item) if verified else None
+        if not answer_text or not isinstance(item.solution_text, str) or not item.solution_text.strip():
+            raise Problem(404, "not_found", "not_found", "这道题暂无已核实的参考答案与步骤。")
+        # Historical variants remain readable. Reveal records help for future
+        # submissions only; it never rewrites an existing response or mastery.
+        if item_id not in row.hints_used:
+            row.hints_used = [*row.hints_used, item_id]
+        body = {"item_id": item_id, "answer_text": answer_text, "solution_text": item.solution_text}
+        session.commit()
+        return body
 
     @app.post("/v1/practice-sessions/{session_id}/responses", status_code=201, operation_id="answerPracticeItem")
     def answer(session_id: str, payload: AnswerInput, actor: ActorDep, session: SessionDep, idempotency_key: OptionalKey = None):

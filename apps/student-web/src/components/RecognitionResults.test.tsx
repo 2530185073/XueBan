@@ -1,8 +1,13 @@
+import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { CaseDetail } from '../core/types'
+import type { CurriculumScope } from '../core/learning'
 import type { Workspace } from '../useStudentWorkspace'
-import { QuestionCard } from './RecognitionResults'
+import { QuestionCard, RecognitionResults } from './RecognitionResults'
+
+vi.mock('./QuestionDetail', () => ({ QuestionDetail: () => { throw new Error('Simple result cards must not mount QuestionDetail') } }))
+vi.mock('./CaseRecord', () => ({ CaseRecordPanel: () => { throw new Error('Simple result cards must not mount CaseRecordPanel') } }))
 
 const row = (): CaseDetail => ({
   case: { id: 'case_test', lifecycle: 'active', question_id: 'question_test', current_attempt_id: 'attempt_test', current_question_revision: 1,
@@ -46,7 +51,7 @@ describe('per-blank student feedback', () => {
     ]
     const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} />)
     expect(html).toContain('class="recognition-answer unanswered"')
-    expect(html).toContain('未作答 <span class="slot-verdict">待完成</span>')
+    expect(html).toContain('未作答 <span class="slot-verdict">未作答</span>')
     expect(html).toContain('class="recognition-answer uncertain"')
     expect(html).toContain('暂未读到清楚的作答 <span class="slot-verdict">待核对</span>')
     expect(html).not.toContain('✕ 错误')
@@ -160,65 +165,212 @@ describe('controlled review uncertainty feedback', () => {
 })
 
 
-describe('correction controls in each result card', () => {
+describe('simple result cards', () => {
   const workspace = { busy: '', online: true, hint: null, client: {}, recordVersion: 0 } as unknown as Workspace
-  it('keeps photo correction, album upload, graduated hints and teacher feedback reachable', () => {
-    const html = renderToStaticMarkup(<QuestionCard row={row()} index={0} open onToggle={() => {}} workspace={workspace} onCorrection={() => {}} />)
-    for (const text of ['我已在纸上订正', '从相册选择订正照片', '给我一点方向', '看看关键一步', '文字和照片不一样', '请老师帮忙']) expect(html).toContain(text)
-    expect(html).toContain('可以拍整页')
-    expect(html).toContain('订正记录')
+  const legacyProps = { workspace, onCorrection: vi.fn(), onContinue: vi.fn(), onVariant: vi.fn(), variantBusy: true }
+  const expectSimpleCard = (html: string) => {
+    for (const text of ['卡住了，再给一点提示', '给我一点方向', '看看关键一步', '我已在纸上订正', '从相册选择订正照片', '文字和照片不一样', '请老师帮忙', '求助与重查', '订正记录', '选做一道同题型', '重新核对原图', '重新检查这道题']) expect(html).not.toContain(text)
+    expect(html).not.toMatch(/question-detail|hint-section|teacher-help|help-panel|case-history|recognition-variant-action|math-view-tools|<details|<textarea/)
+    expect(html.match(/<button\b/g)).toHaveLength(1)
+  }
+  it('shows the original question, answer colors, knowledge and short method without mounting legacy workflows', () => {
+    const value = row()
+    value.case.current_decision!.knowledge_points = ['分数除法']
+    const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} {...legacyProps} />)
+    expectSimpleCard(html)
+    for (const text of ['看图填空。', '总量', '加', '知识点', '分数除法', '正确答案', '总量；除法。', '正确解题步骤', '用对应量除以分率。']) expect(html).toContain(text)
+    expect(html).toContain('class="recognition-answer correct"')
+    expect(html).toContain('class="recognition-answer incorrect"')
+  })
+  it('keeps original choices and raw math text without introducing display controls', () => {
+    const value = row()
+    value.question.stem_text = '3、计算 2/3 + 1/6。'
+    value.question.options = [{ label: 'A', text: '5/6' }, { label: 'B', text: '1/2' }]
+    const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} {...legacyProps} />)
+    expectSimpleCard(html)
+    expect(html).toContain('<span class="recognition-card-title">计算 2/3 + 1/6。</span>')
+    expect(html).toContain('<li><strong>A</strong><span>5/6</span></li>')
+    expect(html).toContain('<li><strong>B</strong><span>1/2</span></li>')
+  })
+  it('keeps the uncertainty star inside the correct badge and omits wrong-answer instructions for a correct answer', () => {
+    const value = uncertainRow()
+    value.case.current_decision!.verdict = 'correct'
+    value.case.current_decision!.answer_checks = []
+    const html = renderToStaticMarkup(<QuestionCard row={value} index={1} open onToggle={() => {}} {...legacyProps} />)
+    expectSimpleCard(html)
+    expect(html).toContain('<span class="recognition-index">2</span>')
+    expect(html).toContain('<span class="recognition-status correct"><sup class="result-star" aria-label="AI识别不确定">*</sup>')
+    expect(html).toContain('class="recognition-answer correct"')
+    expect(html).not.toMatch(/正确答案|正确解题步骤|老师确认正确|AI 初判正确/)
   })
   it('never presents first-pass per-blank answers as settled after the overall judgment is unresolved', () => {
     const value = row(); value.case.current_decision!.validity = 'needs_review'; value.case.current_decision!.verdict = 'unable_to_judge'
-    const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} workspace={workspace} onCorrection={() => {}} />)
-    expect(html).toContain('AI 还没确认这题'); expect(html).toContain('我的作答')
+    const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} {...legacyProps} />)
+    expectSimpleCard(html)
+    expect(html).toContain('待确认'); expect(html).toContain('我的作答')
     expect(html).not.toContain('aria-label="逐空判定"'); expect(html).not.toContain('应填：'); expect(html).not.toContain('正确答案</span>')
-    expect(html).toContain('我已在纸上订正')
+    expect(html).not.toContain('正确解题步骤')
   })
   it.each([
-    ['provider_unavailable', 'AI 核对暂未完成'],
-    ['reconciliation_unavailable', 'AI 核对暂未完成'],
-    ['visual_unreadable', '这处笔迹暂时看不清，可补拍'],
-    ['answer_disagreement', 'AI 还没确认这题'],
-  ])('shows the completed unresolved %s result without an extra per-question model retry', (reason, label) => {
+    'provider_unavailable', 'reconciliation_unavailable', 'visual_unreadable', 'answer_disagreement',
+  ])('keeps unresolved %s neutral without exposing recovery or help controls', reason => {
     const value = row(), decision = value.case.current_decision!
     decision.validity = 'needs_review'; decision.verdict = 'unable_to_judge'; decision.uncertainties = ['private provider detail']
     decision.verification = { mode: 'two_model', status: 'conflict', independent_readback: true, reason_codes: [reason] }
     value.attempt.recognition_status = 'needs_revision'
-    const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} workspace={workspace} onCorrection={() => {}} />)
-    expect(html).toContain(label)
-    expect(html).not.toMatch(/重新检查这道题|正在检查|正在再看|private provider detail|正确答案<|应填：/)
-    expect(html).toContain('文字和照片不一样？请老师核对')
-    expect(html).toContain('我已在纸上订正')
+    const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} {...legacyProps} />)
+    expectSimpleCard(html)
+    expect(html).toContain('待确认')
+    expect(html).toContain('class="recognition-answer uncertain"')
+    expect(html).not.toMatch(/private provider detail|正确答案<|应填：|正确解题步骤|✓ 正确|✕ 错误/)
   })
   it('hides previous answer conclusions while a real recheck is running', () => {
     const value = row(); value.checkJob = { status: 'running' } as CaseDetail['checkJob']
-    const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} workspace={workspace} onCorrection={() => {}} />)
-    expect(html).toContain('处理中'); expect(html).toContain('正在检查')
-    expect(html).not.toMatch(/aria-label="逐空判定"|应填：|正确答案<|重新检查这道题/)
-    const hints = html.match(/<button\b[\s\S]*?<\/button>/g)!.find(tag => tag.includes('给我一点方向'))
-    expect(hints).toContain('disabled')
+    const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} {...legacyProps} />)
+    expectSimpleCard(html)
+    expect(html).toContain('处理中')
+    expect(html).not.toMatch(/aria-label="逐空判定"|应填：|正确答案<|正确解题步骤|✓ 正确|✕ 错误/)
   })
-  it('offers original-image recovery for a failed check while keeping the answer unjudged', () => {
+  it('keeps a failed check unjudged without exposing additional workflows', () => {
     const value = row(); value.case.current_decision = null; value.checkJob = { status: 'failed' } as CaseDetail['checkJob']
-    const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} workspace={workspace} onCorrection={() => {}} />)
-    expect(html).toContain('服务失败'); expect(html).toContain('重新核对原图'); expect(html).not.toContain('重新检查这道题')
-    expect(html).not.toContain('正确答案</span>')
+    const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} {...legacyProps} />)
+    expectSimpleCard(html)
+    expect(html).toContain('服务失败')
+    expect(html).not.toMatch(/正确答案<|正确解题步骤|✓ 正确|✕ 错误/)
+  })
+  it.each(['stale', 'retracted'] as const)('does not display a %s decision as an answer or correction method', validity => {
+    const value = row(); value.case.current_decision!.validity = validity
+    const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} {...legacyProps} />)
+    expectSimpleCard(html)
+    expect(html).toContain('尚未检查')
+    expect(html).not.toMatch(/逐空判定|正确答案<|正确解题步骤|✓ 正确|✕ 错误/)
   })
 })
 
-describe('voluntary same-type practice entry', () => {
-  const renderWithPractice = (value: CaseDetail) => renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} onVariant={() => {}} />)
-  it('offers one voluntary question only from a current usable incorrect decision', () => {
-    expect(renderWithPractice(row())).toContain('选做一道同题型')
-    const uncertain = row()
-    uncertain.case.current_decision!.validity = 'needs_review'
-    expect(renderWithPractice(uncertain)).not.toContain('选做一道同题型')
-    const stale = row()
-    stale.attempt.recognition_revision = 2
-    expect(renderWithPractice(stale)).not.toContain('选做一道同题型')
-    const correct = row()
-    correct.case.current_decision!.verdict = 'correct'
-    expect(renderWithPractice(correct)).not.toContain('选做一道同题型')
+describe('processing card layout isolation', () => {
+  it.each([false, true])('keeps the usual card structure while processing (expanded: %s)', open => {
+    const value = row()
+    value.checkJob = { status: 'running' } as CaseDetail['checkJob']
+    const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open={open} onToggle={() => {}} />)
+
+    expect(html).toContain(`class="recognition-card processing ${open ? 'open' : ''}"`)
+    expect(html).toContain(`aria-expanded="${open}"`)
+    expect(html).toContain('class="recognition-status processing"')
+    expect(html).toContain('处理中')
+    expect(html).not.toContain('photo-processing')
+    expect(html.match(/<button\b/g)).toHaveLength(1)
+    if (open) {
+      expect(html).toContain('</button><div class="recognition-card-body">')
+      expect(html).toContain('我的作答')
+      expect(html).toContain('总量；加')
+    } else {
+      expect(html).not.toContain('recognition-card-body')
+    }
+  })
+
+  it('scopes progress-banner layout away from card, badge and answer processing states', () => {
+    const app = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8')
+    expect(app).toContain('className="photo-processing" role="status"')
+    expect(app).not.toContain('className="processing"')
+    for (const file of ['styles.css', 'record.css', 'design-system.css']) {
+      const css = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')
+      expect(css).toContain('.photo-processing')
+      // A standalone .processing selector also matches the card, its badge and
+      // answer block. Only component-qualified state selectors are safe here.
+      expect(css).not.toMatch(/(?<![\w-])\.processing\b/)
+    }
+  })
+})
+
+describe('correct solution steps', () => {
+  const render = (steps: string | null | undefined, verdict: 'incorrect' | 'partially_correct' | 'unanswered' = 'incorrect') => {
+    const value = row()
+    value.case.current_decision!.correction_method = steps
+    value.case.current_decision!.verdict = verdict
+    const before = structuredClone(value)
+    const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} />)
+    expect(value).toEqual(before)
+    return html
+  }
+
+  it.each(['incorrect', 'partially_correct'] as const)('shows backend calculation steps for a usable %s answer', verdict => {
+    const steps = '1/15×10＝2/3\n1－2/3＝1/3\n1/3÷1/15＝5（天）'
+    const html = render(steps, verdict)
+    expect(html).toContain('正确解题步骤</span>')
+    expect(html).toContain(`<p class="recognition-solution-steps">${steps}</p>`)
+    expect(html).not.toContain('改正方法')
+  })
+
+  it('keeps an unanswered question neutral without showing wrong-answer corrections', () => {
+    const html = render('−3＋5＝2', 'unanswered')
+    expect(html).toContain('class="recognition-status unanswered"')
+    expect(html).toContain('class="recognition-answer unanswered"')
+    expect(html).toContain('未作答')
+    expect(html).not.toMatch(/正确答案|正确解题步骤|应填：|✓ 正确|✕ 错误|待确认/)
+  })
+
+  it.each([
+    '  1/15×10＝2/3\n\n  1－2/3＝1/3\n',
+    '1/15×10＝2/3\r\n1－2/3＝1/3\r\n1/3÷1/15＝5（天）',
+    '2×（3＋4）＝2×7＝14；3:4＝3/4，x^2＋2x＋1＝(x＋1)^2',
+    '先通分，再计算。',
+  ])('keeps backend whitespace, symbols and prose verbatim without inventing or splitting steps: %s', steps => {
+    const html = render(steps)
+    expect(html).toContain(`<p class="recognition-solution-steps">${steps}</p>`)
+    expect(html.match(/class="recognition-solution-steps"/g)).toHaveLength(1)
+  })
+
+  it('retains every character of long expressions and every backend step', () => {
+    const expression = `${'123456789/987654321＋'.repeat(300)}1`
+    const steps = Array.from({ length: 20 }, (_, index) => `${index + 1}. ${expression}`).join('\n')
+    expect(render(steps)).toContain(`<p class="recognition-solution-steps">${steps}</p>`)
+  })
+
+  it.each([null, undefined, '', ' \n\t\r\n '])('omits empty solution steps without inventing a process: %s', steps => {
+    const html = render(steps)
+    expect(html).not.toContain('正确解题步骤')
+    expect(html).not.toContain('recognition-solution-steps')
+  })
+
+  it('renders markup-shaped backend text as escaped text', () => {
+    const html = render('x < 3\n<script>alert(1)</script>\n<img src=x onerror="bad()">')
+    expect(html).toContain('x &lt; 3\n&lt;script&gt;alert(1)&lt;/script&gt;\n&lt;img src=x onerror=&quot;bad()&quot;&gt;')
+    expect(html).not.toMatch(/<script|<img/)
+  })
+})
+
+describe('original recognition results layout', () => {
+  const workspace = { busy: '', studentCurriculum: null } as unknown as Workspace
+  const subjects: CurriculumScope[] = [{ grade: 6, subject: '数学', publisher_code: 'rj', publisher_name: '人教版', stage: 'primary', revision_policy: 'publisher_latest', textbook_revision: 'publisher_latest', catalog_status: 'available', catalog_verified_at: null, catalog_candidates: [], books: [] }]
+
+  it('starts collapsed with continuous numbering, the original summary and next-question action despite legacy props', () => {
+    const first = row(), second = row()
+    second.case.id = 'case_second'; second.question.label = '8'
+    const html = renderToStaticMarkup(<RecognitionResults rows={[first, second]} workspace={workspace} onNext={() => {}} onSelectSubject={() => {}} subjects={subjects} selectedCaseId={first.case.id} onSelect={() => {}} onCorrection={() => {}} onContinue={() => {}} onVariant={() => {}} variantBusy={first.case.id} />)
+    expect(html).toContain('本次作答 2 题 · 正确 0 道 · 错误 2 道')
+    expect(html.match(/class="recognition-index">\d+<\/span>/g)).toEqual(['class="recognition-index">1</span>', 'class="recognition-index">2</span>'])
+    expect(html.match(/aria-expanded="false"/g)).toHaveLength(2)
+    expect(html).not.toContain('recognition-card-body')
+    expect(html).toContain('正确/错误右上角的 *')
+    expect(html).toContain('知识点和正确解题步骤')
+    expect(html).not.toContain('改正方法')
+    expect(html).toContain('拍下一题')
+    expect(html).not.toMatch(/拍下一份作业|选做一道同题型|question-detail|求助与重查|订正记录/)
+    expect(html.match(/<button\b/g)).toHaveLength(3)
+  })
+  it('retains manual subject selection for an unknown subject and disables it while busy', () => {
+    const value = row()
+    const render = (busy: string) => renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} subjects={subjects} onSelectSubject={() => {}} workspace={{ ...workspace, busy }} />)
+    const html = render('')
+    expect(html).toContain('aria-label="选择题目学科"')
+    expect(html).toContain('<option value="数学">数学 · 人教版</option>')
+    expect(html.match(/<select[^>]*>/)?.[0]).not.toContain('disabled')
+    expect(render('正在保存').match(/<select[^>]*>/)?.[0]).toContain('disabled')
+    value.question.subject = '数学'
+    expect(render('')).not.toContain('选择题目学科')
+  })
+  it('disables the next-question action while the workspace is busy', () => {
+    const html = renderToStaticMarkup(<RecognitionResults rows={[]} workspace={{ ...workspace, busy: '正在检查作业' }} onNext={() => {}} onSelectSubject={() => {}} />)
+    expect(html.match(/<button[^>]*class="button primary next-capture"[^>]*>/)?.[0]).toContain('disabled')
   })
 })

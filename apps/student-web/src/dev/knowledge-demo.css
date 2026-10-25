@@ -1,0 +1,11 @@
+.demo-disclaimer{display:flex;align-items:center;gap:12px;padding:12px 16px;margin:0 0 18px;background:#f5efdf;border:1px solid #e4d9bb;border-radius:12px;color:#715b32;font-size:12px;line-height:1.8}
+.demo-disclaimer strong{white-space:nowrap;font-size:13px}
+.demo-overview{display:flex;gap:12px;flex-wrap:wrap;margin:0 0 20px}
+.demo-overview>div{display:flex;align-items:center;gap:9px;padding:10px 16px;border:1px solid var(--line);background:var(--paper);border-radius:12px;font-size:12px;color:var(--muted)}
+.demo-overview strong{color:var(--ink);font:500 22px var(--serif)}
+.knowledge-demo .knowledge-map-sheet{min-width:0}
+.demo-answer{display:grid;gap:12px;background:#f4f5ed;border:1px solid var(--line);padding:14px;border-radius:10px;margin:12px 0 18px;font-size:14px;line-height:1.8}
+.demo-answer strong{font-weight:500}
+.demo-steps{padding-left:20px;font-size:14px;line-height:1.9}
+.demo-steps li+li{margin-top:6px}
+@media(max-width:700px){.demo-disclaimer{align-items:flex-start;flex-direction:column;gap:4px}.demo-overview{display:grid;grid-template-columns:1fr 1fr}.demo-overview>div{padding:10px}.knowledge-demo .page-title-row{align-items:flex-start}}
