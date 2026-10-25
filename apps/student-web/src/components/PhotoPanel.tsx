@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, Expand, ImageOff, LoaderCircle, RefreshCw, X } from 'lucide-react'
 import { pageLabel } from '../core'
 import type { CaseDetail, DraftView, HomeworkDetail } from '../core/types'
@@ -60,6 +60,8 @@ export function PhotoPanel({ workspace, row, draft, detail, onReplacePage, focus
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [expanded, setExpanded] = useState(false)
+  const expandButtonRef = useRef<HTMLButtonElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ width: 0, height: 0 })
   const assetId = current?.assetId, localBlob = current?.blob ?? null
   useEffect(() => {
@@ -73,9 +75,20 @@ export function PhotoPanel({ workspace, row, draft, detail, onReplacePage, focus
   const select = (next: number) => { const target = sources[next]; if (target) setCurrentKey(target.key) }
   useEffect(() => {
     if (!expanded) return
-    const keys = (event: KeyboardEvent) => { if (event.key === 'Escape') setExpanded(false); else if (event.key === 'ArrowLeft') select(index - 1); else if (event.key === 'ArrowRight') select(index + 1) }
+    const keys = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); setExpanded(false); expandButtonRef.current?.focus(); return }
+      if (event.key === 'ArrowLeft') { event.preventDefault(); select(index - 1); return }
+      if (event.key === 'ArrowRight') { event.preventDefault(); select(index + 1); return }
+      if (event.key !== 'Tab') return
+      const focusable = [...(dialogRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])]
+      if (!focusable.length) return
+      const current = document.activeElement, position = focusable.indexOf(current as HTMLButtonElement)
+      const next = event.shiftKey ? (position <= 0 ? focusable.length - 1 : position - 1) : (position < 0 || position === focusable.length - 1 ? 0 : position + 1)
+      event.preventDefault(); focusable[next].focus()
+    }
     window.addEventListener('keydown', keys); return () => window.removeEventListener('keydown', keys)
   })
+  useEffect(() => { if (expanded) dialogRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus() }, [expanded])
   // A region spanning the whole photo only says which page the question is on.
   const regions = row && assetId ? [...row.question.regions, ...row.attempt.answer_regions].filter(region => region.asset_id === assetId && !(region.x === 0 && region.y === 0 && region.width >= size.width && region.height >= size.height)) : []
   const waiting = !hasLocalPages && !!detail && serverPages === null && !sources.length
@@ -83,11 +96,11 @@ export function PhotoPanel({ workspace, row, draft, detail, onReplacePage, focus
   const local = current?.localId != null
   const canReplace = local && !current?.uploaded && !!onReplacePage && draft?.stage === 'failed' && !workspace.busy
   return <section className="photo-panel" aria-label="作业原图">
-    <div className="panel-heading"><span><span className="eyebrow">YOUR WORK</span><h2>{row ? '本次作答照片' : pageCount > 1 ? `这份作业共 ${pageCount} 页` : '先看清这张照片'}</h2></span>{local && <span className={`status-pill ${current?.uploaded ? 'green' : 'amber'}`}>{current?.uploaded ? '服务器已收到' : '还在这台设备'}</span>}<button className="icon-button" disabled={!url} aria-label="放大作业照片" onClick={() => setExpanded(true)}><Expand size={19} /></button></div>
+    <div className="panel-heading"><span><span className="eyebrow">YOUR WORK</span><h2>{row ? '本次作答照片' : pageCount > 1 ? `这份作业共 ${pageCount} 页` : '先看清这张照片'}</h2></span>{local && <span className={`status-pill ${current?.uploaded ? 'green' : 'amber'}`}>{current?.uploaded ? '服务器已收到' : '还在这台设备'}</span>}<button ref={expandButtonRef} className="icon-button" disabled={!url} aria-label="放大作业照片" onClick={() => setExpanded(true)}><Expand size={19} /></button></div>
     <PageNav sources={sources} pageCount={pageCount} index={index} onSelect={select} />
     <div className="photo-mat">{loading || waiting ? <div className="photo-placeholder"><LoaderCircle className="spin" size={24} /><p>正在打开原图…</p></div> : error ? <div className="photo-placeholder"><ImageOff size={30} /><p>{error}</p></div> : picture ?? <div className="photo-placeholder"><ImageOff size={30} /><p>这份记录的照片尚未加载</p></div>}</div>
     {canReplace && <div className="page-recover"><p className="muted small">这一页还没有上传成功。如果提示照片读取不到，可以重新选择这一页，其余页不用重拍。</p><button type="button" className="button secondary" onClick={() => onReplacePage?.(current!.localId!)}><RefreshCw size={15} /> 重新选择这一页</button></div>}
     <p className="photo-caption">{regions.length ? '绿色框为 AI 推测区域，请结合原图核对。' : pageCount > 1 ? `共 ${pageCount} 页，可以逐页翻看。检查结果只包括拍到并读出的题目。` : '题目和自己的作答都拍清楚，检查才更有依据。'}</p>
-    {expanded && <div className="image-dialog" role="dialog" aria-modal="true" aria-label="放大作业照片" onKeyDown={event => { if (event.key === 'Tab') { event.preventDefault(); event.currentTarget.querySelector<HTMLButtonElement>('button')?.focus() } }} onClick={() => setExpanded(false)}><button className="icon-button" autoFocus aria-label="关闭放大照片" onClick={() => setExpanded(false)}><X /></button><div className="expanded-image" onClick={event => event.stopPropagation()}><PageNav sources={sources} pageCount={pageCount} index={index} onSelect={select} />{picture}</div></div>}
+    {expanded && <div ref={dialogRef} className="image-dialog" role="dialog" aria-modal="true" aria-label="放大作业照片" onClick={event => { if (event.target === event.currentTarget) { setExpanded(false); expandButtonRef.current?.focus() } }}><button className="icon-button" aria-label="关闭放大照片" onClick={() => { setExpanded(false); expandButtonRef.current?.focus() }}><X /></button><div className="expanded-image" onClick={event => event.stopPropagation()}><PageNav sources={sources} pageCount={pageCount} index={index} onSelect={select} />{picture}</div></div>}
   </section>
 }

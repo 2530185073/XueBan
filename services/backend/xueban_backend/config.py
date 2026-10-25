@@ -27,6 +27,7 @@ class Settings:
     upload_ticket_ttl_seconds: int = 900
     worker_lease_seconds: int = 300
     auto_check_after_recognition: bool = True
+    correction_mode: str = ""
     allow_sqlite_for_tests: bool = False
     cors_allowed_origins: tuple[str, ...] = ()
     student_web_dist: Path | None = None
@@ -52,6 +53,7 @@ class Settings:
             "upload_ticket_ttl_seconds": int(os.environ.get("UPLOAD_TICKET_TTL_SECONDS", "900")),
             "worker_lease_seconds": int(os.environ.get("WORKER_LEASE_SECONDS", "300")),
             "auto_check_after_recognition": os.environ.get("AUTO_CHECK_AFTER_RECOGNITION", "1") == "1",
+            "correction_mode": os.environ.get("CORRECTION_MODE", ""),
             "allow_sqlite_for_tests": os.environ.get("ALLOW_SQLITE_FOR_TESTS") == "1",
             "cors_allowed_origins": tuple(value.strip() for value in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if value.strip()),
             "student_web_dist": Path(os.environ["STUDENT_WEB_DIST"]) if os.environ.get("STUDENT_WEB_DIST") else None,

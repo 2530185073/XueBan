@@ -10,8 +10,9 @@ const HOME: Camera = { x: 0, y: 0, k: 1 }
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y)
 
 /** Interactive personal atlas: semantic chapters, a real camera, and evidence-first nodes. */
-export function StarMap({ nodes, edges, pending, selectedId, onOpen }: {
+export function StarMap({ nodes, edges, pending, selectedId, onOpen, demo = false }: {
   nodes: KnowledgeGraphNode[]; edges: KnowledgeGraphEdge[]; pending: boolean; selectedId?: string | null; onOpen: (id: string) => void
+  demo?: boolean
 }) {
   const uid = useId().replace(/:/g, '')
   const viewport = useRef<HTMLDivElement>(null)
@@ -70,7 +71,7 @@ export function StarMap({ nodes, edges, pending, selectedId, onOpen }: {
       {query && <button onClick={() => setQuery('')} aria-label="清空搜索"><X size={14} /></button>}
       {query && <div className="star-search-results">{results.length ? results.map(({ node }) => <button key={node.id} onClick={() => chooseSearch(node.id)}><span>{node.name}</span><small>{node.chapter_name}</small></button>) : <p>没有找到这个知识点</p>}</div>}
     </div>
-    <div className="star-view-caption" aria-hidden="true"><strong>{map.clusters.length === 1 ? map.clusters[0].name : '知识地图'}</strong><small>{map.clusters.length} 个章节 · {map.nodes.length} 个知识点</small></div>
+    <div className="star-view-caption" aria-hidden="true"><strong>{map.clusters.length === 1 ? map.clusters[0].name : '知识地图'}</strong><small>{map.clusters.length} 个{demo ? '学科' : '章节'} · {map.nodes.length} 个知识点{demo ? '（模拟）' : ''}</small></div>
     <div className="star-camera-controls" aria-label="星图缩放控制">
       <button onClick={() => zoomAt(camera.k * 1.3, undefined, true)} disabled={camera.k >= 3.19} aria-label="放大星图"><Plus size={17} /></button>
       <span aria-live="polite">{camera.k.toFixed(1)}<small>×</small></span>
@@ -140,13 +141,13 @@ export function StarMap({ nodes, edges, pending, selectedId, onOpen }: {
           {map.clusters.length > 1 && <g className="star-centre" aria-hidden="true">
             <circle cx={STAR_WIDTH / 2} cy={STAR_HEIGHT / 2} r="72" /><circle cx={STAR_WIDTH / 2} cy={STAR_HEIGHT / 2} r="57" />
             <text x={STAR_WIDTH / 2} y={STAR_HEIGHT / 2 + 14} textAnchor="middle" className="star-centre-title">知识地图</text>
-            <text x={STAR_WIDTH / 2} y={STAR_HEIGHT / 2 + 37} textAnchor="middle" className="star-centre-meta">{map.nodes.length} 个真实知识节点</text>
+            <text x={STAR_WIDTH / 2} y={STAR_HEIGHT / 2 + 37} textAnchor="middle" className="star-centre-meta">{map.nodes.length} 个{demo ? '模拟' : '真实'}知识节点</text>
           </g>}
           <g className="star-clusters" aria-hidden="true">{map.clusters.map(cluster => <g key={cluster.id} className={`star-cluster c${cluster.index % 6}`}>
             <circle className="star-cluster-atmosphere" cx={cluster.x} cy={cluster.y} r={cluster.radius * 1.55} />
             <circle className="star-cluster-orbit outer" cx={cluster.x} cy={cluster.y} r={cluster.radius * 1.22} />
             <circle className="star-cluster-orbit inner" cx={cluster.x} cy={cluster.y} r={cluster.radius * 1.08} />
-            <text className="star-cluster-index" x={cluster.x} y={cluster.y - cluster.radius * 1.22 - 29} textAnchor="middle">第 {cluster.index + 1} 章</text>
+            <text className="star-cluster-index" x={cluster.x} y={cluster.y - cluster.radius * 1.22 - 29} textAnchor="middle">{demo ? '初一 · 示例' : `第 ${cluster.index + 1} 章`}</text>
             <text className="star-cluster-name" x={cluster.x} y={cluster.y - cluster.radius * 1.22 - 9} textAnchor="middle">{cluster.name}</text>
             {!pending && <text className="star-cluster-tally" x={cluster.x} y={cluster.y - cluster.radius * 1.22 + 9} textAnchor="middle">{cluster.count} 个知识点</text>}
           </g>)}</g>
@@ -161,7 +162,7 @@ export function StarMap({ nodes, edges, pending, selectedId, onOpen }: {
             const labelX = horizontal ? (dx >= 0 ? r + 10 : -r - 10) : 0, labelY = horizontal ? 4 : (dy >= 0 ? r + 17 : -r - 13)
             return <g key={node.id} ref={element => { if (element) buttons.current.set(node.id, element); else buttons.current.delete(node.id) }}
               transform={`translate(${x} ${y})`} role="button" tabIndex={0} aria-pressed={selectedId === node.id}
-              aria-label={`${node.name}，${pending ? '正在更新' : `${status.label}，${sourceLabel(node.assessment_source)}`}，查看作答证据`}
+              aria-label={`${node.name}，${pending ? '正在更新' : `${status.label}，${demo ? '模拟状态' : sourceLabel(node.assessment_source)}`}，查看${demo ? '模拟作答' : '作答证据'}`}
               className={`star-node ${state} ${selectedId === node.id ? 'selected' : ''} ${related ? '' : 'dim'} ${named.has(node.id) ? 'named' : ''}`}
               onClick={() => open(node.id)} onMouseEnter={() => setHoveredId(node.id)} onMouseLeave={() => setHoveredId(null)}
               onFocus={() => setHoveredId(node.id)} onBlur={() => setHoveredId(null)} onKeyDown={event => {
@@ -183,9 +184,9 @@ export function StarMap({ nodes, edges, pending, selectedId, onOpen }: {
     </div>
     {active && <div className={`star-node-inspector ${pending ? 'pending' : active.learning_status}`} aria-live="polite">
       <span>{active.chapter_name}</span><strong>{active.name}</strong>
-      <small>{pending ? '正在整理最新记录' : `${statusLabels[active.learning_status].label} · ${sourceLabel(active.assessment_source)}`}</small>
-      <em>{pending ? '更新完成后再看状态' : active.valid_evidence_count ? `${active.valid_evidence_count} 条有效作答 · 点击查看证据` : '还没有判断 · 点击查看说明'}</em>
+      <small>{pending ? '正在整理最新记录' : `${statusLabels[active.learning_status].label} · ${demo ? '模拟状态' : sourceLabel(active.assessment_source)}`}</small>
+      <em>{pending ? '更新完成后再看状态' : active.valid_evidence_count ? `${active.valid_evidence_count} 条${demo ? '模拟作答 · 点击查看示例' : '有效作答 · 点击查看证据'}` : '还没有判断 · 点击查看说明'}</em>
     </div>}
-    <div className="star-gesture-hint" aria-hidden="true"><span className="mouse-glyph" />拖动探索 · 滚轮或双指缩放 · 点击看证据</div>
+    <div className="star-gesture-hint" aria-hidden="true"><span className="mouse-glyph" />拖动探索 · 滚轮或双指缩放 · 点击看{demo ? '示例' : '证据'}</div>
   </div>
 }

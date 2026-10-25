@@ -12,6 +12,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import logging
+from time import monotonic
 from typing import Annotated
 from uuid import uuid4
 
@@ -20,6 +21,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from .correction_models import CorrectionEvent, Entity
+from .db import database_failure_code
 from .governance import register_downstream_purger
 from .learning_models import (AttemptCondition, CurriculumGraph, KnowledgeDiagnosis, KnowledgeNode, LearningEvidence,
                               LearningOutbox, LearningProjection, PracticeResponse, PracticeSession, QuestionKnowledgeLink,
@@ -253,10 +255,18 @@ def _project_job(session, job, context):
 class LearningWorker:
     """Shares the correction worker process; every job runs in its own transaction."""
 
-    def __init__(self, engine, *, client=None, scan_interval=timedelta(seconds=10)):
+    def __init__(self, engine, *, client=None, scan_interval=timedelta(seconds=10), asset_store=None, fallback_client=None):
         self.engine, self.client, self.scan_interval = engine, client, scan_interval
+        self.asset_store, self.fallback_client = asset_store, fallback_client
         self.next_scan = datetime.min.replace(tzinfo=timezone.utc)
         self.periodic_due = {}
+        self._retry_delay = 0.0
+        self._retry_not_before = 0.0
+
+    def _cool_down(self):
+        # Local only: do not change a lease or replay a possibly billed handler.
+        self._retry_delay = min(30.0, max(1.0, self._retry_delay * 2))
+        self._retry_not_before = monotonic() + self._retry_delay
 
     def scan(self, force=False):
         if not force and now() < self.next_scan:
@@ -289,15 +299,32 @@ class LearningWorker:
             return job.id, job.lease_token
 
     def run_once(self) -> bool:
-        self.scan()
-        claimed = self.claim()
+        if monotonic() < self._retry_not_before:
+            return False
+        self._retry_not_before = 0.0
+        worked = self._run_once()
+        if self._retry_not_before == 0.0:
+            self._retry_delay = 0.0
+        return worked
+
+    def _run_once(self) -> bool:
+        phase = "scan"
+        try:
+            self.scan()
+            phase = "claim"
+            claimed = self.claim()
+        except Exception as error:
+            log.warning("learning worker %s failed: %s", phase, database_failure_code(error) or "job_error")
+            self._cool_down()
+            return False
         if claimed is None:
             return False
         job_id, token = claimed
+        phase = "handler"
         try:
             with Session(self.engine) as session, session.begin():
                 job = session.get(LearningOutbox, job_id)
-                if job.lease_token != token:
+                if job is None or job.status != "running" or job.lease_token != token:
                     return True
                 kind, tenant_id, student_id = job.kind, job.tenant_id, job.student_id
                 handler = JOB_HANDLERS.get(kind)
@@ -309,29 +336,43 @@ class LearningWorker:
                     job.payload = {**job.payload, "outcome": outcome}
                 job.status, job.lease_token, job.lease_expires_at = "succeeded", None, None
             if kind == "project_student":
+                phase = "followup"
                 with Session(self.engine) as session, session.begin():
                     for followup in PROJECTION_FOLLOWUPS:
                         followup(session, tenant_id, student_id, self)
-        except Exception as error:  # noqa: BLE001 - recorded as a fixed code, never a message
-            code = getattr(error, "code", type(error).__name__)[:64]
-            log.warning("learning job %s failed: %s", job_id, code)
-            with Session(self.engine) as session, session.begin():
-                job = session.get(LearningOutbox, job_id)
-                if job is not None and job.lease_token == token:
-                    # Mapping calls use the same bounded retry policy, retaining
-                    # sanitized provider metadata even when the transaction rolls back.
-                    audit = getattr(error, "learning_audit", None)
-                    if job.kind == "map_model_batch" and isinstance(audit, dict):
-                        job.payload = {**job.payload, "failed_executions":
-                                       [*job.payload.get("failed_executions", []), audit][-MAX_TRIES:]}
-                    job.last_error, job.lease_token, job.lease_expires_at = code, None, None
-                    job.status = "dead" if job.tries >= MAX_TRIES else "queued"
-                    job.available_at = now() + timedelta(seconds=min(300, 5 * 2 ** job.tries))
+        except Exception as error:  # noqa: BLE001 - fixed codes only, including non-DB errors
+            code = database_failure_code(error) or "job_error"
+            log.warning("learning worker %s failed: %s", phase, code)
+            try:
+                with Session(self.engine) as session, session.begin():
+                    job = session.get(LearningOutbox, job_id)
+                    if job is not None and job.status == "running" and job.lease_token == token:
+                        # Mapping calls keep their bounded retry policy and sanitized audit.
+                        audit = getattr(error, "learning_audit", None)
+                        if job.kind == "map_model_batch" and isinstance(audit, dict):
+                            job.payload = {**job.payload, "failed_executions":
+                                           [*job.payload.get("failed_executions", []), audit][-MAX_TRIES:]}
+                        job.last_error, job.lease_token, job.lease_expires_at = code, None, None
+                        job.status = "dead" if job.tries >= MAX_TRIES else "queued"
+                        job.available_at = now() + timedelta(seconds=min(300, 5 * 2 ** job.tries))
+            except Exception as record_error:
+                # Roll back this transaction too. Keep the committed claim/lease;
+                # the next poll must not immediately repeat a possibly billed handler.
+                log.warning("learning worker failure_record failed: %s",
+                            database_failure_code(record_error) or "job_error")
+                self._cool_down()
         return True
 
     def drain(self, limit=100):
         """Test and CLI helper: scan once, then run until no job is ready."""
-        self.scan(force=True)
+        if monotonic() < self._retry_not_before:
+            return 0
+        try:
+            self.scan(force=True)
+        except Exception as error:
+            log.warning("learning worker scan failed: %s", database_failure_code(error) or "job_error")
+            self._cool_down()
+            return 0
         count = 0
         while count < limit and self.run_once():
             count += 1

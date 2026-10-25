@@ -23,6 +23,15 @@ MODEL_CONFIG_NAMES = frozenset({
     "ARK_MODEL",
     "ARK_FALLBACK_MODEL",
 })
+GATEWAY_CONFIG_NAMES = frozenset({"ZYAI_BASE_URL", "ZYAI_API_KEY"})
+USER_ORIGINAL_MODELS = {
+    "ARK_MODEL": "deepseek-v4-1-flash-260910",
+    "ARK_FALLBACK_MODEL": "gpt-6-astra",
+}
+MULTIMODEL_ENVIRONMENT_NAMES = frozenset({
+    "READBACK_MODEL", "REVIEW_MODEL", "REVIEW_API", "REVIEW_THINKING",
+    "RECONCILIATION_PROVIDER", "VISUAL_REVIEW_MODEL", "VISUAL_REVIEW_ENABLED",
+})
 
 # Keep removing the retired review switch from inherited environments even
 # though it is no longer accepted from the private model configuration. This
@@ -41,7 +50,7 @@ def without_model_environment(environment):
             if not _is_model_environment_name(name)}
 
 
-def _read_model_environment(path):
+def _read_model_environment(path, names=MODEL_CONFIG_NAMES):
     values = {}
     for raw_line in read_private(path).splitlines():
         line = raw_line.strip()
@@ -49,9 +58,17 @@ def _read_model_environment(path):
             continue
         name, separator, value = line.partition("=")
         name = name.strip()
-        if separator and name in MODEL_CONFIG_NAMES:
+        if separator and name in names:
             values[name] = value.strip()
     return values
+
+
+def _validate_user_original_models(values):
+    """Only missing identifiers get defaults; explicit incompatible values fail."""
+    for name, expected in USER_ORIGINAL_MODELS.items():
+        if name in values and values[name] != expected:
+            # Report only the configuration key and allowed model, never input.
+            raise ValueError(f"user_original requires {name}={expected}")
 
 
 def write_private(path, value):
@@ -71,6 +88,11 @@ def load(runtime, *, require_model=False):
     env = os.environ.copy()
     env.update(config["environment"])
     env = without_model_environment(env)
+    mode = env.get("CORRECTION_MODE")
+    if mode == "user_original":
+        # A previous mode or shell must not add a Kimi/visual readback layer.
+        for name in MULTIMODEL_ENVIRONMENT_NAMES:
+            env.pop(name, None)
     env["PYTHONPATH"] = str(BACKEND)
     web_dist = REPO / "apps/student-web/dist"
     if (web_dist / "index.html").is_file():
@@ -80,14 +102,17 @@ def load(runtime, *, require_model=False):
         env.update(_read_model_environment(Path(config["model_config"])))
         if not env.get("ARK_BASE_URL") or not env.get("ARK_API_KEY"):
             raise ValueError("Model configuration is incomplete")
-        if env.get("CORRECTION_MODE") in {"multimodel", "two_model"}:
+        if mode in {"multimodel", "two_model", "user_original"}:
             if config.get("gateway_config"):
-                for line in read_private(Path(config["gateway_config"])).splitlines():
-                    name, separator, value = line.partition("=")
-                    if separator and name in {"ZYAI_BASE_URL", "ZYAI_API_KEY"}:
-                        env[name] = value.strip()
+                env.update(_read_model_environment(Path(config["gateway_config"]), GATEWAY_CONFIG_NAMES))
             if not env.get("ZYAI_BASE_URL") or not env.get("ZYAI_API_KEY"):
-                raise ValueError("Multimodel gateway configuration is incomplete")
+                label = "user_original" if mode == "user_original" else "Multimodel"
+                raise ValueError(f"{label} gateway configuration is incomplete")
+        if mode == "user_original":
+            _validate_user_original_models(config["environment"])
+            _validate_user_original_models(env)
+            for name, default in USER_ORIGINAL_MODELS.items():
+                env.setdefault(name, default)
     return config, env
 
 
@@ -96,13 +121,15 @@ def configure_models(runtime, *, mode, gateway_config=None, readback_model="kimi
                      visual_review_model="gpt-6-astra", visual_review_enabled="1"):
     """Keep secrets in their existing private file; persist only explicit paths and switches."""
     config, _ = load(runtime)
-    if mode not in {"single", "multimodel", "two_model"}:
+    if mode not in {"single", "multimodel", "two_model", "user_original"}:
         raise ValueError("Unknown correction mode")
     if (review_api not in {"chat", "responses"} or review_thinking not in {"enabled", "disabled"}
             or reconciliation_provider not in {"primary", "secondary"} or visual_review_enabled not in {"0", "1"}):
         raise ValueError("Invalid review API or thinking mode")
     if mode != "two_model" and (review_api != "responses" or review_thinking != "enabled"):
         raise ValueError("Review API and thinking overrides require two_model mode")
+    if mode == "user_original" and review_model != USER_ORIGINAL_MODELS["ARK_FALLBACK_MODEL"]:
+        raise ValueError("user_original requires gpt-6-astra review")
     for model in (readback_model, review_model, visual_review_model):
         if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", model):
             raise ValueError("Invalid model identifier")
@@ -110,17 +137,28 @@ def configure_models(runtime, *, mode, gateway_config=None, readback_model="kimi
         path = gateway_config.expanduser().resolve()
         read_private(path)
         config["gateway_config"] = str(path)
-    if mode in {"multimodel", "two_model"}:
+    if mode in {"multimodel", "two_model", "user_original"}:
         path = config.get("gateway_config")
         if not path:
             raise ValueError("An explicit private gateway configuration is required")
         from scripts.vision_benchmark import read_config
         read_config(Path(path))
-    config["environment"].update(CORRECTION_MODE=mode, READBACK_MODEL=readback_model, REVIEW_MODEL=review_model)
-    config["environment"].update(REVIEW_API=review_api, REVIEW_THINKING=review_thinking)
-    config["environment"]["RECONCILIATION_PROVIDER"] = reconciliation_provider
-    config["environment"].update(VISUAL_REVIEW_MODEL=visual_review_model, VISUAL_REVIEW_ENABLED=visual_review_enabled)
-    if mode in {"multimodel", "two_model"}:
+    if mode == "user_original":
+        # Reject conflicting private settings before persisting a mode change.
+        _validate_user_original_models(config["environment"])
+        _validate_user_original_models(_read_model_environment(Path(config["model_config"])))
+    config["environment"]["CORRECTION_MODE"] = mode
+    if mode == "user_original":
+        for name in MULTIMODEL_ENVIRONMENT_NAMES:
+            config["environment"].pop(name, None)
+        for name, default in USER_ORIGINAL_MODELS.items():
+            config["environment"].setdefault(name, default)
+    else:
+        config["environment"].update(READBACK_MODEL=readback_model, REVIEW_MODEL=review_model)
+        config["environment"].update(REVIEW_API=review_api, REVIEW_THINKING=review_thinking)
+        config["environment"]["RECONCILIATION_PROVIDER"] = reconciliation_provider
+        config["environment"].update(VISUAL_REVIEW_MODEL=visual_review_model, VISUAL_REVIEW_ENABLED=visual_review_enabled)
+    if mode in {"multimodel", "two_model", "user_original"}:
         config["environment"]["WORKER_LEASE_SECONDS"] = str(max(600, int(config["environment"].get("WORKER_LEASE_SECONDS", "300"))))
     temp = runtime / ("runtime-" + secrets.token_hex(8) + ".tmp")
     try:
@@ -337,7 +375,7 @@ def main():
     for command in ("start", "stop", "status", "migrate"):
         commands.add_parser(command)
     models = commands.add_parser("configure-models")
-    models.add_argument("--mode", choices=("single", "multimodel", "two_model"), required=True)
+    models.add_argument("--mode", choices=("single", "multimodel", "two_model", "user_original"), required=True)
     models.add_argument("--gateway-config", type=Path)
     models.add_argument("--readback-model", default="kimi-k3")
     models.add_argument("--review-model", default="gpt-6-astra")

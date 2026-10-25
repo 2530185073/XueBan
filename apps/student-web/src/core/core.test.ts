@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { IDBFactory } from 'fake-indexeddb'
-import { StudentClient, decisionLabel } from './student'
+import { StudentClient, decisionLabel, NO_PROGRESS_TIMEOUT_MS } from './student'
 import { DraftStore } from './store'
 import { StudentApi } from './api'
 import { imageDimensions } from './photo'
@@ -134,7 +134,21 @@ function wholePageSetup(states: (Pick<Decision, 'validity' | 'verdict'> | null)[
     expect(valid('CapturedQuestionRevision', q), `question ${index}`).toBe(true)
     return { case: c, question: q, attempt: a }
   })
-  const jobs = new Map<string, Job>()
+  const jobs = new Map<string, Job>(), checks = new Map<string, CheckRun>()
+  const addCheck = (row: CaseDetail, status: Job['status'], versions: Partial<CheckRun['input_versions']> = {}) => {
+    const suffix = String(checks.size + 1), checkId = `check_pipeline${suffix}`
+    const created_at = new Date(Date.parse(now) + checks.size * 1000).toISOString()
+    const job: Job = { ...s.job, id: `job_pipeline${suffix}`, kind: 'check', status, created_at, result: null, failure: ['failed', 'retryable_failed'].includes(status) ? { code: 'provider_unavailable', message: '合成失败', retryable: status === 'retryable_failed' } : null }
+    const check: CheckRun = { id: checkId, revision: 1, job_id: job.id, case_id: row.case.id, input_versions: { question_id: row.question.question_id, question_revision: row.question.revision, attempt_id: row.attempt.id, attempt_recognition_revision: row.attempt.recognition_revision, case_revision_at_submission: row.case.revision, fingerprint: '1'.repeat(64), ...versions }, model_version: null, rule_version: null, prompt_version: null, decision_ids: [], created_at }
+    jobs.set(job.id, job); checks.set(check.id, check); row.case.check_ids.push(check.id); s.hw.job_ids.push(job.id)
+    const finish = (patch: Partial<Decision> = {}) => {
+      const decision: Decision = { ...fixture<Decision>('model_candidate'), id: `decision_pipeline${suffix}`, case_id: row.case.id, check_id: check.id, input_versions: check.input_versions, reason_code: patch.verdict === 'unable_to_judge' ? 'recognition_conflict' : null, ...patch }
+      row.case.current_decision = decision; row.case.revision++; check.decision_ids = [decision.id]
+      job.status = 'succeeded'; job.failure = null; job.result = { resource_type: 'check', resource_id: check.id }
+    }
+    if (status === 'succeeded') finish()
+    return { job, check, finish }
+  }
   s.route((path, init) => {
     if (path === `/v1/homeworks/${s.hw.id}/recognitions`) { s.hw.case_ids = rows.map(row => row.case.id); s.hw.question_ids = rows.map(row => row.question.question_id) }
     for (const row of rows) {
@@ -142,16 +156,120 @@ function wholePageSetup(states: (Pick<Decision, 'validity' | 'verdict'> | null)[
       if (path === `/v1/questions/${row.question.question_id}`) return json({ record: row.question, current_revision: row.question.revision, currently_effective: true })
       if (path === `/v1/attempts/${row.attempt.id}`) return json({ record: row.attempt, current_revision: row.attempt.revision, currently_effective: true })
       if (path === `/v1/cases/${row.case.id}/checks` && init.method === 'POST') {
-        const decision: Decision = { ...fixture<Decision>('model_candidate'), case_id: row.case.id, input_versions: { ...fixture<Decision>('model_candidate').input_versions, question_id: row.question.question_id, attempt_id: row.attempt.id, attempt_recognition_revision: row.attempt.recognition_revision } }
-        row.case.current_decision = decision
-        const job: Job = { ...s.job, id: `job_${row.case.id}`, kind: 'check', result: { resource_type: 'check', resource_id: decision.check_id! } }
-        jobs.set(job.id, job); return json({ job, created_resource: null }, 202)
+        const { job } = addCheck(row, 'succeeded')
+        return json({ job, created_resource: job.result }, 202)
       }
     }
+    const check = checks.get(path.split('/').at(-1)!); if (path.startsWith('/v1/checks/') && check) return json(check)
     const job = jobs.get(path.split('/').at(-1)!); if (path.startsWith('/v1/jobs/') && job) return json(job)
   })
-  return { ...s, rows }
+  return { ...s, rows, addCheck }
 }
+
+describe('bounded read-only draft observation', () => {
+  const writes = (s: ReturnType<typeof setup>) => s.calls.filter(call => ['POST', 'PUT'].includes(call.init.method ?? 'GET') && !call.path.startsWith('/v1/auth/'))
+  it('carries the no-progress window across bounded queued polls, pauses, and refreshes a late result with GETs only', async () => {
+    const s = setup(); let clock = 0
+    const result = s.job.result
+    Object.assign(s.job, { status: 'queued', result: null, retry_after_seconds: 1 })
+    const client = new StudentClient({ ...s.options, now: () => clock, sleep: async ms => { clock += ms } })
+    await client.login('synthetic.student', 'synthetic password only')
+    const draft = await client.createDraft(photo.blob), waiting = await client.runDraft(draft.id)
+    expect(waiting).toMatchObject({ stage: 'waiting', observation: { status: 'queued', paused: false, lastProgressAt: 0 } })
+    const writeCount = writes(s).length
+    clock = NO_PROGRESS_TIMEOUT_MS
+    const paused = await client.observeDraft(draft.id)
+    expect(paused).toMatchObject({ stage: 'waiting', observation: { status: 'queued', paused: true } })
+    expect(await paused.photo!.text()).toBe('synthetic-image')
+    expect(client.account?.username).toBe('synthetic.student')
+    clock += NO_PROGRESS_TIMEOUT_MS
+    expect((await client.observeDraft(draft.id)).observation?.paused).toBe(true)
+    expect(writes(s)).toHaveLength(writeCount)
+    Object.assign(s.job, { status: 'succeeded', revision: 2, result, retry_after_seconds: null })
+    expect(await client.observeDraft(draft.id, true)).toMatchObject({ stage: 'complete', observation: { paused: false, status: null } })
+    expect(writes(s)).toHaveLength(writeCount)
+  })
+  it('shows a real queued-to-running transition and stops a stalled running run without creating another job', async () => {
+    const s = setup(); let clock = 0, sawQueued = false, sawRunning = false
+    Object.assign(s.job, { status: 'queued', result: null, retry_after_seconds: 2 })
+    const client = new StudentClient({ ...s.options, now: () => clock, sleep: async ms => {
+      const stored = (await client.listDrafts())[0]
+      if (stored.observation?.status === 'queued') { sawQueued = true; s.job.status = 'running'; s.job.revision++ }
+      if (stored.stage === 'recognizing' && stored.observation?.status === 'running') sawRunning = true
+      clock += ms
+    } })
+    await client.login('synthetic.student', 'synthetic password only')
+    const draft = await client.createDraft(photo.blob), paused = await client.runDraft(draft.id)
+    expect(sawQueued && sawRunning).toBe(true)
+    expect(paused).toMatchObject({ stage: 'waiting', observation: { status: 'running', paused: true, lastProgressAt: 2000 } })
+    expect(s.calls.filter(call => call.path.endsWith('/recognitions'))).toHaveLength(1)
+    const refreshed = await client.observeDraft(draft.id, true)
+    expect(refreshed.observation).toMatchObject({ paused: false, lastProgressAt: clock })
+    const writesBefore = writes(s).length
+    const continued = await client.runDraft(draft.id)
+    expect(continued.observation?.paused).toBe(true)
+    expect(writes(s)).toHaveLength(writesBefore)
+  })
+  it('resets a history observation window and never starts a missing check from a refresh', async () => {
+    const s = wholePageSetup([null]); let clock = 0
+    s.hw.case_ids = s.rows.map(row => row.case.id); s.hw.question_ids = s.rows.map(row => row.question.question_id); s.hw.job_ids = [s.job.id]
+    const row = s.rows[0]; row.attempt.recognition_status = 'ready'
+    const client = new StudentClient({ ...s.options, now: () => clock })
+    await client.login('synthetic.student', 'synthetic password only')
+    const opened = await client.openHomework(s.hw.id), id = opened.draftId!
+    expect((await client.observeDraft(id, true)).observation?.status).toBeNull()
+    expect(writes(s)).toHaveLength(0)
+    const pending = s.addCheck(row, 'queued')
+    await client.observeDraft(id, true)
+    clock = NO_PROGRESS_TIMEOUT_MS
+    expect((await client.observeDraft(id)).observation?.paused).toBe(true)
+    await client.openHomework(s.hw.id)
+    expect((await client.getDraft(id)).observation).toMatchObject({ paused: false, status: 'queued', lastProgressAt: clock })
+    pending.finish()
+    expect((await client.observeDraft(id)).stage).toBe('complete')
+    expect(writes(s)).toHaveLength(0)
+  })
+  it('retains paused question cards and retries terminal failures only on an explicit retry', async () => {
+    const s = wholePageSetup([null]); let clock = 0
+    s.hw.case_ids = s.rows.map(row => row.case.id); s.hw.question_ids = s.rows.map(row => row.question.question_id); s.hw.job_ids = [s.job.id]
+    const row = s.rows[0]; row.attempt.recognition_status = 'ready'
+    const pending = s.addCheck(row, 'running')
+    const client = new StudentClient({ ...s.options, now: () => clock })
+    await client.login('synthetic.student', 'synthetic password only')
+    const id = (await client.openHomework(s.hw.id)).draftId!
+    clock = NO_PROGRESS_TIMEOUT_MS
+    expect((await client.observeDraft(id)).detail?.cases[0]).toMatchObject({ observationPaused: true, case: { id: row.case.id } })
+    Object.assign(pending.job, { status: 'failed', revision: 2, failure: { code: 'provider_unavailable', message: 'synthetic', retryable: false } })
+    expect((await client.observeDraft(id, true)).stage).toBe('failed')
+    expect((await client.runDraft(id)).stage).toBe('failed')
+    expect(writes(s)).toHaveLength(0)
+    expect((await client.runDraft(id, { retryFailed: true })).stage).toBe('complete')
+    expect(writes(s).filter(call => call.path.endsWith('/checks'))).toHaveLength(1)
+    await client.observeDraft(id, true)
+    expect(writes(s).filter(call => call.path.endsWith('/checks'))).toHaveLength(1)
+  })
+  it('does not replay an unknown accepted write when refreshing its status', async () => {
+    const s = setup(); await s.client.login('synthetic.student', 'synthetic password only')
+    const draft = await s.client.createDraft(photo.blob)
+    s.loseRecognition(); await s.client.runDraft(draft.id)
+    const count = writes(s).length
+    await s.client.observeDraft(draft.id, true)
+    await s.client.openHomework(s.hw.id)
+    expect(writes(s)).toHaveLength(count)
+    const scope = JSON.stringify(['http://localhost', 'actor_test', 'student_one'])
+    expect(await s.store.hasPending(scope, `${draft.id}:`)).toBe(true)
+  })
+  it('stops pending card animation when no server job remains to make progress', async () => {
+    const s = wholePageSetup([null])
+    s.hw.case_ids = s.rows.map(row => row.case.id); s.hw.question_ids = s.rows.map(row => row.question.question_id); s.hw.job_ids = [s.job.id]
+    s.rows[0].attempt.recognition_status = 'pending'
+    await s.client.login('synthetic.student', 'synthetic password only')
+    const opened = await s.client.openHomework(s.hw.id)
+    expect(opened.cases[0].observationPaused).toBe(true)
+    expect(await s.client.observeDraft(opened.draftId!)).toMatchObject({ stage: 'waiting', observation: { status: null }, detail: { cases: [{ observationPaused: true }] } })
+    expect(writes(s)).toHaveLength(0)
+  })
+})
 
 describe('whole-page persisted correction results', () => {
   const results: Pick<Decision, 'validity' | 'verdict'>[] = [
@@ -209,6 +327,141 @@ describe('whole-page persisted correction results', () => {
     expect(result.error).toBeNull(); expect(result.stage).toBe('complete')
     expect(s.calls.filter(c => c.path.endsWith('/checks') && c.init.method === 'POST').map(c => c.path)).toEqual(['/v1/cases/case_page2/checks'])
     expect(result.detail?.cases[0].case.current_decision?.validity).toBe('needs_review')
+  })
+})
+
+describe('recognition followed by per-question checks', () => {
+  const scope = JSON.stringify(['http://localhost', 'actor_test', 'student_one'])
+  const posts = (s: ReturnType<typeof wholePageSetup>) => s.calls.filter(call => call.path.endsWith('/checks') && call.init.method === 'POST')
+  const openRecognized = async (s: ReturnType<typeof wholePageSetup>, client = s.client) => {
+    s.hw.case_ids = s.rows.map(row => row.case.id); s.hw.question_ids = s.rows.map(row => row.question.question_id)
+    s.hw.job_ids.unshift(s.job.id)
+    await client.login('synthetic.student', 'synthetic password only')
+    return (await client.openHomework(s.hw.id)).draftId!
+  }
+  const asCorrection = async (s: ReturnType<typeof wholePageSetup>, id: string) => {
+    const saved = await s.store.draft(scope, id), row = s.rows[0]
+    saved.correction = { caseId: row.case.id, parentAttemptId: row.attempt.id, reportedHelp: 'unknown' }
+    await s.store.saveDraft(saved)
+  }
+
+  it.each(['ready', 'needs_revision'] as const)('checks a %s answer after recognition and leaves completed unresolved results alone', async status => {
+    const s = wholePageSetup([null, { validity: 'needs_review', verdict: 'unable_to_judge' }])
+    s.rows[0].attempt.recognition_status = status; s.rows[0].attempt.answer_text = '3x-6'
+    await s.client.login('synthetic.student', 'synthetic password only')
+    const draft = await s.client.createDraft(photo.blob), result = await s.client.runDraft(draft.id)
+    expect(result.error).toBeNull(); expect(result.stage).toBe('complete')
+    expect(posts(s).map(call => call.path)).toEqual([`/v1/cases/${s.rows[0].case.id}/checks`])
+    expect(JSON.parse(posts(s)[0].init.body as string)).toMatchObject({ attempt_id: s.rows[0].attempt.id, question_revision: s.rows[0].question.revision, attempt_recognition_revision: s.rows[0].attempt.recognition_revision })
+    await s.client.runDraft(draft.id)
+    expect(posts(s)).toHaveLength(1)
+    expect(result.detail?.cases[1].case.current_decision?.verdict).toBe('unable_to_judge')
+  })
+
+  it.each(['queued', 'running', 'retryable_failed'] as const)('adopts an existing %s check before inspecting a needs-revision answer', async status => {
+    const s = wholePageSetup([null]), row = s.rows[0]
+    row.attempt.recognition_status = 'needs_revision'; row.attempt.answer_text = null
+    const existing = s.addCheck(row, status), id = await openRecognized(s)
+    const result = await s.client.runDraft(id)
+    expect(result.error).toBeNull(); expect(result.stage).toBe('waiting'); expect(posts(s)).toHaveLength(0)
+    expect(s.calls.filter(call => call.path === `/v1/jobs/${existing.job.id}`).length).toBeGreaterThanOrEqual(120)
+    existing.finish({ validity: 'needs_review', verdict: 'unable_to_judge', correct_answer: null })
+    expect((await s.client.runDraft(id)).stage).toBe('complete')
+    expect(posts(s)).toHaveLength(0)
+  })
+
+  it('observes a newer active check ahead of an older effective decision', async () => {
+    const s = wholePageSetup([{ validity: 'candidate', verdict: 'correct' }])
+    const existing = s.addCheck(s.rows[0], 'running'), id = await openRecognized(s)
+    expect((await s.client.runDraft(id)).stage).toBe('waiting'); expect(posts(s)).toHaveLength(0)
+    existing.finish({ verdict: 'incorrect', correct_answer: '3x-6' })
+    const done = await s.client.runDraft(id)
+    expect(done.stage).toBe('complete'); expect(done.detail?.cases[0].case.current_decision?.correct_answer).toBe('3x-6')
+    expect(posts(s)).toHaveLength(0)
+  })
+
+  it.each(['failed', 'superseded', 'cancelled'] as const)('keeps the current %s check failed until an explicit retry, even with an older decision', async status => {
+    const s = wholePageSetup([{ validity: 'candidate', verdict: 'correct' }]), row = s.rows[0]
+    row.attempt.recognition_status = 'needs_revision'; row.attempt.answer_text = '3x-6'
+    s.addCheck(row, status)
+    const id = await openRecognized(s)
+    for (let run = 0; run < 2; run++) expect(await s.client.runDraft(id)).toMatchObject({ stage: 'failed', error: { code: `job_${status}` } })
+    expect(posts(s)).toHaveLength(0)
+    expect((await s.client.runDraft(id, { retryFailed: true })).stage).toBe('complete')
+    expect(posts(s)).toHaveLength(1)
+    expect((await s.client.runDraft(id)).stage).toBe('complete'); expect(posts(s)).toHaveLength(1)
+  })
+
+  it('does not let an older failed check override the latest completed unable result', async () => {
+    const s = wholePageSetup([null]), row = s.rows[0]
+    s.addCheck(row, 'failed')
+    s.addCheck(row, 'succeeded').finish({ validity: 'needs_review', verdict: 'unable_to_judge', correct_answer: null })
+    row.case.check_ids.reverse()
+    const id = await openRecognized(s)
+    expect((await s.client.runDraft(id)).stage).toBe('complete')
+    expect(posts(s)).toHaveLength(0)
+  })
+
+  it('ignores failed checks of an older input revision and submits the current answer once', async () => {
+    const s = wholePageSetup([null]), row = s.rows[0]
+    row.attempt.recognition_status = 'needs_revision'; row.attempt.answer_text = '3x-6'
+    s.addCheck(row, 'failed', { attempt_recognition_revision: row.attempt.recognition_revision + 1 })
+    const id = await openRecognized(s)
+    expect((await s.client.runDraft(id)).stage).toBe('complete'); expect(posts(s)).toHaveLength(1)
+  })
+
+  it('keeps a mixed homework waiting when one needs-revision answer is still missing', async () => {
+    const s = wholePageSetup([null, null])
+    for (const row of s.rows) row.attempt.recognition_status = 'needs_revision'
+    s.rows[0].attempt.answer_text = '3x-6'; s.rows[1].attempt.answer_text = '  '
+    const id = await openRecognized(s)
+    const result = await s.client.runDraft(id)
+    expect(result.error).toBeNull(); expect(result.stage).toBe('waiting')
+    expect(posts(s).map(call => call.path)).toEqual([`/v1/cases/${s.rows[0].case.id}/checks`])
+    expect(result.detail?.cases[1].case.current_decision).toBeNull()
+  })
+
+  it.each(['queued', 'failed'] as const)('notices a %s check that appears during the final detail refresh', async status => {
+    const s = wholePageSetup([{ validity: 'candidate', verdict: 'correct' }]), row = s.rows[0]
+    const id = await openRecognized(s)
+    let homeworkReads = 0
+    const client = new StudentClient({ ...s.options, transport: async (input, init) => {
+      if (new URL(String(input)).pathname === `/v1/homeworks/${s.hw.id}` && ++homeworkReads === 4) s.addCheck(row, status)
+      return s.options.transport(input, init)
+    } })
+    await client.restore()
+    const result = await client.runDraft(id)
+    expect(result.stage).toBe(status === 'queued' ? 'waiting' : 'failed')
+    expect(posts(s)).toHaveLength(0)
+  })
+
+  it.each(['queued', 'failed'] as const)('checks only the correction target while another question has a %s check', async status => {
+    const s = wholePageSetup([null, null]), [target, other] = s.rows
+    target.attempt.recognition_status = 'needs_revision'; target.attempt.answer_text = '3x-6'
+    s.addCheck(other, status)
+    const id = await openRecognized(s); await asCorrection(s, id)
+    const result = await s.client.runDraft(id, { forceCheckCaseIds: [other.case.id], forceCheckToken: 'foreign_target' })
+    expect(result.error).toBeNull(); expect(result.stage).toBe('complete')
+    expect(posts(s).map(call => call.path)).toEqual([`/v1/cases/${target.case.id}/checks`])
+    expect(result.detail?.cases[1].case.current_decision).toBeNull()
+  })
+
+  it.each(['queued', 'failed'] as const)('does not complete an unreadable correction with a %s target check', async status => {
+    const s = wholePageSetup([null]), target = s.rows[0]
+    target.attempt.recognition_status = 'needs_revision'; target.attempt.answer_text = null
+    s.addCheck(target, status)
+    const id = await openRecognized(s); await asCorrection(s, id)
+    expect((await s.client.runDraft(id)).stage).toBe(status === 'queued' ? 'waiting' : 'failed')
+    expect(posts(s)).toHaveLength(0)
+  })
+
+  it('allows a terminal unreadable correction without a check but keeps pending recognition waiting', async () => {
+    const s = wholePageSetup([null]), target = s.rows[0]
+    target.attempt.recognition_status = 'pending'; target.attempt.answer_text = null
+    const id = await openRecognized(s); await asCorrection(s, id)
+    expect((await s.client.runDraft(id)).stage).toBe('waiting')
+    target.attempt.recognition_status = 'needs_revision'
+    expect((await s.client.runDraft(id)).stage).toBe('complete'); expect(posts(s)).toHaveLength(0)
   })
 })
 

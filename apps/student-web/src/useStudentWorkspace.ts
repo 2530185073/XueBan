@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createStudentClient, remoteDraftId, safeError, type EditChange } from './core'
-import { type CorrectionTarget } from './presentation'
+import { shouldObserveDraft, type CorrectionTarget } from './presentation'
 import type { Account, CaseDetail, CreateHelp, DraftSummary, DraftView, Hint, HomeworkDetail, HomeworkSession, HomeworkSummary, IdentityContext } from './core/types'
 import type { StudentCurriculum } from './core/learning'
 import type { CurriculumContext } from './core/student'
@@ -104,19 +104,19 @@ export function useStudentWorkspace() {
     window.addEventListener('online', update); window.addEventListener('offline', update)
     return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update) }
   }, [])
-  // A bounded client run returns a waiting draft when work is still active;
-  // keep observing that draft while it remains open in this page.
+  // Observe accepted work with GETs only. A stopped window needs an explicit
+  // refresh/continue; it must never re-enter mutation processing on a timer.
   useEffect(() => {
     const id = draft?.id
-    const activeStage = !!id && ['waiting', 'recognizing', 'checking'].includes(draft.stage)
-    if (!id || !activeStage || !identity || !studentId) {
+    const activeStage = shouldObserveDraft(draft)
+    if (!id || !activeStage || !identity || !studentId || !online) {
       if (autoPollTimer.current) { clearTimeout(autoPollTimer.current); autoPollTimer.current = null }
       return
     }
     let live = true
     const schedule = () => {
       if (!live || autoPollTimer.current || activeDraft.current !== id) return
-      autoPollTimer.current = setTimeout(() => { autoPollTimer.current = null; void poll() }, autoPollRunning.current ? 250 : 1200)
+      autoPollTimer.current = setTimeout(() => { autoPollTimer.current = null; void poll() }, autoPollRunning.current ? 250 : 2000)
     }
     const poll = async () => {
       if (!live || activeDraft.current !== id || !identity || !studentId) return
@@ -125,7 +125,7 @@ export function useStudentWorkspace() {
       if (autoPollRunning.current || busyRef.current) { schedule(); return }
       autoPollRunning.current = true
       try {
-        const next = await client.runDraft(id)
+        const next = await client.observeDraft(id)
         if (!live || activeDraft.current !== id) return
         setDraft(next); setDetail(next.detail); setRecordVersion(version => version + 1)
       } catch (e) {
@@ -140,7 +140,7 @@ export function useStudentWorkspace() {
       live = false
       if (autoPollTimer.current) { clearTimeout(autoPollTimer.current); autoPollTimer.current = null }
     }
-  }, [client, draft?.id, draft?.stage, fail, identity, studentId])
+  }, [client, draft?.id, draft?.stage, draft?.observation?.paused, draft?.observation?.status, fail, identity, studentId, online])
   // Background, read-only and cancelled by sign-out; one failing homework does not hide the others.
   const loadSummaries = useCallback((items: HomeworkSession[], known: Record<string, HomeworkSummary | undefined>) => {
     const run = ++summaryRun.current, queue = items.filter(h => known[h.id]?.revision !== h.revision)
@@ -153,7 +153,13 @@ export function useStudentWorkspace() {
   }, [client])
   const refreshOpened = useCallback(async () => {
     const homeworkId = detail?.homework.id ?? draft?.homeworkId; if (!homeworkId) return
-    const next = await client.openHomework(homeworkId); setDetail(next); await sync(); setDetail(next); setRecordVersion(v => v + 1)
+    const id = activeDraft.current
+    if (id) {
+      const next = await client.observeDraft(id, true)
+      if (activeDraft.current !== id) return
+      setDraft(next); setDetail(next.detail)
+    } else { const next = await client.openHomework(homeworkId); setDetail(next) }
+    await sync(); setRecordVersion(v => v + 1)
   }, [client, detail?.homework.id, draft?.homeworkId, sync])
   return {
     client, account, identity, studentId, studentCurriculum, loading, sessionInitializing, busy, error, notice, drafts, history, cursor, historyLoading, historyLoaded, draft, detail, hint, summaries, summaryFailed, recordVersion, online,
@@ -186,8 +192,9 @@ export function useStudentWorkspace() {
     editPage: (pageId: string, change: EditChange) => action(change.crop ? '正在裁切照片' : change.reset ? '正在恢复原图' : '正在旋转照片', async () => { if (!draft) return; show(await client.editPage(draft.id, pageId, change)); await sync() }),
     replacePage: (pageId: string, file: File) => action('正在换上新照片', async () => { if (!draft) return; show(await client.replacePage(draft.id, pageId, file)); setNotice('这一页已换成新照片，可以继续上传。'); await sync() }),
     discardDraft: (id: string) => action('正在删除草稿', async () => { await client.discardDraft(id); if (activeDraft.current === id) show(null); setNotice('这份还没上传的草稿已从这台设备删除。'); await sync() }),
-    openDraft: (id: string) => action('正在打开作业', () => selectDraft(id)),
-    run: () => action('正在检查作业', async () => { if (!draft) return; const next = await client.runDraft(draft.id, { retryFailed: draft.stage === 'failed' }); setDraft(next); setDetail(next.detail); setRecordVersion(v => v + 1); await sync() }),
+    openDraft: (id: string) => action('正在打开作业', async () => { await client.observeDraft(id, true); await selectDraft(id) }),
+    run: () => action('正在检查作业', async () => { if (!draft) return; const next = await client.runDraft(draft.id); setDraft(next); setDetail(next.detail); setRecordVersion(v => v + 1); await sync() }),
+    retryFailed: () => action('正在重试失败任务', async () => { if (!draft || draft.stage !== 'failed') return; const next = await client.runDraft(draft.id, { retryFailed: true }); setDraft(next); setDetail(next.detail); setRecordVersion(v => v + 1); await sync() }),
     rerecognize: () => action('正在重新识别', async () => { if (!draft) return; const next = await client.runDraft(draft.id, { rerecognize: true }); setDraft(next); setDetail(next.detail); setRecordVersion(v => v + 1); await sync() }),
     // Completion of another photo/attempt must never replace the currently open work.
     refreshRecognition: async (row: CaseDetail, stillCurrent: () => boolean) => {

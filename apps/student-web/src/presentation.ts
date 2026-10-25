@@ -1,7 +1,7 @@
 import type { CaseDetail, DraftStage, DraftSummary, DraftView } from './core/types'
 
 export type Tone = 'neutral' | 'green' | 'red' | 'amber'
-export type StudentResultState = 'correct' | 'incorrect' | 'uncertain' | 'processing' | 'unprocessed' | 'service_failure'
+export type StudentResultState = 'correct' | 'incorrect' | 'unanswered' | 'uncertain' | 'processing' | 'unprocessed' | 'service_failure'
 
 /** Strip only an explicit source label with an unambiguous separator.
  * Bare numbers, decimals, coefficients and exponents are question content.
@@ -29,6 +29,7 @@ function currentStudentDecision(row: CaseDetail) {
 
 /** A star marks evidence uncertainty without turning a usable verdict into a pending bucket. */
 export function studentResultUncertain(row: CaseDetail): boolean {
+  if (studentResultState(row) === 'unanswered') return false
   const decision = currentStudentDecision(row)
   return !!row.question.recognition_uncertainties?.length
     || !!row.attempt.recognition_uncertainties?.length
@@ -72,20 +73,31 @@ function unresolvedPresentation(row: CaseDetail): { label: string; tone: Tone; n
 
 /** A real active check takes priority over the previous result while it is running. */
 export function studentResultState(row: CaseDetail): StudentResultState {
-  if (checkInProgress(row)) return 'processing'
+  if (checkInProgress(row)) return row.checkJob?.status === 'running' && !row.observationPaused ? 'processing' : 'unprocessed'
   const decision = currentStudentDecision(row)
+  // An explicit blank readback is different from missing/unreadable text.
+  // Ignore previous attempts and unfinished recognition when showing it.
+  if (row.case.lifecycle === 'active' && row.attempt.id === row.case.current_attempt_id
+    && row.attempt.captured_question_revision === row.case.current_question_revision
+    && ['ready', 'needs_revision'].includes(row.attempt.recognition_status)
+    && row.attempt.answer_status === 'blank') return 'unanswered'
   if (decision && decision.validity !== 'needs_review' && decision.verdict !== 'unable_to_judge') {
-    return decision.verdict === 'correct' ? 'correct' : decision.verdict === 'incorrect' || decision.verdict === 'partially_correct' || decision.verdict === 'unanswered' ? 'incorrect' : 'uncertain'
+    if (decision.verdict === 'unanswered') return 'unanswered'
+    return decision.verdict === 'correct' ? 'correct' : decision.verdict === 'incorrect' || decision.verdict === 'partially_correct' ? 'incorrect' : 'uncertain'
   }
   if (decision) return 'uncertain'
   if (row.checkJob && ['failed', 'superseded', 'cancelled'].includes(row.checkJob.status)) return 'service_failure'
-  if (row.attempt.recognition_status === 'pending') return 'processing'
+  if (row.attempt.recognition_status === 'pending') return row.observationPaused ? 'unprocessed' : 'processing'
   if (row.attempt.recognition_status === 'failed') return 'service_failure'
   return 'unprocessed'
 }
 
 export function casePresentation(row: CaseDetail): { label: string; tone: Tone; note: string } {
+  if (row.observationPaused && (checkInProgress(row) || row.attempt.recognition_status === 'pending')) return { label: '进度已保留', tone: 'amber', note: '等待时间较长，已暂停自动刷新；可以刷新状态查看后续结果。' }
+  if (row.checkJob?.status === 'queued') return { label: '排队等待处理', tone: 'neutral', note: '任务已提交，正在等待处理，不必重复提交。' }
+  if (row.checkJob?.status === 'retryable_failed') return { label: '等待服务重试', tone: 'amber', note: '服务暂未完成，任务正在等待系统重试。' }
   if (checkInProgress(row)) return { label: '正在检查', tone: 'neutral', note: '正在检查这道题的作答，可以先继续其他题。' }
+  if (studentResultState(row) === 'unanswered') return { label: '未作答', tone: 'neutral', note: '这道题还没有填写答案，完成后可以再检查。' }
   const decision = row.case.current_decision
   if (!decision) {
     if (row.attempt.recognition_status === 'failed') return { label: '识别服务失败', tone: 'amber', note: '这道题没有生成判断，服务处理没有完成。请稍后重试，或请老师一起看。' }
@@ -116,7 +128,20 @@ export function uploadState(d: Pick<DraftSummary, 'stage' | 'homeworkId' | 'page
   if (d.stage === 'failed') return { label: '照片已保存在服务器，处理未完成，可重试', tone: 'amber' }
   return { label: '服务器已收到照片，正在处理', tone: 'neutral' }
 }
-export const stageLabels: Record<DraftStage, string> = { local: '照片已备好', creating: '保存作业', uploading: '上传照片', recognizing: '核对题目与作答', checking: '补充核对作答', complete: '可查看结果', failed: '这次尚未完成', waiting: '进度已保留' }
+export const stageLabels: Record<DraftStage, string> = { local: '照片已备好', creating: '保存作业', uploading: '上传照片', recognizing: '读题与作答', checking: '逐题检查', complete: '可查看结果', failed: '这次尚未完成', waiting: '进度已保留' }
+export function shouldObserveDraft(draft: DraftView | null): boolean {
+  return !!draft && ['waiting', 'recognizing', 'checking'].includes(draft.stage)
+    && !draft.observation?.paused && (!draft.observation || draft.observation.status !== null)
+}
+export function draftProgress(draft: DraftSummary): { label: string; note: string; spinning: boolean } {
+  const observation = draft.observation
+  if (observation?.paused) return { label: '进度已保留', note: '较长时间没有新的处理进度，服务可能暂不可用。已暂停自动刷新；后台仍可能完成，可刷新状态查看。', spinning: false }
+  if (observation?.status === 'queued') return { label: '排队等待处理', note: '任务已提交，正在等待处理，不必重复提交。', spinning: false }
+  if (observation?.status === 'retryable_failed') return { label: '等待服务重试', note: '服务暂未完成，正在等待系统重试；原图和进度已保留。', spinning: false }
+  if (observation?.status === 'running') return { label: observation.phase === 'checking' ? '逐题检查' : '读题与作答', note: '原图和进度会保留，不必重复提交。', spinning: true }
+  if (['creating', 'uploading'].includes(draft.stage)) return { label: stageLabels[draft.stage], note: '原图和进度会保留，不必重复提交。', spinning: true }
+  return { label: '进度已保留', note: '可刷新状态查看结果；未完成的步骤可以明确继续。', spinning: false }
+}
 export function dateLabel(value: string): string { const date = new Date(value); return Number.isNaN(date.getTime()) ? '时间待确认' : new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(date) }
 
 export interface CorrectionTarget { caseId: string; parentAttemptId: string }

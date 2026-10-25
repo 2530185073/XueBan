@@ -25,6 +25,7 @@ interface RecognitionResultsProps {
 const stateLabels: Record<StudentResultState, string> = {
   correct: 'AI 初判正确',
   incorrect: '需要订正',
+  unanswered: '未作答',
   uncertain: '待确认',
   processing: '处理中',
   unprocessed: '尚未检查',

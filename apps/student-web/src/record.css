@@ -85,7 +85,7 @@ del.timeline-title,.timeline-item.invalid .timeline-text{color:#8d9488;font-weig
 
 /* Readability and touch targets on tablets and phones: no text below 11px, controls at least 44px. */
 @media(max-width:1050px),(pointer:coarse){
-  .eyebrow,.panel-heading .eyebrow,.answer-block>span,.question-title small,.photo-caption,.results-meta,.processing p,.history-info time,.footer,.transcript-label,.transcript>.text-button,.teacher-help span,.teacher-help .text-button,.correction-note,.question-detail>.small:last-child,.hint-note small,.hint-note .eyebrow,.upload-sheet small,.tips-footer{font-size:11px}
+  .eyebrow,.panel-heading .eyebrow,.answer-block>span,.question-title small,.photo-caption,.results-meta,.photo-processing p,.history-info time,.footer,.transcript-label,.transcript>.text-button,.teacher-help span,.teacher-help .text-button,.correction-note,.question-detail>.small:last-child,.hint-note small,.hint-note .eyebrow,.upload-sheet small,.tips-footer{font-size:11px}
   .question-item>.status-pill,.status-pill{font-size:11px}
   .icon-button{width:44px;height:44px}
   .text-button{min-height:44px}
@@ -136,6 +136,7 @@ del.timeline-title,.timeline-item.invalid .timeline-text{color:#8d9488;font-weig
 .recognition-status.uncertain{color:#8a672d;background:#f7eedb}
 .recognition-status.processing{color:#536a78;background:#edf2f4}
 .recognition-status.unprocessed{color:#6f7669;background:#eff1eb}
+.recognition-status.unanswered,.app-shell .recognition-status.unanswered{color:#6f7669;background:#eff1eb}
 .recognition-status.service_failure{color:#986033;background:#fff0df}
 .recognition-chevron{color:#8b9584;transition:transform .18s ease}
 .recognition-card.open .recognition-chevron{transform:rotate(180deg)}

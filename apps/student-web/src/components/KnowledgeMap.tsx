@@ -1,7 +1,7 @@
 import { StarMap } from './StarMap'
 import { ObservatoryTour } from './ObservatoryTour'
 import { evidenceTarget, type EvidenceTarget } from '../core/evidenceTrace'
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowLeft, ArrowUpRight, BookOpen, ChevronRight, CircleDot, Clock3, Compass, Leaf, List, LoaderCircle, Map as MapIcon, Presentation, RefreshCw, X } from 'lucide-react'
 import { safeError } from '../core'
@@ -9,6 +9,9 @@ import { CurriculumBookPicker } from './CurriculumBookPicker'
 import type { EvidenceSources, KnowledgeDetail, KnowledgeMap, MappingCoverage } from '../core/learning'
 import type { Workspace } from '../useStudentWorkspace'
 import { sourceLabel, assistanceLabel, dayLabel, eventLabel, knowledgeChapters, knowledgeNodes, PENDING_NOTICE, reasonText, resultLabels, statusLabels } from '../learning'
+import { isKnowledgeDemoEnabled } from '../dev/knowledgeDemoGate'
+
+const KnowledgeDemoPage = import.meta.env.DEV ? lazy(() => import('../dev/KnowledgeDemoPage')) : null
 
 type OpenHomework = (homeworkId: string, caseId: string, evidence?: EvidenceTarget) => void
 
@@ -136,9 +139,32 @@ export function KnowledgeMapView({ map, onOpen, selectedId, onOpenHomework, deta
   </div>
 }
 
-export function KnowledgeMapPage({ workspace, map, loading, loadError, onRefresh, onOpenHomework }: {
+type KnowledgeMapPageProps = {
   workspace: Workspace; map: KnowledgeMap | null; loading: boolean; loadError: string; onRefresh: () => void; onOpenHomework?: OpenHomework
-}) {
+}
+
+/** Local, explicitly requested preview; it never replaces API data or writes learning records. */
+export function KnowledgeMapPage(props: KnowledgeMapPageProps) {
+  const [dismissed, setDismissed] = useState(false)
+  const studentId = props.workspace.studentId
+  const enabled = import.meta.env.DEV && typeof window !== 'undefined' && !dismissed && !props.loading &&
+    props.map?.student_id === studentId && isKnowledgeDemoEnabled({
+      development: import.meta.env.DEV, hostname: window.location.hostname,
+      requestedStudent: new URLSearchParams(window.location.search).get('knowledgeDemo'),
+      currentStudent: studentId, grade: props.map?.grade,
+    })
+  if (enabled && KnowledgeDemoPage) return <Suspense fallback={<p role="status">正在打开模拟图谱…</p>}>
+    <KnowledgeDemoPage key={studentId} onExit={() => {
+      const url = new URL(window.location.href)
+      url.searchParams.delete('knowledgeDemo')
+      window.history.replaceState(window.history.state, '', url)
+      setDismissed(true)
+    }} />
+  </Suspense>
+  return <LiveKnowledgeMapPage {...props} />
+}
+
+function LiveKnowledgeMapPage({ workspace, map, loading, loadError, onRefresh, onOpenHomework }: KnowledgeMapPageProps) {
   const [openId, setOpenId] = useState<string | null>(null)
   const [detailState, setDetailState] = useState<{ key: string; value: KnowledgeDetail } | null>(null)
   const [errorState, setErrorState] = useState<{ key: string; message: string } | null>(null)
