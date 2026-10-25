@@ -411,7 +411,7 @@ def install_learning(app, engine, cfg, database_session, current_actor):
                 counts[subject]["partial_count"] += 1
                 counts[subject]["incorrect_count"] += 1
                 counts[subject]["scorable_count"] += 1
-            elif verdict in {"incorrect", "unanswered"}:
+            elif verdict == "incorrect":
                 counts[subject]["incorrect_count"] += 1
                 counts[subject]["scorable_count"] += 1
         subjects = []

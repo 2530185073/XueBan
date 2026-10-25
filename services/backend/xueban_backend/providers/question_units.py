@@ -536,3 +536,41 @@ def compatible_saved_target(question, annotations, candidate, canonical_label):
     # New photos have different asset IDs, so only the stable observed locator
     # and original unit boundaries are compared here, alongside the caller's stem.
     return same_unit_identity(saved, candidate, require_page=False)
+
+
+def correction_target_key(item):
+    """Exact identity for the original reader's corrected-photo binding.
+
+    Old original-reader records appended their single response-label slot to
+    the stem. Remove only that exact, independently stored suffix; substantive
+    prompts and multiple slots still belong to the question. No stored text or
+    handwriting is rewritten by this comparison.
+    """
+    from .whole_page import normalize_literal_math
+
+    stem = item.get("stem_text")
+    if not isinstance(stem, str) or not stem.strip():
+        return None
+    slots = item.get("answer_slots") or []
+    if len(slots) == 1:
+        slot = slots[0]
+        prompt = slot.get("prompt")
+        if (slot.get("index") == 1 and isinstance(prompt, str)
+                and re.fullmatch(r"\s*(?:解|答|解答|答案)\s*[:：]\s*", prompt)):
+            suffix = "\n1. " + prompt
+            if stem.endswith(suffix):
+                stem = stem[:-len(suffix)]
+
+    def literal(value):
+        value = normalize_literal_math(value, "stem_text") or ""
+        # The shared literal comparator already preserves separated digit and
+        # variable groups, signs, brackets and exponents. These two visible
+        # operators need the same spacing treatment as +, -, / and *.
+        return re.sub(r"\s*([×÷])\s*", r"\1", value)
+
+    stem = literal(stem)
+    if not stem:
+        return None
+    options = tuple(sorted((literal(option["label"]), literal(option["text"]))
+                           for option in item.get("options", [])))
+    return stem, options

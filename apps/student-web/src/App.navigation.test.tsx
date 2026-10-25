@@ -52,6 +52,37 @@ describe('homework observation controls', () => {
   })
 })
 const navigation = (html: string) => html.match(/<nav aria-label="主要导航">[\s\S]*?<\/nav>/)?.[0]
+describe('setup before a new homework upload', () => {
+  const localPhoto = () => {
+    state.workspace.draft = { id: 'draft_one', title: '学校作业', stage: 'local', createdAt: '2026-10-17T00:00:00Z', updatedAt: '2026-10-17T00:00:00Z', homeworkId: null, error: null,
+      pageCount: 0, uploadedCount: 0, photo: null, pages: [], editable: true, detail: null } satisfies DraftView
+  }
+  const startButton = (html: string) => [...html.matchAll(/<button\b[\s\S]*?<\/button>/g)].find(match => match[0].includes('开始检查'))?.[0]
+  it('keeps a local photo while missing setup disables the first upload', () => {
+    localPhoto()
+    const html = renderToStaticMarkup(<App />)
+    expect(html).toContain('检查前的课程设置')
+    expect(html).toContain('已选照片仍保存在这台设备上')
+    expect(startButton(html)).toContain('disabled=')
+  })
+  it('allows a new upload after the supported grade and offered book have been selected', () => {
+    localPhoto()
+    state.workspace.studentCurriculum = { student_id: 'student_one', grade: 7, subjects: [{ catalog_status: 'available' }] } as Workspace['studentCurriculum']
+    state.workspace.studentBooks = { student_id: 'student_one', profile_revision: 1, current_binding: { graph_version: 'book_one' }, books: [{ graph_version: 'book_one' }] } as Workspace['studentBooks']
+    const html = renderToStaticMarkup(<App />)
+    expect(html).not.toContain('检查前的课程设置')
+    expect(startButton(html)).not.toContain('disabled=')
+  })
+  it('leaves a correction to existing homework available without a new setup gate', () => {
+    localPhoto()
+    state.workspace.draft!.homeworkId = 'homework_one'
+    state.workspace.draft!.correction = { caseId: 'case_one', parentAttemptId: 'attempt_one' }
+    const html = renderToStaticMarkup(<App />)
+    expect(html).not.toContain('检查前的课程设置')
+    expect(startButton(html)).toContain('开始检查这张订正')
+    expect(startButton(html)).not.toContain('disabled=')
+  })
+})
 describe('account initialization navigation barrier', () => {
   it('renders four sibling navigation buttons without group spacers', () => {
     const nav = navigation(renderToStaticMarkup(<App />))!

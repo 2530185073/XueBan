@@ -91,8 +91,6 @@ export default function ReviewPanel({ ws, focus, actorId, block, sample, busy, a
       </li>)}</ol>
     </section>
 
-    {learning}
-
     <section className="panel-section">
       <div className="section-heading"><span><Lightbulb size={17} />提示记录</span><small>{ws.hints.length} 条</small></div>
       {ws.hints.length === 0 && <p className="subtle">还没有生成过提示。</p>}
@@ -118,6 +116,8 @@ export default function ReviewPanel({ ws, focus, actorId, block, sample, busy, a
       {!locked && !stale && issue && (form.reason || form.basis) && <small className="form-issue">{issue}</small>}
       <button className="button primary full" disabled={!submittable} onClick={() => void submit()}>{busy ? <LoaderCircle size={16} className="spin" /> : <Check size={16} />}{busy ? '等待服务端确认…' : `提交：${actionLabels[action]}`}</button>
     </section>
+
+    {learning}
 
     {ws.reviews.length > 0 && <section className="panel-section">
       <div className="section-heading"><span><UserCheck size={17} />复核记录</span><small>{ws.reviews.length} 条</small></div>

@@ -262,6 +262,9 @@ export default function App() {
       if (generation !== epoch.current) return false
       setWriteUncertain(false); setNotice(success)
       after?.(value)
+      // A review changes which knowledge links are effective, even when the
+      // selected question ID stays the same. Refresh those dependent panels.
+      setDataVersion(version => version + 1)
       await refreshAll()
       return true
     } catch (cause) {
@@ -332,6 +335,7 @@ export default function App() {
       recorded={conditions.get(viewed.record.id)} onRecorded={condition => setConditions(old => new Map(old).set(condition.attempt_id, condition))}
       locked={ws.homework.processing_blocked ? '这份作业已停止处理，不能继续操作。' : null} />
     <KnowledgeLinkEditor key={ws.question.record.question_id} ctx={ctx} questionId={ws.question.record.question_id}
+      judgmentConfirmed={ws.decision?.currently_effective === true && ws.decision.record.validity === 'confirmed'}
       locked={ws.correction.lifecycle !== 'active' ? '此题已被替代，请在新题上确认知识点。' : ws.homework.processing_blocked ? '这份作业已停止处理，不能继续操作。' : null} />
   </> : null
   const clearFeedback = () => { setError(null); setNotice(null) }
@@ -421,7 +425,7 @@ export default function App() {
           attemptId={attemptId || ws.correction.current_attempt_id} onAttempt={setAttemptId}
           onClaim={target => mutate(() => api.claim(target), '已接手这条求助。')}
           onComplete={(target, outcome, note) => mutate(() => api.complete(target, outcome, note), outcome === 'resolved' ? '已记录：帮助已结束。题目对错仍以复核记录为准。' : '已记录：仍需帮助。')}
-          onReview={(payload: SubmitReview) => mutate(() => api.submitReview(ws.correction.id, payload), '复核记录已保存。')}
+          onReview={(payload: SubmitReview) => mutate(() => api.submitReview(ws.correction.id, payload), '判断已保存。请继续核对下方的作答帮助与知识点。')}
           learning={caseLearning}
           onStartCheck={() => { const attempt = currentAttempt(ws)!; return mutate(() => api.startCheck(ws.correction.id, { expected_revision: ws.correction.revision, attempt_id: attempt.record.id, question_revision: ws.question.current_revision, attempt_recognition_revision: attempt.record.recognition_revision }), '已请求重新检查，完成后会自动刷新这道题。', watchCheck) }} />
       </> : <>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Camera, Check, ChevronDown, CircleAlert, CircleX, Clock3, Lightbulb, LoaderCircle, Shuffle } from 'lucide-react'
 import type { CaseDetail } from '../core/types'
 import type { CurriculumScope } from '../core/learning'
@@ -9,6 +9,7 @@ import { ResultsSummary } from './ResultsSummary'
 import { QuestionDetail } from './QuestionDetail'
 import { MathText } from './MathText'
 import { mathPresentation } from '../mathPresentation'
+import { safeError } from '../core/errors'
 
 interface RecognitionResultsProps {
   rows: CaseDetail[]
@@ -63,11 +64,33 @@ function ResultIcon({ state }: { state: StudentResultState }) {
 export function QuestionCard({ row, index, open, onToggle, subjects = [], onSelectSubject = () => {}, workspace, onCorrection, onContinue, onVariant, variantBusy = false }: { row: CaseDetail; index: number; open: boolean; onToggle: () => void; subjects?: CurriculumScope[]; onSelectSubject?: (subject: string) => void; workspace?: Workspace; onCorrection?: (camera: boolean) => void; onContinue?: () => void; onVariant?: () => void; variantBusy?: boolean }) {
   const [originalMath, setOriginalMath] = useState(false)
   const [copyStatus, setCopyStatus] = useState('')
+  const [revealed, setRevealed] = useState('')
+  const [revealing, setRevealing] = useState('')
+  const [solutionError, setSolutionError] = useState('')
+  const revealingRef = useRef(false)
   const state = studentResultState(row)
   const serviceIncomplete = studentUnresolvedKind(row) === 'service'
   const compactService = !!workspace && !!onCorrection && studentServiceOnlyIncomplete(row)
   const decision = effectiveDecision(row)
   const usable = state !== 'processing' && decision && decision.validity !== 'needs_review' && decision.verdict !== 'unable_to_judge'
+  const solutionBinding = JSON.stringify([workspace?.client?.evidenceScope, row.case.id, row.attempt.id, decision?.id, decision?.revision])
+  const currentBinding = useRef(solutionBinding); currentBinding.current = solutionBinding
+  const solutionVisible = !!usable && revealed === solutionBinding
+  const hasSolution = !!usable && !!(decision.correct_answer || decision.correction_method || decision.answer_checks?.some(part => part.verdict === 'incorrect' && part.correct_answer))
+  useEffect(() => { setSolutionError('') }, [solutionBinding])
+  useEffect(() => { currentBinding.current = solutionBinding; return () => { currentBinding.current = '' } }, [solutionBinding])
+  const revealSolution = async () => {
+    if (!workspace || !hasSolution || revealingRef.current) return
+    const binding = solutionBinding
+    revealingRef.current = true; setRevealing(binding); setSolutionError('')
+    try {
+      await workspace.client.recordSolutionViewed(row)
+      if (currentBinding.current === binding) setRevealed(binding)
+    } catch (error) {
+      if (currentBinding.current === binding) setSolutionError(safeError(error).message)
+      workspace.report(error)
+    } finally { revealingRef.current = false; if (currentBinding.current === binding) setRevealing('') }
+  }
   const firstUncertainty = decision?.uncertainties?.[0]
   const controlledServiceMessage = firstUncertainty && controlledServiceUncertaintyMessages.has(firstUncertainty) ? firstUncertainty : undefined
   const uncertain = studentResultUncertain(row)
@@ -86,10 +109,10 @@ export function QuestionCard({ row, index, open, onToggle, subjects = [], onSele
   if (usable && decision?.answer_checks?.length) {
     for (const part of decision.answer_checks) {
       fields.push({ label: `逐空反馈 · 第${part.index}${row.question.blank_count ? '空' : '项'}`, text: part.prompt }, { label: '作答', text: part.student_answer || (part.verdict === 'unanswered' ? '未作答' : '暂未读到清楚的作答') })
-      if (part.verdict === 'incorrect' && part.correct_answer) fields.push({ label: '应填', text: part.correct_answer })
+      if (solutionVisible && part.verdict === 'incorrect' && part.correct_answer) fields.push({ label: '应填', text: part.correct_answer })
     }
   } else fields.push({ label: serviceIncomplete ? 'AI 识读草稿' : '我的作答', text: displayedAnswer })
-  if (state === 'incorrect') fields.push({ label: '正确答案', text: decision?.correct_answer || displayedCorrect })
+  if (solutionVisible && decision.correct_answer) fields.push({ label: '正确答案', text: decision.correct_answer })
   const hasMathView = open && fields.some(field => mathPresentation(field.text) !== null)
   const copyFields = [...fields]
   if (usable && decision?.answer_checks?.length && typeof row.attempt.answer_text === 'string') {
@@ -128,14 +151,15 @@ export function QuestionCard({ row, index, open, onToggle, subjects = [], onSele
         {decision.answer_checks.map(part => <div key={part.index} className={`recognition-answer ${slotFeedback[part.verdict].tone}`}>
           <span className="recognition-label">第{part.index}{row.question.blank_count ? '空' : '项'} · <MathText text={part.prompt} original={originalMath} /></span>
           <p><MathText text={part.student_answer || (part.verdict === 'unanswered' ? '未作答' : '暂未读到清楚的作答')} original={originalMath} /> <span className="slot-verdict">{slotFeedback[part.verdict].label}</span></p>
-          {part.verdict === 'incorrect' && part.correct_answer && <p className="slot-correction">应填：<MathText text={part.correct_answer} original={originalMath} /></p>}
+          {solutionVisible && part.verdict === 'incorrect' && part.correct_answer && <p className="slot-correction">应填：<MathText text={part.correct_answer} original={originalMath} /></p>}
         </div>)}
       </div> : <div className={`recognition-answer ${state}`}>
         <span className="recognition-label">{serviceIncomplete ? 'AI 识读草稿' : '我的作答'}</span>
         <p><MathText text={displayedAnswer} original={originalMath} /></p>
         {serviceIncomplete && <small>这段文字尚未完成核对，可能与照片不同，请以原图为准。</small>}
       </div>}
-      {state === 'incorrect' && <div className="recognition-correct-answer">
+      {hasSolution && !solutionVisible && <div className="recognition-solution-action"><button className="button secondary" type="button" disabled={!workspace || !!workspace.busy || revealing === solutionBinding} onClick={() => void revealSolution()}>{revealing === solutionBinding ? <LoaderCircle className="spin" size={16} /> : <Lightbulb size={16} />}{revealing === solutionBinding ? '正在打开答案' : '查看答案与解法'}</button><small>需要时再打开，学伴会记下这次帮助。</small>{solutionError && <p className="inline-error" role="alert">{solutionError} 答案尚未打开，可以重试。</p>}</div>}
+      {solutionVisible && decision.correct_answer && <div className="recognition-correct-answer">
         <span className="recognition-label">正确答案</span>
         <p><MathText text={originalMath ? decision?.correct_answer || displayedCorrect : displayedCorrect} original={originalMath} /></p>
       </div>}
@@ -148,7 +172,7 @@ export function QuestionCard({ row, index, open, onToggle, subjects = [], onSele
           </select><small>仅显示当前年级已配置且官方目录匹配的最新版教材。</small></div>
         </div>}
         <div className="recognition-learning-row"><span>知识点</span><div className="knowledge-tags">{points.length ? points.map(point => <span key={point}>{point}</span>) : <em>暂未识别</em>}</div></div>
-        {method && usable && decision && ['incorrect', 'partially_correct', 'unanswered'].includes(decision.verdict) && <div className="recognition-learning-row correction-method"><span><Lightbulb size={15} />改正方法</span><p>{method}</p></div>}
+        {solutionVisible && method && <div className="recognition-learning-row correction-method"><span><Lightbulb size={15} />改正方法</span><p>{method}</p></div>}
       </div>}
       {!compactService && uncertainties.length > 0 && <p className="recognition-uncertainty">{state === 'uncertain' ? casePresentation(row).note : state === 'processing' ? '正在检查这道题的作答，可以先继续其他题。' : controlledServiceMessage ?? '* AI 对这道题的识别或判断存在不确定，请结合原图核对。'}</p>}
       {workspace && onCorrection && <QuestionDetail row={row} workspace={workspace} embedded onCorrection={() => onCorrection(true)} onUpload={() => onCorrection(false)} onContinue={onContinue} />}

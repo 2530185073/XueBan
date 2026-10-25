@@ -13,7 +13,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .auth import Actor
-from .correction_models import Entity
+from .correction_models import Entity, CorrectionEvent as Event
+from .correction_history import prior_attempts
 from .learning_models import LearningOutbox, PracticeAssessment, PracticeResponse, PracticeSession, VariantGeneration
 from .models import Homework
 
@@ -95,8 +96,12 @@ def notebook_document(session, student):
     homeworks = {row.id: row for row in session.scalars(homework_query)}
     entities = [row for row in session.scalars(select(Entity).where(
         Entity.homework_id.in_(homework_query.with_only_columns(Homework.id)),
-        Entity.kind.in_(("case", "question", "attempt")))) if row.homework_id in homeworks]
+        Entity.kind.in_(("case", "question", "attempt", "decision")))) if row.homework_id in homeworks]
     by_id = {(row.homework_id, row.kind, row.id): row for row in entities}
+    attempts = {row.id: row.document for row in entities if row.kind == "attempt"}
+    decisions = [row.document for row in entities if row.kind == "decision"]
+    stale_reasons = {row.id: row.payload.get("reason") for row in session.scalars(select(Event).where(
+        Event.homework_id.in_(homeworks), Event.kind == "evidence.invalidated"))}
     cases = []
     for case in entities:
         if case.kind != "case" or case.document.get("lifecycle", "active") != "active":
@@ -104,10 +109,24 @@ def notebook_document(session, student):
         decision = case.document.get("current_decision") or {}
         # Match the student's visible wrong verdict, including starred model
         # judgments. Collecting practice is not promoting mastery evidence.
+        attempt = by_id.get((case.homework_id, "attempt", case.document.get("current_attempt_id")))
+        original_status = None
         if (decision.get("verdict") not in {"incorrect", "partially_correct"}
                 or decision.get("validity") not in {"candidate", "confirmed"}):
-            continue
-        attempt = by_id.get((case.homework_id, "attempt", case.document.get("current_attempt_id")))
+            # A submitted correction clears the current judgment. Keep its
+            # original wrong card until staff confirms the new answer; this
+            # must not alter the independent variant-practice progress.
+            if decision.get("origin") == "staff" and decision.get("validity") == "confirmed" and decision.get("verdict") == "correct":
+                continue
+            history = prior_attempts({**case.document, "id": case.id}, attempts, decisions, stale_reasons)
+            previous = next((prior for prior, judgment in history if judgment
+                             and judgment.get("verdict") in {"incorrect", "partially_correct"}
+                             and prior.get("answer_status") != "blank"), None)
+            if previous is None:
+                continue
+            attempt = by_id.get((case.homework_id, "attempt", previous["id"]))
+            original_status = ("awaiting_review" if decision.get("verdict") == "correct"
+                               and decision.get("origin") == "model" else "rechecking")
         # Blank answers are explicitly unanswered; unknown/missing answer text
         # must not erase a real saved incorrect/partial decision.
         if attempt and attempt.document.get("answer_status") == "blank":
@@ -116,7 +135,7 @@ def notebook_document(session, student):
         if not isinstance(question_id, str):
             continue
         question = by_id.get((case.homework_id, "question", question_id))
-        cases.append((case, question, _occurred_at(attempt, homeworks[case.homework_id])))
+        cases.append((case, question, _occurred_at(attempt, homeworks[case.homework_id]), original_status))
     if not cases:
         return {"student_id": student.id, "items": []}
 
@@ -154,7 +173,7 @@ def notebook_document(session, student):
             PracticeAssessment.session_id.in_(session_query.with_only_columns(PracticeSession.id))))))}
 
     items = []
-    for case, question, occurred_at in sorted(cases, key=lambda entry: (entry[2], entry[0].id), reverse=True):
+    for case, question, occurred_at, original_status in sorted(cases, key=lambda entry: (entry[2], entry[0].id), reverse=True):
         generation = generations.get(case.id)
         history = by_case[case.id]
         practiced = any(responses[row.id] or assessments[row.id] for row in history)
@@ -192,6 +211,7 @@ def notebook_document(session, student):
             "generation_id": generation.id if generation else None,
             "generation_status": _generation_status(generation, generation_jobs),
             "session_id": activity.id if activity else None,
+            **({"original_status": original_status} if original_status else {}),
         })
     return {"student_id": student.id, "items": items}
 

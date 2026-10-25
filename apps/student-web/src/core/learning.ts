@@ -123,6 +123,7 @@ export interface VariantGeneration {
 }
 export interface VariantGenerationList { student_id: string; items: VariantGeneration[] }
 export interface VariantNotebookQuestion {
+  original_status?: 'rechecking' | 'awaiting_review'
   case_id: string; question_id: string; question_text: string | null; homework_title: string | null
   occurred_at: string; status: VariantNotebookStatus; practiced: boolean
   generation_id: string | null; session_id: string | null
@@ -248,6 +249,7 @@ export const isVariantNotebookQuestion = shape<VariantNotebookQuestion>({
   case_id: id, question_id: id, question_text: nullable(text), homework_title: nullable(text), occurred_at: date,
   status: oneOf(variantNotebookStatuses), practiced: v => typeof v === 'boolean', generation_id: nullable(id), session_id: nullable(id),
   generation_status: optional(nullable(oneOf(variantGenerationStatuses))),
+  original_status: optional(oneOf(['rechecking', 'awaiting_review'] as const)),
 })
 export const isVariantNotebook = shape<VariantNotebook>({ student_id: id, items: list(isVariantNotebookQuestion, Number.MAX_SAFE_INTEGER) })
 // Drafts allow partially completed answers, including empty text/options/fields.

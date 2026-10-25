@@ -73,6 +73,19 @@ beforeEach(() => { vi.useFakeTimers(); vi.mocked(normalizePhoto).mockResolvedVal
 afterEach(() => { solutions.splice(0).forEach(solution => solution.dispose()); controllers.splice(0).forEach(controller => controller.dispose()); vi.useRealTimers(); vi.clearAllMocks() })
 
 describe('notebook generation and persistence', () => {
+  it.each(['rechecking', 'awaiting_review'] as const)('shows original %s separately and keeps an existing practice accessible', original_status => {
+    const value = row({ original_status, session_id: 'session_one', generation_id: 'generation_one', status: 'correct', practiced: true })
+    const html = renderToStaticMarkup(<NotebookCard item={value} onOpen={() => {}} />)
+    expect(html).toContain(original_status === 'rechecking' ? '原题正在重新检查' : '原题待老师核实')
+    expect(html).toContain('已有练习记录会保留')
+    expect(html).not.toContain('disabled=')
+    expect(html).toContain('已做对')
+  })
+  it('waits for the original review before offering a new practice', () => {
+    const html = renderToStaticMarkup(<NotebookCard item={row({ original_status: 'awaiting_review' })} onOpen={() => {}} />)
+    expect(html).toContain('disabled=')
+    expect(html).toContain('原题待老师核实')
+  })
   it('shows generation immediately after regenerate and exit, through polling, then stops on completion', async () => {
     const { controller, client } = await openSession(), pending = deferred<VariantGeneration>()
     client.generateVariant.mockReturnValueOnce(pending.promise)

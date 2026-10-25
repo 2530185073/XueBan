@@ -245,7 +245,7 @@ export interface ReportSnapshot {
   help: { requests: number; by_kind: Record<string, number>; resolved: number; hints_viewed: number; answers_shown: number; staff_help: { date: string; kind: string; question: string; outcome: string; note: string }[] }
   focus: FocusItem[]; steady: (EvidenceSources & { knowledge_id: string; name: string; correct: number; independent_correct: number })[]; unknown_current: { knowledge_id: string; name: string }[]
   sufficient: boolean; sections: { optional_activity?: { summary: string; answered?: number; correct?: number } }; limitations: string
-  mistakes?: DailyMistake[]; activity_kinds?: { preview: number; variant: number }
+  mistakes?: DailyMistake[]; completions?: DailyMistake[]; activity_kinds?: { preview: number; variant: number }
 }
 export interface Report {
   id: string; student_id: string; cadence: ReportCadence; period_start: string; period_end: string; version: number; status: ReportStatus; snapshot: ReportSnapshot | null
@@ -282,6 +282,7 @@ export function isReportSnapshot(value: unknown): value is ReportSnapshot {
     list(value.unknown_current, item => record(item) && id(item.knowledge_id) && text(item.name, 200), 50) && typeof value.sufficient === 'boolean' &&
     (sections.optional_activity === undefined || (record(sections.optional_activity) && text(sections.optional_activity.summary, 500))) && text(value.limitations, 2000) &&
     (value.mistakes === undefined || list(value.mistakes, isMistake, 30)) &&
+    (value.completions === undefined || list(value.completions, isMistake, 30)) &&
     (value.activity_kinds === undefined || (record(value.activity_kinds) && count(value.activity_kinds.preview) && count(value.activity_kinds.variant)))
 }
 function isReportBase(value: unknown): value is Report {

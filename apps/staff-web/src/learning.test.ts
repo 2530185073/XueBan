@@ -258,12 +258,30 @@ describe('写入前的本地规则', () => {
     expect(primaryConflict(links, 'kp-new', 'primary', 'kp-rational-add-sub')).toBeNull()
     expect(primaryConflict([link({ status: 'rejected' })], 'kp-new', 'primary')).toBeNull()
   })
-  it('看过提示的作答不能标为独立', () => {
+  it('作答后的提示与答案不倒记为原答的帮助', () => {
     const attempt = sampleWorkspace.attempts[0]
-    expect(helpSeen(attempt, [])).toBe(true)
-    const clean = { ...attempt, record: { ...attempt.record, help_condition: 'none_reported' as const } }
-    expect(helpSeen(clean, [])).toBe(false)
-    expect(helpSeen(clean, sampleWorkspace.hints)).toBe(true)
+    const later = { ...sampleWorkspace.hints[0], first_shown_at: new Date(Date.parse(attempt.record.occurred_at) + 1000).toISOString() }
+    for (const help_condition of ['none_reported', 'hint_used', 'answer_shown'] as const) {
+      const original = { ...attempt, record: { ...attempt.record, help_condition } }
+      expect(helpSeen(original, [])).toBe(false)
+      expect(helpSeen(original, [later])).toBe(false)
+    }
+  })
+  it('同题作答前或同时展示的帮助仍禁止独立，不依赖帮助绑定在哪次作答', () => {
+    const attempt = sampleWorkspace.attempts[0]
+    for (const offset of [-1000, 0]) {
+      const earlier = { ...sampleWorkspace.hints[0], attempt_id: 'attempt_other', first_shown_at: new Date(Date.parse(attempt.record.occurred_at) + offset).toISOString() }
+      expect(helpSeen(attempt, [earlier])).toBe(true)
+      expect(helpSeen(attempt, [{ ...earlier, exposes_answer: true }])).toBe(true)
+      expect(helpSeen(attempt, [{ ...earlier, case_id: 'case_other' }])).toBe(false)
+      expect(helpSeen(attempt, [{ ...earlier, first_shown_at: null }])).toBe(false)
+    }
+  })
+  it('订正即使无帮助记录也始终不能标为独立', () => {
+    const attempt = sampleWorkspace.attempts[0]
+    const correction = { ...attempt, record: { ...attempt.record, parent_attempt_id: 'attempt_parent', help_condition: 'none_reported' as const } }
+    expect(helpSeen(correction, [])).toBe(true)
+    expect(helpSeen(correction, sampleWorkspace.hints)).toBe(true)
   })
   it('记忆：学科困难必须引用有效证据，内容不超过 120 字', () => {
     const valid = new Set(['evidence_1'])

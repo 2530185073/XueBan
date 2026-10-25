@@ -540,10 +540,29 @@ class CorrectionWorker:
                 return canonical_label(value or "")
             original_label = (question.annotations or {}).get("label")
             active_questions = [row for row in session.scalars(select(Entity).where(Entity.homework_id == homework.id, Entity.kind == "question")) if row.document["lifecycle"] == "active"]
+            original_policy = bool(getattr(self.pipeline, "uses_original_decision_policy", False))
+            roots = {}
+            if original_policy:
+                for row in session.scalars(select(Entity).where(
+                        Entity.homework_id == homework.id, Entity.kind == "attempt")):
+                    if row.document.get("root_attempt_id") == row.id:
+                        roots.setdefault(row.document.get("question_id"), []).append(row)
             def question_item(row):
-                return {"stem_text": row.document["stem_text"], "label": (row.annotations or {}).get("label") or "",
+                value = {"stem_text": row.document["stem_text"], "label": (row.annotations or {}).get("label") or "",
                         "question_type": row.document.get("question_type", "unknown"),
                         "options": row.document.get("options", [])}
+                # Only the version-bound original observation may explain a
+                # historical appended response label. A later correction or
+                # stale slot annotation cannot erase part of a revised stem.
+                originals = roots.get(row.id, [])
+                if len(originals) == 1:
+                    original = originals[0]
+                    annotations = original.annotations or {}
+                    if (original.document.get("captured_question_revision") == row.revision
+                            and annotations.get("slots_question_revision") == row.revision
+                            and annotations.get("slots_recognition_revision") == original.document.get("recognition_revision")):
+                        value["answer_slots"] = annotations.get("answer_slots", [])
+                return value
             # A whole-page correction can contain unrelated questions. Bind only a
             # unique full-stem match; shared stems additionally need the original
             # subquestion label. Neither array position nor a label alone is proof.
@@ -552,7 +571,9 @@ class CorrectionWorker:
                 if not question_units.compatible_saved_target(
                         question.document, question.annotations, item, normalized_label):
                     continue
-                if isinstance(item.get("assessment"), dict):
+                if original_policy:
+                    normalize = question_units.correction_target_key
+                elif isinstance(item.get("assessment"), dict):
                     # Multimodel readers can include the printed item label in
                     # the stem. Strip only that label's decoration, then require
                     # complete equality; substring overlap is not target proof.
