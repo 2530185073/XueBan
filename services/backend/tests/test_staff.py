@@ -13,7 +13,7 @@ from test_correction_flow import flow  # noqa: F401  (pytest fixture reuse)
 
 ADMIN_PASSWORD = "synthetic-admin-password-1"
 STAFF_PASSWORD = "synthetic-teacher-password-1"
-CHANGED_PASSWORD = "teacher123"
+CHANGED_PASSWORD = STAFF_PASSWORD + "-new"
 
 
 def keyed(value):
