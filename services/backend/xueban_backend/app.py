@@ -354,6 +354,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from .account_auth import install_account_auth
     install_account_auth(app, engine, cfg)
     install_correction(app, engine, cfg, database_session, current_actor)
+    from .solution_views import install_solution_views
+    install_solution_views(app, cfg, database_session, current_actor)
     from .governance import install_governance
     install_governance(app, engine, cfg, database_session, current_actor)
     from .staff import install_staff

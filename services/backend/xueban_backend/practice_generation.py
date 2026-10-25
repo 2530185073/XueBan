@@ -51,7 +51,7 @@ GENERATE_PROMPT = """为小学或初中学生生成恰好一道与 source_questi
 不得原样重复原题、previous_questions_to_avoid 或 rejected_questions，不得包含学生信息。此前生成过的数学练习也允许更换数字，但不能完全重复。
 题干条件完整，选项独立列出并与新题匹配。仅调换选项顺序不算新题。
 选择题支持单选/多选，answer_values 写完整正确选项集合；填空每空用独立稳定id，field_answers逐空给答案；
-解答题 answer_kind=text，写完整参考解答及合理等价形式。非填空的answer_fields/field_answers为空。
+解答题写完整参考解答及合理等价形式；纯数值终答可用answer_kind=number，其他终答用text，两者都必须在solution_text写完整必要步骤。非填空的answer_fields/field_answers为空。
 填空时answer_values为空；其他题至少一个answer_values。solution_text用同年级教材的方法，逐步写出简短、完整的必要步骤和正确答案，不能只给终答。
 题干不泄露答案；hint_text只给方向。答案和步骤单独放在答案字段及solution_text，供学生展开查看。
 遵守requested_question_type/question_kind；只返回schema字段。不需要图片、外部材料或无法展示的图形。"""
@@ -352,6 +352,27 @@ def _near_copy_stem(stem, previous, *, allow_numeric_changes=False):
                for part in [prose(previous), *(prose(line) for line in previous.splitlines())])
 
 
+def _valid_solution_answer(answer):
+    """Accept typed numerical conclusions without treating them as full work.
+
+    Both representations still require the blind solve and full-step review.
+    A number field must contain literal rational values, not an expression,
+    units, separated digits or an unparseable/nonfinite placeholder.
+    """
+    from .practice import _number
+
+    values = answer["answer_values"]
+    if not values or not all(value.strip() for value in values):
+        return False
+    if answer["answer_kind"] == "text":
+        return True
+    if answer["answer_kind"] != "number":
+        return False
+    decimal = r"[+\-−]?(?:\d+(?:\.\d+)?|\.\d+)"
+    return all(re.fullmatch(rf"\s*{decimal}(?:\s*/\s*{decimal})?\s*", value)
+               and _number(value) is not None for value in values)
+
+
 def _valid_candidate(candidate, snapshot, *, source_subject=None):
     from .practice import _normalize
     allow_numeric_changes = _math_source(snapshot, source_subject)
@@ -382,7 +403,7 @@ def _valid_candidate(candidate, snapshot, *, source_subject=None):
         expected_count = snapshot["source_question"].get("blank_count")
         return (bool(fields) and set(fields) == set(supplied_fields) and not candidate["answer_values"]
                 and (not expected_count or len(fields) == expected_count))
-    return (bool(candidate["answer_values"]) and candidate["answer_kind"] == "text" and not fields and not supplied_fields
+    return (_valid_solution_answer(candidate) and not fields and not supplied_fields
             and bool(candidate["solution_text"].strip()))
 
 
@@ -411,7 +432,7 @@ def _valid_reference(candidate, verified):
         fields = [f["field_id"] for f in verified["field_answers"]]
         return (not verified["answer_values"] and len(fields) == len(set(fields))
                 and set(fields) == {f["id"] for f in candidate["answer_fields"]})
-    return (verified["answer_kind"] in ("number", "text") and bool(verified["answer_values"])
+    return (_valid_solution_answer(verified)
             and not verified["field_answers"] and bool(verified["solution_text"].strip()))
 
 

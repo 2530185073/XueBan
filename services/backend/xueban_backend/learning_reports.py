@@ -28,11 +28,12 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from .auth import Actor
-from .correction_models import Entity
+from .correction_models import Entity, CorrectionEvent as Event
+from .correction_history import prior_attempts
 from .device_auth import utc
 from .errors import Problem
 from .governance import register_downstream_purger
-from .learning_models import (KnowledgeDiagnosis, KnowledgeNode, LearningEvidence, LearningProjection, LearningReport,
+from .learning_models import (AttemptCondition, KnowledgeDiagnosis, KnowledgeNode, LearningEvidence, LearningProjection, LearningReport,
                               PracticeSession, ReportShareLink, StudentLearningProfile)
 from .learning_projection import (fingerprints, new_id, published_graph, register_periodic, register_projection_followup)
 from .learning_rules import compute_state, model_decision_usable
@@ -40,8 +41,8 @@ from .models import Homework, Student
 from .learning_coverage import mapping_coverage
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
-REPORT_RULE = "report-r2-evidence-source"
-DAILY_RULE = "daily-r2-evidence-source"
+REPORT_RULE = "report-r3-submission-history"
+DAILY_RULE = "daily-r3-submission-history"
 REFRESH_PERIODS = {"half_month": 12, "daily": 14}
 LINK_DAYS_DEFAULT, LINK_DAYS_MAX = 30, 90
 REPORT_SECTIONS = []
@@ -58,6 +59,15 @@ SOURCE_LABEL = {"model": "AI 初判，尚未经老师核实", "sitting_teacher":
 CORRECTION_LABEL = {"verified_resolved": "已订正，老师确认通过", "rechecking": "订正已提交，正在检查",
                     "needs_correction": "还没订正", "editing": "正在订正", "paused": "订正暂停，下次继续", "pending": "待安排订正"}
 OPEN_CORRECTION = ("needs_correction", "editing", "rechecking", "paused")
+WRONG_VERDICTS = {"incorrect", "partially_correct"}
+
+
+def _case_history(case, entities, stale_reasons):
+    history = prior_attempts(case, {key: value[1] for key, value in entities["attempt"].items()},
+                             [value[1] for value in entities["decision"].values()], stale_reasons)
+    was_wrong = any(d and d.get("verdict") in WRONG_VERDICTS for _, d in history)
+    was_blank = any(d and d.get("verdict") == "unanswered" for _, d in history)
+    return was_wrong, was_blank
 
 
 def _ai_correction_pending(case, decision) -> bool:
@@ -138,15 +148,18 @@ def build_snapshot(session, student: Student, start: date, end: date, cadence: s
     entities = defaultdict(dict)
     if homeworks:
         for entity in session.scalars(select(Entity).where(Entity.homework_id.in_([h.id for h in homeworks]),
-                                                           Entity.kind.in_(("case", "question", "decision", "help", "hint")))):
+                                                           Entity.kind.in_(("case", "question", "attempt", "decision", "help", "hint")))):
             key = entity.document.get("question_id") if entity.kind == "question" else entity.id
             entities[entity.kind][key] = (entity.homework_id, entity.document)
+    stale_reasons = {row.id: row.payload.get("reason") for row in session.scalars(select(Event).where(
+        Event.homework_id.in_([h.id for h in homeworks]), Event.kind == "evidence.invalidated"))}
     tasks = Counter()
     for homework_id, case in entities["case"].values():
         if homework_id not in period_homeworks or case.get("lifecycle", "active") != "active":
             continue
         tasks["questions"] += 1
         decision = case.get("current_decision") or {}
+        was_wrong, _ = _case_history(case, entities, stale_reasons)
         if decision.get("origin") == "staff" and decision.get("validity") == "confirmed":
             tasks["staff_verified"] += 1
             tasks[f"verdict_{decision['verdict']}"] += 1
@@ -158,11 +171,14 @@ def build_snapshot(session, student: Student, start: date, end: date, cadence: s
                     and decision.get("verdict") in VERDICT_LABEL and model_decision_usable(decision)):
                 tasks["ai_judged"] += 1
                 tasks[f"ai_verdict_{decision['verdict']}"] += 1
-        if case.get("progress") == "verified_resolved":
+        if (was_wrong and case.get("progress") == "verified_resolved"
+                and decision.get("origin") == "staff" and decision.get("validity") == "confirmed"
+                and decision.get("verdict") == "correct"):
             tasks["corrected_resolved"] += 1
-        elif _ai_correction_pending(case, decision):
+        elif was_wrong and _ai_correction_pending(case, decision):
             tasks["ai_corrected_pending"] += 1
-        elif case.get("progress") in ("needs_correction", "editing", "rechecking", "paused"):
+        elif (case.get("progress") in OPEN_CORRECTION
+              and (was_wrong or decision.get("verdict") in WRONG_VERDICTS)):
             tasks["correction_open"] += 1
     help_rows = [(hw, doc) for hw, doc in entities["help"].values() if inside(_parse(doc["created_at"]))]
     staff_help = []
@@ -174,6 +190,19 @@ def build_snapshot(session, student: Student, start: date, end: date, cadence: s
                                "question": (question.get("stem_text") or "")[:80], "outcome": doc["status"],
                                "note": doc["resolution_note"][:300]})
     hints = [doc for _, doc in entities["hint"].values() if doc.get("first_shown_at") and inside(_parse(doc["first_shown_at"]))]
+    # A full answer can be displayed outside the hint UI. Count a submission
+    # once even when both its hint and its confirmed condition record it.
+    answer_views = {doc.get("attempt_id") or ("hint", doc["id"]) for doc in hints if doc.get("exposes_answer")}
+    conditions = {}
+    for row in session.scalars(select(AttemptCondition).where(
+            AttemptCondition.tenant_id == student.tenant_id, AttemptCondition.student_id == student.id)
+            .order_by(AttemptCondition.created_at, AttemptCondition.id)):
+        if utc(row.created_at) < window_end:
+            conditions[row.attempt_id] = row
+    for attempt_id, condition in conditions.items():
+        if (attempt_id in entities["attempt"] and condition.assistance_level == "solution_seen"
+                and inside(utc(condition.created_at))):
+            answer_views.add(attempt_id)
     graph = published_graph(session, student.id)
     names = {n.id: n for n in session.scalars(select(KnowledgeNode).where(KnowledgeNode.graph_version == graph.version))} if graph else {}
     valid = defaultdict(list)
@@ -252,7 +281,7 @@ def build_snapshot(session, student: Student, start: date, end: date, cadence: s
                          "ai_corrected_pending": tasks["ai_corrected_pending"], "correction_open": tasks["correction_open"]},
         "help": {"requests": len(help_rows), "by_kind": dict(sorted(Counter(d["kind"] for _, d in help_rows).items())),
                  "resolved": sum(1 for _, d in help_rows if d["status"] == "resolved"),
-                 "hints_viewed": len(hints), "answers_shown": sum(1 for d in hints if d.get("exposes_answer")),
+                 "hints_viewed": len(hints), "answers_shown": len(answer_views),
                  "staff_help": staff_help[:10]},
         "focus": focus, "steady": steady, "unknown_current": unknown,
         "sufficient": bool(focus or steady), "evidence_ids": sorted(evidence_ids), "sections": sections,
@@ -260,15 +289,15 @@ def build_snapshot(session, student: Student, start: date, end: date, cadence: s
     if cadence == "half_month":
         snapshot["mapping_coverage"] = mapping_coverage(session, student, start=window_start, end=window_end, include_states=False)
     if cadence == "daily":
-        snapshot.update(daily_facts(session, student, entities, period_homeworks, window_start, window_end))
+        snapshot.update(daily_facts(session, student, entities, period_homeworks, window_start, window_end, stale_reasons))
         snapshot["rule_version"], snapshot["limitations"], snapshot["unknown_current"] = DAILY_RULE, DAILY_LIMITATIONS, []
         snapshot["coverage"]["partial_period"] = False
     return snapshot
 
 
-def daily_facts(session, student, entities, period_homeworks, window_start, window_end) -> dict:
+def daily_facts(session, student, entities, period_homeworks, window_start, window_end, stale_reasons) -> dict:
     """What a guardian asks at pickup: which questions went wrong today and whether they are fixed."""
-    mistakes = []
+    mistakes, completions = [], []
     for homework_id, case in entities["case"].values():
         if homework_id not in period_homeworks or case.get("lifecycle", "active") != "active":
             continue
@@ -277,26 +306,34 @@ def daily_facts(session, student, entities, period_homeworks, window_start, wind
         ai_judged = (decision.get("origin") == "model" and decision.get("validity") == "candidate"
                      and model_decision_usable(decision))
         progress = case.get("progress") or "pending"
-        wrong = (confirmed or ai_judged) and decision.get("verdict") in ("incorrect", "partially_correct", "unanswered")
-        corrected = progress == "verified_resolved" and case.get("current_attempt_id") != case.get("root_attempt_id")
-        ai_corrected = _ai_correction_pending(case, decision)
-        if not (wrong or corrected or ai_corrected or progress in OPEN_CORRECTION):
+        was_wrong, was_blank = _case_history(case, entities, stale_reasons)
+        wrong = (confirmed or ai_judged) and decision.get("verdict") in WRONG_VERDICTS
+        blank = (confirmed or ai_judged) and decision.get("verdict") == "unanswered"
+        corrected = was_wrong and progress == "verified_resolved" and confirmed and decision.get("verdict") == "correct"
+        ai_corrected = was_wrong and _ai_correction_pending(case, decision)
+        completion = (blank or was_blank) and not was_wrong and not wrong
+        if not (wrong or corrected or ai_corrected or completion or (was_wrong and progress in OPEN_CORRECTION)):
             continue
         homework = period_homeworks[homework_id]
         question = entities["question"].get(case.get("question_id"), (None, {}))[1]
         pages = [r.get("page_index") for r in question.get("regions", []) if isinstance(r, dict) and r.get("page_index") is not None]
-        mistakes.append({"case_id": case.get("id"), "homework_title": homework.title, "page": (pages[0] + 1) if pages else None,
+        correction = ("已提交订正，AI 初判正确（待老师核实）" if ai_corrected else CORRECTION_LABEL.get(progress, progress))
+        if completion:
+            correction = ("已补做，老师确认通过" if confirmed and decision.get("verdict") == "correct"
+                          else "已补做，AI 初判正确（待老师核实）" if _ai_correction_pending(case, decision)
+                          else "尚未作答，待完成" if blank else "补做已提交，正在检查或待核实")
+        (completions if completion else mistakes).append({"case_id": case.get("id"), "homework_title": homework.title, "page": (pages[0] + 1) if pages else None,
                          "question": (question.get("stem_text") or "")[:120],
-                         "verdict": VERDICT_LABEL.get(decision.get("verdict")) if wrong or ai_corrected else None, "progress": progress,
+                         "verdict": VERDICT_LABEL.get(decision.get("verdict")) if wrong or ai_corrected or blank else None, "progress": progress,
                          "source_role": "sitting_teacher" if confirmed else "model" if ai_judged else None,
                          "certainty": SOURCE_LABEL["sitting_teacher" if confirmed else "model"] if confirmed or ai_judged else "暂不能判断",
-                         "correction": ("已提交订正，AI 初判正确（待老师核实）" if ai_corrected
-                                        else CORRECTION_LABEL.get(progress, progress)),
+                         "correction": correction,
                          "_order": (utc(homework.occurred_at).isoformat(), homework_id, pages[0] if pages else 0, case.get("id") or "")})
     mistakes.sort(key=lambda m: m.pop("_order"))
+    completions.sort(key=lambda m: m.pop("_order"))
     sessions = [r for r in session.scalars(select(PracticeSession).where(PracticeSession.student_id == student.id))
                 if window_start <= utc(r.started_at) < window_end]
-    return {"cadence": "daily", "mistakes": mistakes[:30],
+    return {"cadence": "daily", "mistakes": mistakes[:30], "completions": completions[:30],
             "activity_kinds": {"preview": sum(1 for r in sessions if r.purpose == "preview"),
                                "variant": sum(1 for r in sessions if r.purpose == "variant")}}
 
@@ -728,7 +765,8 @@ def render_report(body):
     parts.append(f"<section><h2>学校任务概况</h2>{partial}<dl><dt>有记录的到班日</dt><dd>{e(coverage['observed_days'])} 天</dd>"
                  f"<dt>拍照作业</dt><dd>{e(coverage['homeworks'])} 份，共 {e(tasks['questions'])} 道题</dd>"
                  f"<dt>老师已核实</dt><dd>{e(tasks['staff_verified'])} / {e(tasks['questions'])} 道</dd>"
-                 f"<dt>其中答对</dt><dd>{e(tasks['verdicts']['correct'])} 道；答错 {e(tasks['verdicts']['incorrect'])} 道；部分正确 {e(tasks['verdicts']['partially_correct'])} 道</dd>"
+                 f"<dt>其中答对</dt><dd>{e(tasks['verdicts']['correct'])} 道；答错 {e(tasks['verdicts']['incorrect'])} 道；部分正确 {e(tasks['verdicts']['partially_correct'])} 道；"
+                 f"未作答、待完成 {e(tasks['verdicts'].get('unanswered', 0))} 道</dd>"
                  + _render_judgment_summary(tasks) +
                  f"<dt>订正完成</dt><dd>老师确认 {e(tasks['corrected_resolved'])} 道；"
                  f"AI 初判订正正确 {e(tasks.get('ai_corrected_pending', 0))} 道（尚未经老师核实）；仍在订正 {e(tasks['correction_open'])} 道</dd>"
@@ -761,10 +799,10 @@ def render_report(body):
         parts.append(f"<section><h2>本期做得好的</h2><ul>{rows}</ul></section>")
     if not snap["sufficient"]:
         parts.append("<section><h2>学科证据</h2><p>本期暂无足够的已核实作答来判断具体知识点情况。这不表示孩子有薄弱，也不需要为此加做测验。</p></section>")
-    if help_["staff_help"] or help_["requests"]:
+    if help_["staff_help"] or help_["requests"] or help_["hints_viewed"] or help_["answers_shown"]:
         rows = "".join(f"<li>{e(h['date'])}：{e(h['question'])} —— {e(h['note'])}</li>" for h in help_["staff_help"])
         parts.append(f"<section><h2>现场帮助</h2><p>本期求助 {e(help_['requests'])} 次，已解决 {e(help_['resolved'])} 次；"
-                     f"查看提示 {e(help_['hints_viewed'])} 次。</p><ul>{rows}</ul></section>")
+                     f"查看提示 {e(help_['hints_viewed'])} 次；查看答案或完整解法 {e(help_['answers_shown'])} 次（按作答去重）。</p><ul>{rows}</ul></section>")
     optional = snap["sections"].get("optional_activity")
     if optional is not None:
         parts.append(f"<section><h2>额外活动（自愿）</h2><p>{e(optional.get('summary'))}</p></section>")
@@ -806,7 +844,7 @@ def render_daily(body):
     if coverage["homeworks"]:
         parts.append(f"<section><h2 style='margin-top:0'>今天的作业</h2><dl><dt>拍照作业</dt><dd>{e(coverage['homeworks'])} 份，共 {e(tasks['questions'])} 道题</dd>"
                      f"<dt>老师已核实</dt><dd>{e(tasks['staff_verified'])} 道：答对 {e(tasks['verdicts']['correct'])}，答错 {e(tasks['verdicts']['incorrect'])}，"
-                     f"部分正确 {e(tasks['verdicts']['partially_correct'])}</dd>"
+                     f"部分正确 {e(tasks['verdicts']['partially_correct'])}，未作答、待完成 {e(tasks['verdicts'].get('unanswered', 0))}</dd>"
                      + _render_judgment_summary(tasks) +
                      f"<dt>订正</dt><dd>老师确认完成 {e(tasks['corrected_resolved'])} 道；"
                      f"AI 初判订正正确 {e(tasks.get('ai_corrected_pending', 0))} 道（尚未经老师核实）；还没完成 {e(tasks['correction_open'])} 道</dd>"
@@ -821,6 +859,12 @@ def render_daily(body):
                f"（{e(m.get('certainty', '老师已核实'))}）</dd>" if m["verdict"] else "")
             + f"<dt>订正</dt><dd>{e(m['correction'])}</dd></dl></div>" for m in snap["mistakes"])
         parts.append(f"<section><h2 style='margin-top:0'>今天错的题和订正情况</h2>{rows}</section>")
+    if snap.get("completions"):
+        rows = "".join(
+            f"<div class=card><dl><dt>题目</dt><dd>{e(item['question']) or '（题目文字未识别）'}</dd>"
+            f"<dt>出处</dt><dd>{e(item['homework_title'])}{(' · 第 ' + e(item['page']) + ' 页') if item['page'] else ''}</dd>"
+            f"<dt>完成情况</dt><dd>{e(item['correction'])}</dd></dl></div>" for item in snap["completions"])
+        parts.append(f"<section><h2 style='margin-top:0'>待完成与补做情况</h2>{rows}</section>")
     if snap["focus"]:
         rows = "".join(f"<li>{e(f['name'])}：今天 {e(f['denominator'])} 次有判定记录的作答中出错 {e(f['errors'])} 次"
                        f"（AI 初判 {e(f.get('model_evidence_count', 0))} 次，老师核实 {e(f.get('staff_verified_evidence_count', f['denominator']))} 次）"
@@ -832,9 +876,10 @@ def render_daily(body):
         rows = "；".join(f"{e(s['name'])}（AI 初判 {e(s.get('model_evidence_count', 0))} 次，"
                          f"老师核实 {e(s.get('staff_verified_evidence_count', s['correct']))} 次）" for s in snap["steady"])
         parts.append(f"<section><h2 style='margin-top:0'>今天做得好的</h2><p>{rows}</p></section>")
-    if help_["requests"] or help_["hints_viewed"]:
+    if help_["requests"] or help_["hints_viewed"] or help_["answers_shown"]:
         rows = "".join(f"<li>{e(h['question'])} —— {e(h['note'])}</li>" for h in help_["staff_help"])
-        parts.append(f"<section><h2 style='margin-top:0'>求助与提示</h2><p>向老师求助 {e(help_['requests'])} 次，查看提示 {e(help_['hints_viewed'])} 次。</p>"
+        parts.append(f"<section><h2 style='margin-top:0'>求助与提示</h2><p>向老师求助 {e(help_['requests'])} 次，查看提示 {e(help_['hints_viewed'])} 次；"
+                     f"查看答案或完整解法 {e(help_['answers_shown'])} 次（按作答去重）。</p>"
                      + (f"<ul>{rows}</ul>" if rows else "") + "</section>")
     kinds, optional = snap.get("activity_kinds") or {}, snap["sections"].get("optional_activity") or {}
     if kinds.get("preview") or kinds.get("variant"):

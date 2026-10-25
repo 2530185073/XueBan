@@ -46,6 +46,12 @@ export function SnapshotView({ snap }: { snap: ReportSnapshot }) {
         {!!tasks.ai_corrected_pending && <><dt>订正 AI 初判通过</dt><dd>{tasks.ai_corrected_pending} 道，尚未经老师核实</dd></>}
       </dl>
     </section>
+    {(snap.completions ?? []).length > 0 && <section className="report-block"><h4>待完成与补做</h4>
+      <p className="subtle">原来未作答的题单独记录，不计为答错或错题订正。</p>
+      <ul className="plain-list">{snap.completions!.map(item => <li key={item.case_id}>
+        {item.question || '（题目文字未识别）'}：{item.correction}
+      </li>)}</ul>
+    </section>}
     <MappingCoverageNote coverage={snap.mapping_coverage} snapshot />
     {snap.focus.length > 0 && <><h3 className="block-title">具体问题</h3>{snap.focus.map(item => <Focus key={item.knowledge_id} item={item} />)}</>}
     {snap.steady.length > 0 && <section className="report-block"><h4>本期做得好的</h4><ul className="plain-list">{snap.steady.map(item =>
@@ -53,7 +59,7 @@ export function SnapshotView({ snap }: { snap: ReportSnapshot }) {
     {!snap.sufficient && <section className="report-block"><h4>学科证据</h4><p>本期暂无足够的有效作答来判断具体知识点情况。这不表示孩子有薄弱，也不需要为此加做测验。</p></section>}
     {snap.unknown_current.length > 0 && <section className="report-block"><h4>还不知道的</h4><p>近期课程中的 {snap.unknown_current.map(item => item.name).join('、')} 本期没有足够作答记录，暂不判断。</p></section>}
     <section className="report-block"><h4>现场帮助</h4>
-      <p>本期求助 {help.requests} 次（{Object.entries(help.by_kind).map(([kind, n]) => `${helpKinds[kind] ?? kind} ${n}`).join('、') || '无'}），帮助已结束 {help.resolved} 次；查看提示 {help.hints_viewed} 次，其中含答案 {help.answers_shown} 次。</p>
+      <p>本期求助 {help.requests} 次（{Object.entries(help.by_kind).map(([kind, n]) => `${helpKinds[kind] ?? kind} ${n}`).join('、') || '无'}），帮助已结束 {help.resolved} 次；查看提示 {help.hints_viewed} 次，查看答案或解法 {help.answers_shown} 道。</p>
       {help.staff_help.length > 0 && <ul className="plain-list">{help.staff_help.map((item, i) => <li key={i}>{item.date} · {item.question || '（题干待识别）'} —— {item.note}{item.outcome === 'unresolved' ? '（仍需帮助）' : ''}</li>)}</ul>}
     </section>
     {optional && <section className="report-block"><h4>额外活动（自愿）</h4><p>{optional.summary}</p></section>}

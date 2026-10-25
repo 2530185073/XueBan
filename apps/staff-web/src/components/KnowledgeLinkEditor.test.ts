@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { withLinkVersions } from './KnowledgeLinkEditor'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { KnowledgeReviewNotice, withLinkVersions } from './KnowledgeLinkEditor'
 import { isKnowledgeLinkList, type LinkDecision } from '../api/learningTypes'
 import { LearningApi } from '../api/learning'
 import type { StaffApi } from '../api/client'
@@ -24,5 +26,20 @@ describe('knowledge link snapshot binding', () => {
     expect(call).not.toHaveBeenCalled()
     api.decideLink('question_1', withLinkVersions(snapshot, choice))
     expect(call.mock.calls[0][2].payload).toEqual(withLinkVersions(snapshot, choice))
+  })
+})
+
+describe('review handoff to knowledge confirmation', () => {
+  const link = { id: 'link_1', question_id: 'question_1', knowledge_id: 'kp-1', knowledge_name: '有理数', role: 'primary', source: 'model', status: 'confirmed', rationale: null, actor_id: null, supersedes_id: null, created_at: '2026-10-26T01:00:00Z' } as const
+  it('shows the missing step after a teacher judgment even if an AI link exists', () => {
+    const html = renderToStaticMarkup(createElement(KnowledgeReviewNotice, { judgmentConfirmed: true, items: [link] }))
+    expect(html).toContain('下一步：确认本题的主要知识点')
+    expect(html).not.toContain('对错与主要知识点均已确认')
+  })
+  it('only marks both steps complete for a staff-confirmed primary', () => {
+    const render = (items: typeof link[] | Array<Omit<typeof link, 'source' | 'role'> & { source: string; role: 'primary' | 'secondary' }>) => renderToStaticMarkup(createElement(KnowledgeReviewNotice, { judgmentConfirmed: true, items }))
+    expect(render([{ ...link, source: 'staff', role: 'secondary' }])).toContain('下一步')
+    expect(render([{ ...link, source: 'staff' }])).toContain('对错与主要知识点均已确认')
+    expect(renderToStaticMarkup(createElement(KnowledgeReviewNotice, { judgmentConfirmed: false, items: [] }))).toBe('')
   })
 })

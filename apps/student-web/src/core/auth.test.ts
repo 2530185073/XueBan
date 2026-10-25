@@ -30,7 +30,12 @@ function setup(required = false, admin = false) {
     if (rejected) return problem(401, 'authentication_required')
     if (path === '/v1/auth/login') return reply(session())
     if (path === '/v1/auth/account') return reply(account)
-    if (path === '/v1/auth/change-password') { account.must_change_password = false; return reply(session()) }
+    if (path === '/v1/auth/change-password') {
+      // Mirror the HTTP contract: first sign-in also requires the current secret.
+      const body = JSON.parse(String(init.body))
+      if (typeof body.current_password !== 'string' || !body.current_password) return problem(422, 'invalid_request')
+      account.must_change_password = false; return reply(session())
+    }
     if (path === '/v1/auth/logout') return reply({ logged_out: true })
     if (path === '/v1/me') return reply(identity)
     if (path === '/v1/admin/student-accounts') return reply({ items: [] })
@@ -52,11 +57,18 @@ describe('long-term account authentication', () => {
     expect(next.account?.must_change_password).toBe(true); expect(next.identity).toBeNull()
     expect(s.calls.some(c => c.path === '/v1/me')).toBe(false)
     await next.changePassword(secret, fresh)
+    expect(JSON.parse(s.calls.find(c => c.path === '/v1/auth/change-password')!.init.body as string)).toEqual({ current_password: secret, new_password: fresh })
     expect(next.account?.must_change_password).toBe(false); expect(next.selectedStudentId).toBe('student_one')
     expect(s.calls.at(-1)?.path).toBe('/v1/me')
     const saved = [...s.storage.values.values()].join('')
     expect(saved).not.toContain(secret); expect(saved).not.toContain(fresh); expect(saved).not.toContain('synthetic.student')
     expect(saved).toContain('synthetic.regular.token')
+  })
+  it('requires the initial password before a first-login change can be submitted', async () => {
+    const s = setup(true); await s.client.login('synthetic.student', secret)
+    for (const missing of [null, '']) await expect(s.client.changePassword(missing, fresh)).rejects.toMatchObject({ code: 'invalid_password' })
+    expect(s.calls.some(c => c.path === '/v1/auth/change-password')).toBe(false)
+    expect(s.client.account?.must_change_password).toBe(true)
   })
   it('ignores a retired pending pair and paired session instead of exchanging them', async () => {
     const s = setup()

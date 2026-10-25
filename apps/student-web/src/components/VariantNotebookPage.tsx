@@ -334,7 +334,8 @@ export function NotebookCard({ item, entry, onOpen }: { item: NotebookItem; entr
     <div className="notebook-card-meta"><time dateTime={item.occurred_at}>{formatDate(item.occurred_at)}</time><span className={`notebook-status ${status}`} role="status">{generating && <LoaderCircle className="spin" size={12} aria-hidden="true" />}{label}</span></div>
     {(item.homework_title || item.practiced) && <p className="notebook-homework">{item.homework_title}{item.practiced && <span className="notebook-practiced">已练习过</span>}</p>}
     <p className="notebook-original"><MathText text={item.question_text || '原题文字暂缺'} /></p>
-    <button className="button secondary notebook-open" onClick={onOpen}>举一反三练习<ChevronRight size={16} aria-hidden="true" /></button>
+    {item.original_status && <p className="notebook-original-status" role="status">{item.original_status === 'rechecking' ? '原题正在重新检查，已有练习记录会保留。' : '原题待老师核实，已有练习记录会保留。'}</p>}
+    <button className="button secondary notebook-open" disabled={!!item.original_status && !item.session_id && !item.generation_id && !entry} onClick={onOpen}>举一反三练习<ChevronRight size={16} aria-hidden="true" /></button>
   </article>
 }
 

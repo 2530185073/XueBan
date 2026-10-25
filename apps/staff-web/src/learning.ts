@@ -164,9 +164,13 @@ export function shareState(link: { revoked_at: string | null; expires_at: string
   return Date.parse(link.expires_at) <= at ? 'expired' : 'active'
 }
 
-/** The system already saw a hint or answer for this attempt, so it cannot be marked independent. */
+/** Match the server's time boundary: later help does not change an earlier answer. */
 export function helpSeen(attempt: AttemptRead, hints: Hint[]): boolean {
-  return ['hint_used', 'answer_shown'].includes(attempt.record.help_condition) || hints.some(hint => hint.attempt_id === attempt.record.id && !!hint.first_shown_at)
+  if (attempt.record.parent_attempt_id) return true
+  const occurred = Date.parse(attempt.record.occurred_at)
+  // help_condition is also updated by later reveals, so it cannot establish
+  // that assistance preceded this answer without the timestamped hint record.
+  return hints.some(hint => hint.case_id === attempt.record.case_id && !!hint.first_shown_at && Date.parse(hint.first_shown_at) <= occurred)
 }
 
 export const selectableNodes = (nodes: KnowledgeNode[]) => nodes.filter(node => node.node_type === 'concept' || node.node_type === 'skill')

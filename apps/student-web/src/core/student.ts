@@ -239,10 +239,9 @@ export class StudentClient {
   }
   async changePassword(currentPassword: string | null, newPassword: string): Promise<IdentityContext | null> {
     if (!this.session) throw new StudentError('authentication_required', 401)
-    const firstLogin = this.currentAccount?.must_change_password === true
-    if ([...newPassword].length < 15 || [...newPassword].length > 128 || new TextEncoder().encode(newPassword).length > 512 || (!firstLogin && (!currentPassword || [...currentPassword].length > 128 || new TextEncoder().encode(currentPassword).length > 512))) throw new StudentError('invalid_password', 422, '新密码需要15–128个字符，普通改密还需要填写当前密码。')
+    if ([...newPassword].length < 15 || [...newPassword].length > 128 || new TextEncoder().encode(newPassword).length > 512 || !currentPassword || [...currentPassword].length > 128 || new TextEncoder().encode(currentPassword).length > 512) throw new StudentError('invalid_password', 422, '请填写初始或当前密码；新密码需要15–128个字符。')
     const epoch = this.epoch
-    const payload = firstLogin ? { new_password: newPassword } : { current_password: currentPassword, new_password: newPassword }
+    const payload = { current_password: currentPassword, new_password: newPassword }
     const result = await this.authWrite<AuthSession>('/v1/auth/change-password', payload, 'AuthSession')
     if (epoch !== this.epoch) throw new StudentError('session_changed', 401)
     this.epoch++; this.currentIdentity = null; this.student = null; this.dropMedia(); this.acceptSession(result)
@@ -939,6 +938,27 @@ export class StudentClient {
     const ctx = await this.authorize(), hint = await this.read<Hint>(ctx, `/v1/hints/${encoded(hintId)}`, 'Hint')
     await this.caseDetail(ctx, hint.case_id)
     return this.write(ctx, `hint-view:${hintId}`, `/v1/hints/${encoded(hintId)}/views`, { expected_revision: hint.revision, shown_at: new Date().toISOString() }, 'Hint', 'ShowHint')
+  }
+  /** Persist exposure before rendering a solution; the same binding replays after refresh. */
+  async recordSolutionViewed(row: CaseDetail): Promise<void> {
+    const ctx = { ...await this.authorize(), detailSession: this.session! }
+    const decision = effectiveDecision(row)
+    if (!decision || decision.validity === 'needs_review' || decision.verdict === 'unable_to_judge') throw new StudentError('no_current_decision', 409)
+    const body = { attempt_id: row.attempt.id, source_decision_id: decision.id, source_decision_revision: decision.revision }
+    const assertCurrent = (current: CaseDetail) => {
+      const d = effectiveDecision(current)
+      if (current.attempt.id !== body.attempt_id || d?.id !== body.source_decision_id || d.revision !== body.source_decision_revision || d.validity === 'needs_review' || ['editing', 'rechecking'].includes(current.case.progress) || current.attempt.recognition_status === 'pending') throw new StudentError('stale_source', 409, '这道题已有新的作答或判断，请刷新后再查看答案。')
+    }
+    // Single-case reads do not contain checkJob. Use the persisted progress;
+    // the write endpoint also fences active original-image recovery jobs.
+    assertCurrent(await this.caseDetail(ctx, row.case.id))
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([ctx.scope, row.case.id, body])))
+    const key = 'solution-view-' + Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
+    this.check(ctx)
+    const receipt = await this.api.request<Record<string, unknown>>(`/v1/cases/${encoded(row.case.id)}/solution-view`, 'Learning', JSON.stringify(body), key)
+    this.check(ctx)
+    if (receipt.case_id !== row.case.id || receipt.attempt_id !== body.attempt_id || receipt.source_decision_id !== body.source_decision_id || receipt.source_decision_revision !== body.source_decision_revision || receipt.exposed !== true) throw new StudentError('invalid_response', 502)
+    assertCurrent(await this.caseDetail(ctx, row.case.id))
   }
   /**
    * One journaled request per answer and kind; an appeal is per result, so a

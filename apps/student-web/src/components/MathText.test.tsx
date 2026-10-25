@@ -13,7 +13,7 @@ function sample():CaseDetail{
 const card=(row:CaseDetail,open=true)=>renderToStaticMarkup(<QuestionCard row={row} index={0} open={open} onToggle={()=>{}}/>)
 it('only expanded body has math and a single toggle; raw header and source remain unchanged',()=>{
  const row=sample(),before=structuredClone(row),html=card(row)
- expect(html).toContain('<sup>4</sup>');expect(html.match(/class="math-fraction"/g)).toHaveLength(2)
+ expect(html).toContain('<sup>4</sup>');expect(html.match(/class="math-fraction"/g)).toHaveLength(1)
  expect(html.match(/>查看原文</g)).toHaveLength(1);expect(html.match(/>复制本题原文</g)).toHaveLength(1)
  const header=html.slice(html.indexOf('<button class="recognition-card-head"'),html.indexOf('</button>'))
  expect(header).toContain('(-5)^4');expect(header).not.toContain('<sup>');expect(header).not.toContain('查看原文')

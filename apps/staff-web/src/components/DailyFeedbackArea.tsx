@@ -32,11 +32,18 @@ export function DailySnapshotView({ snap }: { snap: ReportSnapshot }) {
         {item.verdict && <><dt>{evidenceSourceLabel(item.source_role)}</dt><dd>{item.verdict}</dd></>}
         <dt>订正</dt><dd><span className={`tag ${item.progress === 'verified_resolved' ? '' : 'amber'}`}>{item.correction}</span></dd>
       </dl>)}</div></section>}
+    {(snap.completions ?? []).length > 0 && <section className="report-block"><h4>待完成与补做</h4>
+      <p className="subtle">原来未作答的题单独记录，不计为答错或错题订正。</p>
+      <div className="evidence-cards">{snap.completions!.map(item => <dl key={item.case_id} className="evidence-card">
+        <dt>题目</dt><dd>{item.question || '（题目文字未识别）'}</dd>
+        <dt>出处</dt><dd>{item.homework_title ?? '学校作业'}{item.page !== null && ` · 第 ${item.page} 页`}</dd>
+        <dt>完成情况</dt><dd>{item.correction}</dd>
+      </dl>)}</div></section>}
     {snap.focus.length > 0 && <section className="report-block"><h4>今天卡住的知识点</h4><ul className="plain-list">{snap.focus.map(item =>
       <li key={item.knowledge_id}>{item.name}：{item.denominator} 次有效作答中出错 {item.errors} 次（{evidenceSourceCounts(item)}）{item.verified_scope.length > 0 && `（已核实：${item.verified_scope.join('；')}）`}</li>)}</ul></section>}
     {snap.steady.length > 0 && <section className="report-block"><h4>今天做得好的</h4><ul className="plain-list">{snap.steady.map(item => <li key={item.knowledge_id}>{item.name}（{evidenceSourceCounts(item)}）</li>)}</ul></section>}
-    {(help.requests > 0 || help.hints_viewed > 0) && <section className="report-block"><h4>求助与提示</h4>
-      <p>向老师求助 {help.requests} 次，查看提示 {help.hints_viewed} 次。</p>
+    {(help.requests > 0 || help.hints_viewed > 0 || help.answers_shown > 0) && <section className="report-block"><h4>求助与提示</h4>
+      <p>向老师求助 {help.requests} 次，查看提示 {help.hints_viewed} 次；查看答案或解法 {help.answers_shown} 道。</p>
       {help.staff_help.length > 0 && <ul className="plain-list">{help.staff_help.map((item, i) => <li key={i}>{item.question || '（题干待识别）'} —— {item.note}</li>)}</ul>}</section>}
     {kinds && (kinds.preview > 0 || kinds.variant > 0) && <section className="report-block"><h4>自愿活动</h4>
       <p>{[kinds.preview > 0 && `预习 ${kinds.preview} 次`, kinds.variant > 0 && `举一反三练习 ${kinds.variant} 次`].filter(Boolean).join('，')}
@@ -157,7 +164,8 @@ export default function DailyFeedbackArea({ ctx }: { ctx: LearningContext }) {
     .sort((a, b) => order(a.report) - order(b.report) || a.student.display_name.localeCompare(b.student.display_name, 'zh-CN'))
   const waiting = rows.filter(row => row.report?.status === 'draft').length
   const published = rows.filter(row => row.report?.status === 'published').length
-  const confirmed = rows.filter(row => row.report?.delivery?.sent_confirmed_at || row.report?.delivery?.opened_at).length
+  const confirmed = rows.filter(row => row.report?.delivery?.sent_confirmed_at).length
+  const opened = rows.filter(row => row.report?.delivery?.opened_at).length
   const selected = rows.find(row => row.student.student_id === chosen)
 
   async function generate(studentId: string) {
@@ -171,7 +179,7 @@ export default function DailyFeedbackArea({ ctx }: { ctx: LearningContext }) {
       <div className="side-block">
         <label>日期<div className="select-wrap"><select value={day} onChange={event => { setDay(event.target.value); setChosen(null) }}>
           {days.map(value => <option key={value} value={value}>{dayLabel(value, Date.now())}</option>)}</select></div></label>
-        <p className="subtle">待发布 {waiting} 人 · 已发布 {published} 人（确认发送 {confirmed} 人）· 共 {rows.length} 人</p>
+        <p className="subtle">待发布 {waiting} 人 · 已发布 {published} 人（确认发送 {confirmed} 人 · 家长打开 {opened} 人）· 共 {rows.length} 人</p>
       </div>
       <div className="queue-list">
         <LoadNote state={drafts.error ? drafts : sent}>
@@ -179,7 +187,7 @@ export default function DailyFeedbackArea({ ctx }: { ctx: LearningContext }) {
             const [label, tone] = deliveryLabel(report)
             return <div key={student.student_id} className={`queue-item ${student.student_id === chosen ? 'selected' : ''}`}>
               <div className="queue-item-top"><span className="queue-avatar"><MessageSquareText size={15} /></span><span className={`tag ${tone}`}>{label}</span>
-                {report && report.mistake_count > 0 && <span className="queue-status muted">{report.mistake_count} 道要订正</span>}</div>
+                {report && report.mistake_count > 0 && <span className="queue-status muted">{report.mistake_count} 道错题记录</span>}</div>
               <h3>{student.display_name}</h3>
               {report ? <button className="text-link" onClick={() => setChosen(student.student_id)}>{report.status === 'draft' ? '核对并发布' : '查看'}<ArrowRight size={14} /></button>
                 : <button className="text-link" disabled={ctx.busy} onClick={() => void generate(student.student_id)}><Plus size={14} />仍要生成</button>}

@@ -11,7 +11,16 @@ export function withLinkVersions(snapshot: KnowledgeLinkList, choice: LinkChoice
 const decision = (link: Pick<KnowledgeLink, 'knowledge_id' | 'id'> | null, knowledgeId: string, role: LinkRole, status: LinkDecision['status'], rationale: string | null = null): LinkChoice =>
   ({ knowledge_id: knowledgeId, role, status, expected_link_id: link?.id ?? null, rationale })
 
-export default function KnowledgeLinkEditor({ ctx, questionId, locked }: { ctx: LearningContext; questionId: string; locked?: string | null }) {
+export function KnowledgeReviewNotice({ judgmentConfirmed, items }: { judgmentConfirmed: boolean; items: KnowledgeLink[] }) {
+  if (!judgmentConfirmed) return null
+  const ready = items.some(link => link.source === 'staff' && link.status === 'confirmed' && link.role === 'primary')
+  return <p className={ready ? 'subtle' : 'preview-note'} role="status">
+    {ready ? '对错与主要知识点均已确认。图谱将按有效作答证据更新。'
+      : '下一步：确认本题的主要知识点。对错已由老师核实，知识点确认后才会形成老师核实的图谱记录。'}
+  </p>
+}
+
+export default function KnowledgeLinkEditor({ ctx, questionId, locked, judgmentConfirmed = false }: { ctx: LearningContext; questionId: string; locked?: string | null; judgmentConfirmed?: boolean }) {
   const { learning, act, busy, version } = ctx
   const links = useLoad(questionId, signal => learning.links(questionId, signal), version)
   const graph = useLoad(`${questionId}:${links.data?.graph_version ?? ''}`, () => learning.graph(questionId), version)
@@ -59,6 +68,7 @@ export default function KnowledgeLinkEditor({ ctx, questionId, locked }: { ctx: 
     {locked && <div className="preview-note">{locked}</div>}
     {scopeMismatch && <p className="warning-text" role="alert">题目使用的教材范围已更新。请刷新后重新选择知识点，当前选择不会提交。</p>}
     <LoadNote state={links}>
+      <KnowledgeReviewNotice judgmentConfirmed={judgmentConfirmed} items={items} />
       {confirmed.length === 0 && <p className="subtle">还没有可用于本次作答的知识点关联。</p>}
       <ul className="link-list">{confirmed.map(link => <li key={link.id} className="confirmed">
         <div className="help-row">{link.source === 'model' ? <Bot size={13} /> : <UserCheck size={13} />}<strong>{link.knowledge_name ?? link.knowledge_id}</strong><span className={`tag ${link.role === 'primary' ? '' : 'muted'}`}>{roleLabels[link.role]}</span><span className="tag muted">{link.source === 'model' ? 'AI 归因 · 最新作答' : '老师确认 · 本题'}</span></div>

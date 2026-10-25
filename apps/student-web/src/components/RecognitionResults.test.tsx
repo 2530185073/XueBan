@@ -17,6 +17,14 @@ const row = (): CaseDetail => ({
 } as CaseDetail)
 
 describe('per-blank student feedback', () => {
+  it('keeps the method for a correct answer behind the same explicit help action', () => {
+    const value = row()
+    value.case.current_decision!.verdict = 'correct'
+    const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} />)
+    expect(html).toContain('查看答案与解法')
+    expect(html).not.toContain('用对应量除以分率。')
+    expect(html).not.toContain('总量；除法。')
+  })
   it('shows correct and incorrect blanks separately within one wrong question', () => {
     const html = renderToStaticMarkup(<QuestionCard row={row()} index={0} open onToggle={() => {}} />)
     expect(html).toContain('aria-label="逐空判定"')
@@ -24,9 +32,10 @@ describe('per-blank student feedback', () => {
     expect(html).toContain('class="recognition-answer incorrect"')
     expect(html).toContain('✓ 正确')
     expect(html).toContain('✕ 错误')
-    expect(html).toContain('应填：除')
+    expect(html).not.toContain('应填：除')
     expect(html).not.toContain('应填：总量')
-    expect(html).toContain('<span class="recognition-label">正确答案</span>')
+    expect(html).not.toContain('<span class="recognition-label">正确答案</span>')
+    expect(html).toContain('查看答案与解法')
     expect(html).not.toContain('参考答案')
   })
   it('hides stale per-blank decisions after the student answer changes', () => {
@@ -83,9 +92,10 @@ describe('controlled review uncertainty feedback', () => {
     const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} />)
 
     expect(html).toContain(`<p class="recognition-uncertainty">${message}</p>`)
-    expect(html).toContain('<span class="recognition-label">正确答案</span>')
-    expect(html).toContain('总量；除法。')
-    expect(html).toContain('应填：除')
+    expect(html).not.toContain('<span class="recognition-label">正确答案</span>')
+    expect(html).toContain('查看答案与解法')
+    expect(html).not.toContain('总量；除法。')
+    expect(html).not.toContain('应填：除')
     expect(html).not.toContain('参考答案')
     expect(html).not.toContain(genericUncertainty)
     expect(html).not.toContain('不应展示')
@@ -120,7 +130,8 @@ describe('controlled review uncertainty feedback', () => {
 
     expect(html).toContain(genericUncertainty)
     expect(html).not.toContain(summary)
-    expect(html).toContain('<span class="recognition-label">正确答案</span>')
+    expect(html).not.toContain('<span class="recognition-label">正确答案</span>')
+    expect(html).toContain('查看答案与解法')
     expect(html).not.toContain('67%')
   })
 
@@ -154,7 +165,8 @@ describe('controlled review uncertainty feedback', () => {
     value.case.current_decision!.correct_answer = null
     const html = renderToStaticMarkup(<QuestionCard row={value} index={0} open onToggle={() => {}} />)
 
-    expect(html).toContain('暂未生成正确答案，请重新识别或请老师核对。')
+    expect(html).not.toContain('暂未生成正确答案，请重新识别或请老师核对。')
+    expect(html).toContain('查看答案与解法')
     expect(html).not.toContain('参考答案')
   })
 })

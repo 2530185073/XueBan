@@ -41,7 +41,7 @@ export function CurriculumBookPicker({ workspace, grade, onChanged }: { workspac
       {data && (!current || expanded) && <><div className="knowledge-book-controls"><div className="knowledge-book-field"><label htmlFor="knowledge-book-select">当前教材</label><select id="knowledge-book-select" value={choice} disabled={disabled} onChange={event => setChoice(event.target.value)}><option value="">默认教材范围（未指定一本书）</option>{unavailable && <option value={current!.graph_version} disabled>{current!.title} · 暂不可用</option>}{data.books.map(book => <option value={book.graph_version} key={book.graph_version}>{book.title} · {book.publisher_name}</option>)}</select></div><button className="button secondary" disabled={disabled || choice === (current?.graph_version ?? '') || (!!choice && !selected)} onClick={() => void save()}>{saving ? <LoaderCircle className="spin" size={15} /> : null}保存教材</button></div>
       {(selected || current) && <div className="knowledge-book-meta"><span>{(selected ?? current)!.review_label}</span><span>{(selected ?? current)!.isbn ? `ISBN ${(selected ?? current)!.isbn}` : '书号待补充'}</span></div>}
       {(selected || current)?.source_note && <p className="knowledge-book-note">{(selected ?? current)!.source_note}</p>}
-      {unavailable && <p className="knowledge-book-note">当前选择已保留，但该书图谱暂不可用；可以继续拍照检查。</p>}
+      {unavailable && <p className="knowledge-book-note">当前选择已保留，但该教材暂不可用；请改选已就绪的教材后再开始新作业。</p>}
       {!data.books.length && <p className="knowledge-book-note">当前年级暂没有可选择的具体书目。拍照检查可以继续，知识地图等目录就绪后再补全。</p>}</>}
       {error && <p className="knowledge-book-error" role="alert">{error} <button className="text-button" disabled={saving} onClick={() => { setTick(n => n + 1); onChanged() }}><RefreshCw size={14} />刷新教材选项</button></p>}
     </>}

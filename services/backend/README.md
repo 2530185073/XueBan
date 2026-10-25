@@ -63,6 +63,7 @@ PYTHONPATH=services/backend services/backend/.venv/bin/python -m xueban_backend.
 | `GET /v1/questions/{id}`；`GET /v1/attempts/{id}`；`GET /v1/cases/{id}` | 题目、原/新作答和纠错状态 |
 | `POST /v1/cases/{id}/checks`；`GET /v1/checks/{id}`；`GET /v1/decisions/{id}` | 发起检查、模型版本、候选依据 |
 | `POST /v1/cases/{id}/hints`；`GET /v1/hints/{id}`；`POST /v1/hints/{id}/views` | 分层提示、真实展示记录 |
+| `POST /v1/cases/{id}/solution-view` | 学生主动打开当前解答；提交 `attempt_id`、`source_decision_id`、`source_decision_revision` 与幂等键，校验当前版本并记录带时间的答案展示，重检中拒绝旧解答 |
 | `POST /v1/cases/{id}/attempts` | 新订正照片生成新 Attempt，先识别，再明确发起 checks |
 | `POST /v1/cases/{id}/help-requests`；`GET /v1/help-requests`；`POST /v1/help-requests/{id}/claim`；`POST /v1/help-requests/{id}/complete` | 学生求助、老师授权待办、领取和处理 |
 | `POST /v1/cases/{id}/reviews` | 受权老师确认/替换/撤回判断，模型失败时可人工初判 |
@@ -86,6 +87,8 @@ PYTHONPATH=services/backend services/backend/.venv/bin/python -m xueban_backend.
 | `POST/GET /v1/students/{id}/practice-sessions`；`GET /v1/practice-sessions/{id}`；`…/responses`、`…/items/{item}/hint`、`…/exit` | 自愿举一反三、预习与小测，随时结束不记欠账 |
 
 `GET question/attempt/decision` 支持 `?revision=N`，返回历史快照及当前有效性。`GET homework` 返回实际 `asset_ids/question_ids/case_ids/job_ids`；从历史即可恢复，不能用安卓本地演示数据代替服务端结果。
+
+学生端首次改密须同时提交初始密码与新密码；开始新作业前先核对年级与可用教材。打开解答只追加带时间的帮助记录，不倒改之前独立作答的条件；之后的新订正继承已看答案状态。日报将原答正确、错题订正、空白补做分别处理，`completions` 列出待完成与补做，`corrected_resolved` 只统计确有错误祖先的新订正。
 
 上传/读取票据另外指向 `PUT/GET /v1/assets/{id}/content`，这是 `UploadTicket`/`AssetAccess` 中的对象传输地址。上传客户端只发送 `required_headers`，不把业务 Bearer 扩散到 URL。票据绑定资产、签发主体及有效期；每次传输重新核验主体、角色和学生授权。原图只写私有目录，文件0600、目录创建0700；原图不可覆盖。PUT 成功仍为 `awaiting_upload`，`complete` 验证真实 SHA256、大小、格式、完整解码和尺寸后才变为 `uploaded` 并撤销上传票据。同票据同内容可在完成前重传，过期通过原资产续票恢复。
 
