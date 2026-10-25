@@ -109,7 +109,7 @@ describe('independent late identity boundary',()=>{
   it('password change retires old identity work even when synthetic token is equal',async()=>{
     const s=setup();await s.client.login('user_a','synthetic password');s.hold()
     const old=s.client.history().catch(e=>e);await tick();s.unhold()
-    await s.client.changePassword('synthetic password','changed123')
+    await s.client.changePassword('synthetic password','changed-password-12345')
     s.pending[0].resolve(problem(401));await old
     expect(s.client.selectedStudentId).toBe('student_user_a')
     await s.client.history()

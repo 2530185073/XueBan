@@ -19,7 +19,7 @@ from .device_auth import signing_key, utc
 from .device_models import DeviceSession
 from .errors import Problem
 from .models import Campus, Principal, PrincipalRole, Student, StudentGrant
-from .passwords import DUMMY_HASH, hash_password, validate_password, validate_student_password, verify_password
+from .passwords import DUMMY_HASH, hash_password, validate_password, verify_password
 
 KEY = Header(alias='Idempotency-Key', min_length=8, max_length=128, pattern=r'^[A-Za-z0-9._:-]+$')
 ID_PATTERN = r'^[a-z][a-z0-9_-]{2,63}$'
@@ -41,29 +41,6 @@ def password(value: SecretStr):
     return value
 
 
-def login_password(value: SecretStr | None):
-    if value is None:
-        return None
-    raw = value.get_secret_value()
-    if not isinstance(raw, str) or not 3 <= len(raw) <= 128:
-        raise Problem(422, 'validation', 'invalid_request', '密码须为3至128个字符。')
-    try:
-        if len(raw.encode('utf-8')) > 512:
-            raise ValueError
-    except UnicodeError:
-        raise Problem(422, 'validation', 'invalid_request', '密码编码无效。') from None
-    return raw
-
-
-def new_student_password(value: SecretStr):
-    raw = value.get_secret_value()
-    try:
-        validate_student_password(raw)
-    except ValueError:
-        raise Problem(422, 'validation', 'invalid_request', '新密码须为3至15位英文字母或数字。') from None
-    return raw
-
-
 class Strict(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -74,7 +51,7 @@ class Login(Strict):
 
 
 class ChangePassword(Strict):
-    current_password: SecretStr | None = None
+    current_password: SecretStr
     new_password: SecretStr
 
 
@@ -270,7 +247,7 @@ def install_account_auth(app, engine, cfg):
 
     @app.post('/v1/auth/login')
     def login(payload: Login, request: Request, idempotency_key: str = KEY):
-        key = signing_key(cfg); secret = mac_key(key); name = username(payload.username); supplied = login_password(payload.password)
+        key = signing_key(cfg); secret = mac_key(key); name = username(payload.username); supplied = password(payload.password)
         body = {'username': name, 'password': supplied}; now = datetime.now(timezone.utc).replace(microsecond=0)
         error = None; result = None
         with Session(engine) as session, session.begin():
@@ -310,7 +287,7 @@ def install_account_auth(app, engine, cfg):
 
     @app.post('/v1/auth/change-password')
     def change_password(payload: ChangePassword, authorization: str | None = Header(default=None), idempotency_key: str = KEY):
-        key = signing_key(cfg); secret = mac_key(key); current = login_password(payload.current_password); new = new_student_password(payload.new_password)
+        key = signing_key(cfg); secret = mac_key(key); current = password(payload.current_password); new = password(payload.new_password)
         body = {'current_password': current, 'new_password': new}; now = datetime.now(timezone.utc).replace(microsecond=0)
         error = None; result = None
         with Session(engine) as session, session.begin():
@@ -323,15 +300,13 @@ def install_account_auth(app, engine, cfg):
                 raise session_ended()
             elif account.locked_until and utc(account.locked_until) > now:
                 error = throttled()
-            elif not account.must_change_password and current is None:
-                raise Problem(422, 'validation', 'invalid_request', '普通改密需要填写当前密码。')
-            elif current is not None and not verify_password(current, account.password_hash):
+            elif not verify_password(current, account.password_hash):
                 if account.locked_until: account.failed_attempts = 0; account.locked_until = None
                 account_failure(account, now); error = denied()
             else:
-                if current is not None and hmac.compare_digest(current.encode('utf-8'), new.encode('utf-8')):
+                if hmac.compare_digest(current.encode('utf-8'), new.encode('utf-8')):
                     raise Problem(422, 'validation', 'invalid_request', '新密码必须与当前密码不同。')
-                account.password_hash = hash_password(new, validator=validate_student_password); account.password_version += 1; account.must_change_password = False
+                account.password_hash = hash_password(new); account.password_version += 1; account.must_change_password = False
                 account.failed_attempts = 0; account.locked_until = None; account.updated_at = now
                 revoke_sessions(session, principal.id); device = mint(session, cfg, principal, now)
                 record_operation(session, principal.id, 'change-password', idempotency_key, body, secret, session_id=device.id, previous_session_id=previous.id, credential_version=account.password_version)

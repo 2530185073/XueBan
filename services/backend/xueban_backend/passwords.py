@@ -2,7 +2,6 @@
 import hashlib
 import hmac
 import os
-import re
 from pathlib import Path
 import secrets
 import stat
@@ -21,13 +20,8 @@ def validate_password(password: str):
         raise ValueError('Password encoding is invalid') from None
 
 
-def validate_student_password(password: str):
-    if not isinstance(password, str) or not re.fullmatch(r'[A-Za-z0-9]{3,15}', password):
-        raise ValueError('Student password must contain 3 to 15 ASCII letters or digits')
-
-
-def hash_password(password: str, *, validator=validate_password) -> str:
-    validator(password)
+def hash_password(password: str) -> str:
+    validate_password(password)
     salt = secrets.token_bytes(16)
     derived = hashlib.scrypt(password.encode('utf-8'), salt=salt, n=N, r=R, p=P, dklen=32, maxmem=256 * 1024 * 1024)
     return f'scrypt$v1${N}${R}${P}${salt.hex()}${derived.hex()}'

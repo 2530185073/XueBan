@@ -16,7 +16,7 @@ function sample(validity: Decision['validity'], verdict: Decision['verdict']): C
 const workspace = { busy: '', hint: null, client: {}, recordVersion: 0 } as unknown as Workspace
 const button = (html: string, label: string) => html.match(/<button\b[\s\S]*?<\/button>/g)?.find(tag => tag.includes(label))
 
-describe('standalone question detail and result summary', () => {
+describe('whole-page correction experience', () => {
   it.each(['correct', 'unable_to_judge'] as const)('keeps an uncertain %s result open for feedback and navigation, without giving solution hints', verdict => {
     const row = sample('needs_review', verdict)
     const hint: Hint = { ...fixture<Hint>('shown_but_invalidated_hint'), validity: 'active', attempt_id: row.attempt.id, source_decision_id: row.case.current_decision!.id, source_decision_revision: row.case.current_decision!.revision, content: '这条未核实的解题提示不应展示' }
@@ -37,23 +37,15 @@ describe('standalone question detail and result summary', () => {
     const row = sample('candidate', 'correct')
     row.checkJob = { ...fixture<Job>('successful_check_job'), status: 'running' }
     const html = renderToStaticMarkup(<ResultsSummary rows={[row]} detail={null} compact />)
-    expect(html).toContain('本次作答 1 题 · 正确 0 道 · 错误 0 道')
+    expect(html).toContain('本次读到 1 题')
+    expect(html).toContain('AI 初判正确 0 道')
     expect(html).toContain('处理中 1 道')
-    expect(html).not.toMatch(/正确 1 道|错误 1 道|AI 初判正确|老师确认正确/)
   })
-  it('summarises mixed results without counting pending work as correct or incorrect', () => {
+  it('summarises mixed results separately and leaves correction available before all questions are confirmed', () => {
     const rows = [sample('candidate', 'incorrect'), sample('needs_review', 'correct'), sample('candidate', 'correct')]
     const html = renderToStaticMarkup(<ResultsSummary rows={rows} detail={null} />)
     expect(html).toContain('需订正 1，待核实 1，AI初判正确 1，已确认正确 0')
-    expect(html).toContain('<p class="results-breakdown">待确认 1 道</p>')
-    expect(html).not.toContain('可以先订正其他题，不必等整页一起确认')
+    expect(html).toContain('可以先订正其他题，不必等整页一起确认')
     expect(html).not.toContain('全部正确')
-    const compact = renderToStaticMarkup(<ResultsSummary rows={rows} detail={null} compact />)
-    expect(compact).toContain('本次作答 3 题 · 正确 1 道 · 错误 1 道')
-    expect(compact).toContain('待确认 1 道')
-    // The independent detail still supports correction without mounting it in QuestionCard.
-    const detail = renderToStaticMarkup(<QuestionDetail row={rows[0]} workspace={workspace} onCorrection={() => {}} />)
-    expect(button(detail, '我已在纸上订正')).toBeDefined()
-    expect(button(detail, '我已在纸上订正')).not.toContain('disabled')
   })
 })

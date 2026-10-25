@@ -240,7 +240,7 @@ export class StudentClient {
   async changePassword(currentPassword: string | null, newPassword: string): Promise<IdentityContext | null> {
     if (!this.session) throw new StudentError('authentication_required', 401)
     const firstLogin = this.currentAccount?.must_change_password === true
-    if (!/^[A-Za-z0-9]{3,15}$/.test(newPassword) || (!firstLogin && (!currentPassword || [...currentPassword].length > 128 || new TextEncoder().encode(currentPassword).length > 512))) throw new StudentError('invalid_password', 422, '新密码请使用3–15位英文字母或数字。普通改密还需要填写当前密码。')
+    if ([...newPassword].length < 15 || [...newPassword].length > 128 || new TextEncoder().encode(newPassword).length > 512 || (!firstLogin && (!currentPassword || [...currentPassword].length > 128 || new TextEncoder().encode(currentPassword).length > 512))) throw new StudentError('invalid_password', 422, '新密码需要15–128个字符，普通改密还需要填写当前密码。')
     const epoch = this.epoch
     const payload = firstLogin ? { new_password: newPassword } : { current_password: currentPassword, new_password: newPassword }
     const result = await this.authWrite<AuthSession>('/v1/auth/change-password', payload, 'AuthSession')

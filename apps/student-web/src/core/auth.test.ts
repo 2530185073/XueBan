@@ -17,7 +17,7 @@ class SessionStorage implements Storage {
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status })
 const problem = (status: number, code: string) => reply({ type: 'urn:xueban:auth', title: '合成认证状态', status, category: status === 401 ? 'authorization' : 'validation', code, detail: '测试', request_id: 'request_auth', current_revision: null, retry_after_seconds: null }, status)
 const secret = 'synthetic initial password'
-const fresh = 'Fresh123'
+const fresh = 'synthetic replacement password'
 function setup(required = false, admin = false) {
   const storage = new SessionStorage(), calls: { path: string; init: RequestInit }[] = []
   const account: Account = { username: 'synthetic.student', must_change_password: required, student_id: admin ? null : 'student_one' }
@@ -91,10 +91,10 @@ describe('long-term account authentication', () => {
     expect(writes).toHaveLength(1); expect(writes[0].init.body).toBe('{}'); expect(writes[0].init.headers).toHaveProperty('Idempotency-Key')
     await s.client.login('synthetic.student', secret); await s.client.logout(); expect(s.storage.length).toBe(0)
   })
-  it('accepts simple passwords for change and login', async () => {
-    const s = setup(), password = 'abc123'
+  it('accepts the same Unicode codepoint password limits for change and login', async () => {
+    const s = setup(), password = '🙂'.repeat(80)
     await s.client.login('synthetic.student', password)
-    await s.client.changePassword(password, 'xyz789')
+    await s.client.changePassword(password, password + '新')
     expect(JSON.parse(s.calls.find(c => c.path === '/v1/auth/login')!.init.body as string).password).toBe(password)
     expect(JSON.parse(s.calls.find(c => c.path === '/v1/auth/change-password')!.init.body as string).current_password).toBe(password)
     await expect(s.client.login('synthetic.student', '🙂'.repeat(129))).rejects.toMatchObject({ code: 'invalid_login' })
@@ -102,7 +102,7 @@ describe('long-term account authentication', () => {
   it('retains an unknown password change only in memory and replays the original key', async () => {
     const s = setup(true); await s.client.login('synthetic.student', secret)
     s.lose('/v1/auth/change-password'); await expect(s.client.changePassword(secret, fresh)).rejects.toMatchObject({ code: 'network_unknown' })
-    await expect(s.client.changePassword(secret, fresh + '4')).rejects.toMatchObject({ code: 'auth_request_unknown' })
+    await expect(s.client.changePassword(secret, fresh + 'different')).rejects.toMatchObject({ code: 'auth_request_unknown' })
     await s.client.changePassword(secret, fresh)
     const writes = s.calls.filter(c => c.path === '/v1/auth/change-password')
     expect(writes).toHaveLength(2); expect(writes[0].init.headers).toEqual(writes[1].init.headers); expect(writes[0].init.body).toBe(writes[1].init.body)

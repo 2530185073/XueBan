@@ -11,20 +11,13 @@ function sample():CaseDetail{
  row.case.current_decision=d;row.question.stem_text='计算：(-5)^4';row.question.options=[];row.attempt.answer_text='2/7';row.attempt.answer_status='present';row.attempt.recognition_status='ready';return row
 }
 const card=(row:CaseDetail,open=true)=>renderToStaticMarkup(<QuestionCard row={row} index={0} open={open} onToggle={()=>{}}/>)
-it('simple cards retain raw math in the expanded body and header without math controls or source mutation',()=>{
+it('only expanded body has math and a single toggle; raw header and source remain unchanged',()=>{
  const row=sample(),before=structuredClone(row),html=card(row)
- expect(html).toContain('<p>计算：(-5)^4</p>');expect(html).toContain('<p>2/7</p>');expect(html).toContain('<p>-2/7</p>')
- expect(html).not.toMatch(/math-view-tools|math-fraction|查看原文|复制本题原文|<sup>/);expect(html.match(/<button\b/g)).toHaveLength(1)
+ expect(html).toContain('<sup>4</sup>');expect(html.match(/class="math-fraction"/g)).toHaveLength(2)
+ expect(html.match(/>查看原文</g)).toHaveLength(1);expect(html.match(/>复制本题原文</g)).toHaveLength(1)
  const header=html.slice(html.indexOf('<button class="recognition-card-head"'),html.indexOf('</button>'))
  expect(header).toContain('(-5)^4');expect(header).not.toContain('<sup>');expect(header).not.toContain('查看原文')
  expect(card(row,false)).not.toContain('math-view-tools');expect(row).toEqual(before)
-})
-it('standalone MathText still formats powers and fractions while preserving accessible source text',()=>{
- const row=sample(),before=structuredClone(row)
- const html=renderToStaticMarkup(<div><MathText text={row.question.stem_text!}/><MathText text={row.attempt.answer_text!}/><MathText text={row.case.current_decision!.correct_answer!}/><MathText text="x^(2n+1)"/></div>)
- expect(html).toContain('<sup>4</sup>');expect(html).toContain('<sup>2n+1</sup>');expect(html.match(/class="math-fraction"/g)).toHaveLength(2)
- for(const source of ['计算：(-5)^4','2/7','-2/7','x^(2n+1)']) expect(html).toContain(`aria-label="${source}"`)
- expect(row).toEqual(before)
 })
 it('original mode preserves whitespace and ambiguous text exactly',()=>{
  expect(renderToStaticMarkup(<MathText text={'  -2/7\n'} original/>)).toBe('  -2/7\n')
@@ -36,11 +29,11 @@ it('plain or ambiguous-only cards get no toolbar',()=>{
 })
 it('position prompts/answers/corrections preserve source and result labels',()=>{
  const row=sample();row.question.blank_count=2;row.case.current_decision!.answer_checks=[{index:1,prompt:'(-2)^3',student_answer:'2/7',verdict:'incorrect',correct_answer:'-2/7',explanation:'原说明'},{index:2,prompt:'x^(2n+1)',student_answer:'2^3',verdict:'correct',correct_answer:null,explanation:'原说明'}] as unknown as NonNullable<Decision['answer_checks']>
- const before=structuredClone(row),html=card(row);expect(html).toContain('逐空判定');expect(html).toContain('(-2)^3');expect(html).toContain('x^(2n+1)');expect(html).toContain('应填：-2/7');expect(html).toContain('✕ 错误');expect(html).toContain('✓ 正确');expect(html).not.toMatch(/math-view-tools|<sup>/);expect(row).toEqual(before)
+ const before=structuredClone(row),html=card(row);expect(html).toContain('逐空判定');expect(html).toContain('<sup>2n+1</sup>');expect(html).toContain('✕ 错误');expect(html).toContain('✓ 正确');expect(row).toEqual(before)
 })
-it('an incomplete check preserves the original answer as pending without a correct answer or invented subject control',()=>{
+it('AI incomplete remains a draft and exposes no correct answer or new subject control',()=>{
  const row=sample(),d=row.case.current_decision!;d.verdict='unable_to_judge';d.validity='needs_review';d.verification={mode:'two_model',status:'degraded',independent_readback:false,reason_codes:['provider_unavailable']};row.question.subject=null;row.attempt.recognition_status='needs_revision'
- const html=card(row);expect(html).toContain('我的作答');expect(html).toContain('<p>2/7</p>');expect(html).toContain('待确认');expect(html).toContain('class="recognition-answer uncertain"');expect(html).not.toMatch(/正确答案<|class="recognition-answer (correct|incorrect)"|✓ 正确|✕ 错误|选择题目学科|question-detail/)
+ const html=card(row);expect(html).toContain('AI 识读草稿');expect(html).toContain('AI 核对暂未完成');expect(html).toContain('可能与照片不同');expect(html).not.toContain('正确答案</span>');expect(html).not.toContain('选择题目学科')
 })
 it('script-shaped text is escaped and commands stay literal',()=>{
  const html=renderToStaticMarkup(<MathText text={'<img src=x onerror="globalThis.bad=1"> 2^3'}/>);expect(html).toContain('&lt;img');expect(html).not.toContain('<img');expect(html).not.toContain('<script')

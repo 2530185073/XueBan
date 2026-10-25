@@ -1,6 +1,6 @@
 from pathlib import Path
 import pytest
-from xueban_backend.passwords import hash_password, read_password_file, validate_password, validate_student_password, verify_password
+from xueban_backend.passwords import hash_password, read_password_file, validate_password, verify_password
 
 
 def test_scrypt_random_salt_and_exact_whitespace_unicode():
@@ -17,16 +17,6 @@ def test_scrypt_random_salt_and_exact_whitespace_unicode():
 @pytest.mark.parametrize('value', ['', 'a'*14, 'a'*129, None, '\ud800'*15])
 def test_password_policy_fixed_boundaries(value):
     with pytest.raises(ValueError): validate_password(value)
-
-
-@pytest.mark.parametrize('value', ['123', 'abcXYZ', 'a1b2c3', '9'*15])
-def test_student_password_policy_accepts_letters_and_digits(value):
-    validate_student_password(value)
-
-
-@pytest.mark.parametrize('value', ['', 'ab', 'a'*16, 'abc-123', '中文密码'])
-def test_student_password_policy_rejects_other_values(value):
-    with pytest.raises(ValueError): validate_student_password(value)
 
 
 def test_password_file_0600_no_follow_and_no_password_in_error(tmp_path):

@@ -22,9 +22,8 @@ from xueban_backend.device_models import DeviceSession
 from xueban_backend.models import Campus, Homework, Principal, PrincipalRole, Student, StudentGrant
 
 PASSWORD = 'original synthetic password'
-NEW_PASSWORD = 'changed123'
+NEW_PASSWORD = 'changed synthetic password'
 RESET_PASSWORD = 'reset synthetic password'
-OTHER_PASSWORD = 'reset456'
 
 
 @pytest.fixture
@@ -80,14 +79,14 @@ def test_forced_change_preserves_identity_and_revokes_old_token(accounts, databa
         with pytest.raises(ValueError, match='pairing is disabled'):
             issue_pairing(session, cfg, 'actor_a')
     key = 'change-once-unknown-response'
-    body = {'new_password': NEW_PASSWORD}
+    body = {'current_password': PASSWORD, 'new_password': NEW_PASSWORD}
     changed = post(client, '/v1/auth/change-password', body, token, key)
     assert changed.status_code == 200, changed.text
     new = changed.json()
     assert new['must_change_password'] is False
     assert post(client, '/v1/auth/change-password', body, token, key).json() == new
     assert post(client, '/v1/auth/change-password', body, token, 'new-key-after-revocation').status_code == 401
-    assert post(client, '/v1/auth/change-password', {**body, 'new_password': OTHER_PASSWORD}, token, key).status_code == 409
+    assert post(client, '/v1/auth/change-password', {**body, 'new_password': RESET_PASSWORD}, token, key).status_code == 409
     assert client.get('/v1/me', headers=bearer(token)).status_code == 401
     identity = client.get('/v1/me', headers=bearer(new['access_token'])).json()
     assert identity['actor_id'] == 'actor_a'
@@ -215,7 +214,7 @@ def test_admin_campus_and_tenant_boundaries(accounts, database, signing):
     base = {'username': 'no.student', 'student_name': '合成学员', 'initial_password': PASSWORD}
     for campus in ('campus_b', 'campus_other'):
         assert post(client, '/v1/admin/student-accounts', {**base, 'campus_id': campus}, admin).status_code == 403
-    assert post(client, '/v1/admin/student-accounts/student_b/reset-password', {'new_password': RESET_PASSWORD}, admin).status_code == 404
+    assert post(client, '/v1/admin/student-accounts/student_b/reset-password', {'new_password': NEW_PASSWORD}, admin).status_code == 404
     # A role plus an existing student grant never implies campus management.
     other = signing.token('subject-b')
     assert client.get('/v1/admin/student-accounts', headers=bearer(other)).json() == {'items': [], 'campuses': []}
@@ -250,7 +249,7 @@ def test_admin_reset_revokes_sessions_replays_and_preserves_history(accounts, da
 @pytest.mark.parametrize('body', [
     {'username': 'ab', 'password': PASSWORD},
     {'username': 'bad!name', 'password': PASSWORD},
-    {'username': 'student.alpha', 'password': 'xy'},
+    {'username': 'student.alpha', 'password': 'short'},
     {'username': 'student.alpha', 'password': 'a'*129},
     {'username': 'student.alpha', 'password': PASSWORD, 'role': 'campus_admin'},
 ])
