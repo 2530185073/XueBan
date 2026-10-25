@@ -154,8 +154,10 @@ export default function DailyFeedbackArea({ ctx }: { ctx: LearningContext }) {
   const days = recentDays(Date.now(), 7)
   const [day, setDay] = useState(days[0])
   const [chosen, setChosen] = useState<string | null>(null)
-  const drafts = useLoad(`draft:${day}`, signal => ctx.learning.reportQueue('draft', signal, day), ctx.version)
-  const sent = useLoad(`published:${day}`, signal => ctx.learning.reportQueue('published', signal, day), ctx.version)
+  const [refreshVersion, setRefreshVersion] = useState(0)
+  const viewCtx = { ...ctx, version: ctx.version + refreshVersion }
+  const drafts = useLoad(`draft:${day}`, signal => ctx.learning.reportQueue('draft', signal, day), viewCtx.version)
+  const sent = useLoad(`published:${day}`, signal => ctx.learning.reportQueue('published', signal, day), viewCtx.version)
   const byStudent = new Map<string, QueuedReport>()
   for (const report of sent.data?.items ?? []) byStudent.set(report.student_id, report)
   for (const report of drafts.data?.items ?? []) byStudent.set(report.student_id, report)
@@ -175,7 +177,7 @@ export default function DailyFeedbackArea({ ctx }: { ctx: LearningContext }) {
 
   return <main id="main" className="learning-area">
     <aside className="learning-side" aria-label="每日反馈列表">
-      <div className="queue-heading"><div><h2>每日家长反馈</h2><p>孩子当天有作业或活动就自动生成草稿；老师核对后发布，复制消息发给家长并确认</p></div><RefreshButton state={drafts} label="刷新每日反馈" /></div>
+      <div className="queue-heading"><div><h2>每日家长反馈</h2><p>孩子当天有作业或活动就自动生成草稿；老师核对后发布，复制消息发给家长并确认</p></div><RefreshButton state={{ ...drafts, loading: drafts.loading || sent.loading, reload: () => setRefreshVersion(value => value + 1) }} label="刷新每日反馈" /></div>
       <div className="side-block">
         <label>日期<div className="select-wrap"><select value={day} onChange={event => { setDay(event.target.value); setChosen(null) }}>
           {days.map(value => <option key={value} value={value}>{dayLabel(value, Date.now())}</option>)}</select></div></label>
@@ -198,7 +200,7 @@ export default function DailyFeedbackArea({ ctx }: { ctx: LearningContext }) {
       </div>
     </aside>
     <section className="learning-main">
-      {selected?.report ? <DailyDetail key={selected.report.id} ctx={ctx} reportId={selected.report.id} name={selected.student.display_name} day={day} />
+      {selected?.report ? <DailyDetail key={selected.report.id} ctx={viewCtx} reportId={selected.report.id} name={selected.student.display_name} day={day} />
         : <div className="learning-empty"><span className="round-icon"><Check size={23} /></span><h2>今天交了什么、错在哪、订正了没有</h2>
           <p>每份反馈只汇总这一天在托管班拍照提交的作业，对错以老师核实为准。草稿随作业和核实自动更新；发布后记录变化会生成更新草稿。老师核对并发布新版后，已生成的家长链接才显示新内容。</p></div>}
     </section>
