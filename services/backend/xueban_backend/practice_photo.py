@@ -138,6 +138,9 @@ def install_practice_photo(app, cfg, database_session, current_actor):
             raise Problem(422, "validation", "invalid_image", "图片编码无效，请重新上传。")
         store.verify(content, document)
         operation = f"POST /v1/practice-sessions/{session_id}/photo-responses"
+        from .practice import require_valid_reference
+        if payload.item_id in activity.item_ids:
+            require_valid_reference(session.get(PracticeItem, payload.item_id))
         # Bytes are verified against SHA256 before hashing the small request.
         request = {"item_id": payload.item_id, "image": document}
         replay = replay_idempotent(session, actor, activity.student_id, operation, idempotency_key, request)

@@ -1,31 +1,50 @@
 import { useEffect, useRef, useState } from 'react'
-import { Camera, Check, ChevronDown, CircleAlert, CircleX, Clock3, Lightbulb, LoaderCircle, Shuffle } from 'lucide-react'
+import { Camera, Check, ChevronDown, Circle, CircleAlert, CircleX, Clock3, Lightbulb, LoaderCircle } from 'lucide-react'
 import type { CaseDetail } from '../core/types'
 import type { CurriculumScope } from '../core/learning'
 import type { Workspace } from '../useStudentWorkspace'
 import { effectiveDecision } from '../core'
-import { casePresentation, studentQuestionText, studentResultState, studentResultUncertain, studentUnresolvedKind, studentServiceOnlyIncomplete, type StudentResultState } from '../presentation'
+import { studentQuestionText, studentResultState, studentResultUncertain, studentUnresolvedKind, type StudentResultState } from '../presentation'
 import { ResultsSummary } from './ResultsSummary'
-import { QuestionDetail } from './QuestionDetail'
 import { MathText } from './MathText'
-import { mathPresentation } from '../mathPresentation'
+import { prepareResultCardOpen, resultCardBinding, resultCardSolutionUsable } from '../core/resultDisclosure'
 import { safeError } from '../core/errors'
 
 interface RecognitionResultsProps {
   rows: CaseDetail[]
   workspace: Workspace
   onNext: () => void
-  selectedCaseId: string | null
-  onSelect: (row: CaseDetail) => void
-  onCorrection: (row: CaseDetail, camera: boolean) => void
   onSelectSubject: (row: CaseDetail, subject: string) => void
+  subjects?: CurriculumScope[]
+  onSelect?: (row: CaseDetail) => void
+  // Accepted for existing callers; the simple result view owns its expansion
+  // and does not expose correction, hint, help, or practice workflows.
+  selectedCaseId?: string | null
+  onCorrection?: (row: CaseDetail, camera: boolean) => void
+  onContinue?: () => void
   onVariant?: (row: CaseDetail) => void
   variantBusy?: string
 }
 
+interface QuestionCardProps {
+  row: CaseDetail
+  index: number
+  open: boolean
+  onToggle: () => void
+  subjects?: CurriculumScope[]
+  onSelectSubject?: (subject: string) => void
+  workspace?: Workspace
+  onCorrection?: (camera: boolean) => void
+  onContinue?: () => void
+  onVariant?: () => void
+  variantBusy?: boolean
+  opening?: boolean
+  openError?: string
+}
+
 const stateLabels: Record<StudentResultState, string> = {
-  correct: 'AI 初判正确',
-  incorrect: '需要订正',
+  correct: '正确',
+  incorrect: '错误',
   unanswered: '未作答',
   uncertain: '待确认',
   processing: '处理中',
@@ -36,7 +55,7 @@ const stateLabels: Record<StudentResultState, string> = {
 const slotFeedback = {
   correct: { tone: 'correct', label: '✓ 正确' },
   incorrect: { tone: 'incorrect', label: '✕ 错误' },
-  unanswered: { tone: 'unanswered', label: '待完成' },
+  unanswered: { tone: 'unanswered', label: '未作答' },
   unable_to_judge: { tone: 'uncertain', label: '待核对' },
 } as const
 
@@ -48,53 +67,29 @@ const controlledServiceUncertaintyMessages = new Set([
 ])
 
 function answerText(row: CaseDetail) {
-  if (row.attempt.answer_status === 'blank') return '未填写作答'
+  if (row.attempt.answer_status === 'blank' || studentResultState(row) === 'unanswered') return '未作答'
   return row.attempt.answer_text || '暂未读到清楚的作答'
 }
 
 function ResultIcon({ state }: { state: StudentResultState }) {
   if (state === 'correct') return <Check size={17} strokeWidth={2.5} />
   if (state === 'incorrect') return <CircleX size={17} strokeWidth={2.2} />
+  if (state === 'unanswered') return <Circle size={17} strokeWidth={2.2} />
   if (state === 'processing') return <LoaderCircle className="spin" size={17} strokeWidth={2.2} />
   if (state === 'unprocessed') return <Clock3 size={17} strokeWidth={2.2} />
   if (state === 'service_failure') return <CircleX size={17} strokeWidth={2.2} />
   return <CircleAlert size={17} strokeWidth={2.2} />
 }
 
-export function QuestionCard({ row, index, open, onToggle, subjects = [], onSelectSubject = () => {}, workspace, onCorrection, onContinue, onVariant, variantBusy = false }: { row: CaseDetail; index: number; open: boolean; onToggle: () => void; subjects?: CurriculumScope[]; onSelectSubject?: (subject: string) => void; workspace?: Workspace; onCorrection?: (camera: boolean) => void; onContinue?: () => void; onVariant?: () => void; variantBusy?: boolean }) {
-  const [originalMath, setOriginalMath] = useState(false)
-  const [copyStatus, setCopyStatus] = useState('')
-  const [revealed, setRevealed] = useState('')
-  const [revealing, setRevealing] = useState('')
-  const [solutionError, setSolutionError] = useState('')
-  const revealingRef = useRef(false)
-  const state = studentResultState(row)
+export function QuestionCard({ row, index, open, onToggle, subjects = [], onSelectSubject = () => {}, workspace, opening = false, openError }: QuestionCardProps) {
   const serviceIncomplete = studentUnresolvedKind(row) === 'service'
-  const compactService = !!workspace && !!onCorrection && studentServiceOnlyIncomplete(row)
+  const state = serviceIncomplete ? 'uncertain' : studentResultState(row)
   const decision = effectiveDecision(row)
-  const usable = state !== 'processing' && decision && decision.validity !== 'needs_review' && decision.verdict !== 'unable_to_judge'
-  const solutionBinding = JSON.stringify([workspace?.client?.evidenceScope, row.case.id, row.attempt.id, decision?.id, decision?.revision])
-  const currentBinding = useRef(solutionBinding); currentBinding.current = solutionBinding
-  const solutionVisible = !!usable && revealed === solutionBinding
-  const hasSolution = !!usable && !!(decision.correct_answer || decision.correction_method || decision.answer_checks?.some(part => part.verdict === 'incorrect' && part.correct_answer))
-  useEffect(() => { setSolutionError('') }, [solutionBinding])
-  useEffect(() => { currentBinding.current = solutionBinding; return () => { currentBinding.current = '' } }, [solutionBinding])
-  const revealSolution = async () => {
-    if (!workspace || !hasSolution || revealingRef.current) return
-    const binding = solutionBinding
-    revealingRef.current = true; setRevealing(binding); setSolutionError('')
-    try {
-      await workspace.client.recordSolutionViewed(row)
-      if (currentBinding.current === binding) setRevealed(binding)
-    } catch (error) {
-      if (currentBinding.current === binding) setSolutionError(safeError(error).message)
-      workspace.report(error)
-    } finally { revealingRef.current = false; if (currentBinding.current === binding) setRevealing('') }
-  }
+  const usable = resultCardSolutionUsable(row) && decision
   const firstUncertainty = decision?.uncertainties?.[0]
   const controlledServiceMessage = firstUncertainty && controlledServiceUncertaintyMessages.has(firstUncertainty) ? firstUncertainty : undefined
   const uncertain = studentResultUncertain(row)
-  const method = decision?.correction_method?.trim()
+  const solutionSteps = decision?.correction_method
   const points = decision?.knowledge_points ?? []
   const stemText = studentQuestionText(row.question.stem_text, row.question.label)
   const uncertainties = [...new Set([
@@ -102,69 +97,37 @@ export function QuestionCard({ row, index, open, onToggle, subjects = [], onSele
     ...(row.attempt.recognition_uncertainties ?? []),
     ...(decision?.uncertainties ?? []),
   ])]
-  const displayedAnswer = serviceIncomplete ? row.attempt.answer_text || 'AI 暂未读到作答，仍需结合原图核对。' : answerText(row)
-  const displayedCorrect = decision?.correct_answer?.trim() || '暂未生成正确答案，请重新识别或请老师核对。'
-  const fields: { label: string; text: string }[] = [{ label: '题目', text: row.question.stem_text || '题干暂未读清。' }]
-  for (const option of row.question.options ?? []) fields.push({ label: option.label, text: option.text })
-  if (usable && decision?.answer_checks?.length) {
-    for (const part of decision.answer_checks) {
-      fields.push({ label: `逐空反馈 · 第${part.index}${row.question.blank_count ? '空' : '项'}`, text: part.prompt }, { label: '作答', text: part.student_answer || (part.verdict === 'unanswered' ? '未作答' : '暂未读到清楚的作答') })
-      if (solutionVisible && part.verdict === 'incorrect' && part.correct_answer) fields.push({ label: '应填', text: part.correct_answer })
-    }
-  } else fields.push({ label: serviceIncomplete ? 'AI 识读草稿' : '我的作答', text: displayedAnswer })
-  if (solutionVisible && decision.correct_answer) fields.push({ label: '正确答案', text: decision.correct_answer })
-  const hasMathView = open && fields.some(field => mathPresentation(field.text) !== null)
-  const copyFields = [...fields]
-  if (usable && decision?.answer_checks?.length && typeof row.attempt.answer_text === 'string') {
-    copyFields.splice(1 + (row.question.options?.length ?? 0), 0, { label: '整段原作答（原记录）', text: row.attempt.answer_text })
-  }
-  const rawCopy = copyFields.map(field => `${field.label}\n${field.text}`).join('\n\n')
-  useEffect(() => { setCopyStatus('') }, [rawCopy])
-  const copyOriginal = async () => {
-    try {
-      if (!navigator.clipboard?.writeText) throw new Error('clipboard_unavailable')
-      await navigator.clipboard.writeText(rawCopy); setCopyStatus('已复制本题原文。')
-    } catch { setCopyStatus('暂时无法复制，请切换原文后选择文字复制。') }
-  }
   return <article className={`recognition-card ${state} ${open ? 'open' : ''}`}>
-
-    <button className="recognition-card-head" type="button" aria-expanded={open} onClick={onToggle}>
+    <button className="recognition-card-head" type="button" aria-expanded={open} aria-busy={opening || undefined} onClick={onToggle}>
       <span className="recognition-index">{index + 1}</span>
       <span className="recognition-card-title">{stemText || '题干待核实'}</span>
-      <span className={`recognition-status ${state}`}>{uncertain && <sup className="result-star" aria-label="AI识别不确定">*</sup>}<ResultIcon state={state} />{state === 'correct' && decision?.origin === 'staff' && decision.validity === 'confirmed' ? '老师确认正确' : state === 'uncertain' ? casePresentation(row).label : stateLabels[state]}</span>
-      <ChevronDown className="recognition-chevron" size={19} aria-hidden="true" />
+      <span className={`recognition-status ${state}`}>{uncertain && <sup className="result-star" aria-label="AI识别不确定">*</sup>}<ResultIcon state={state} />{serviceIncomplete ? '未完成' : stateLabels[state]}</span>
+      {opening ? <LoaderCircle className="recognition-chevron spin" size={19} aria-label="正在打开题目" /> : <ChevronDown className="recognition-chevron" size={19} aria-hidden="true" />}
     </button>
+    {openError && <p className="recognition-uncertainty" role="alert">{openError} 点击题目重试。</p>}
     {open && <div className="recognition-card-body">
-      {hasMathView && <div className="math-view-tools" aria-label="数学文字显示">
-        <button className="text-button" type="button" aria-pressed={originalMath} onClick={() => { setOriginalMath(value => !value); setCopyStatus('') }}>{originalMath ? '查看公式排版' : '查看原文'}</button>
-        <button className="text-button" type="button" onClick={() => void copyOriginal()}>复制本题原文</button>
-        <small>仅调整显示，原文字和判断保持不变。</small>
-        {copyStatus && <span className="math-copy-status" role="status">{copyStatus}</span>}
-      </div>}
       <div className="recognition-question-block">
         <span className="recognition-label">题目</span>
-        <p><MathText text={(originalMath ? row.question.stem_text : stemText) || '题干暂未读清。'} original={originalMath} /></p>
+        <p><MathText text={stemText || '题干暂未读清。'} /></p>
         {!!row.question.blank_count && <span className="blank-note">填空题 · {row.question.blank_count} 个空</span>}
       </div>
-      {!!row.question.options?.length && <ol className="recognition-original-options" aria-label="原题选项">{row.question.options.map((option, optionIndex) => <li key={`${optionIndex}:${option.label}`}><strong>{option.label}</strong><span><MathText text={option.text} original={originalMath} /></span></li>)}</ol>}
+      {!!row.question.options?.length && <ol className="recognition-original-options" aria-label="原题选项">{row.question.options.map((option, optionIndex) => <li key={`${optionIndex}:${option.label}`}><strong>{option.label}</strong><span><MathText text={option.text} /></span></li>)}</ol>}
       {usable && decision.answer_checks?.length ? <div className="recognition-answer-slots" aria-label="逐空判定">
         {decision.answer_checks.map(part => <div key={part.index} className={`recognition-answer ${slotFeedback[part.verdict].tone}`}>
-          <span className="recognition-label">第{part.index}{row.question.blank_count ? '空' : '项'} · <MathText text={part.prompt} original={originalMath} /></span>
-          <p><MathText text={part.student_answer || (part.verdict === 'unanswered' ? '未作答' : '暂未读到清楚的作答')} original={originalMath} /> <span className="slot-verdict">{slotFeedback[part.verdict].label}</span></p>
-          {solutionVisible && part.verdict === 'incorrect' && part.correct_answer && <p className="slot-correction">应填：<MathText text={part.correct_answer} original={originalMath} /></p>}
+          <span className="recognition-label">第{part.index}{row.question.blank_count ? '空' : '项'} · <MathText text={part.prompt} /></span>
+          <p><MathText text={part.student_answer || (part.verdict === 'unanswered' ? '未作答' : '暂未读到清楚的作答')} /> <span className="slot-verdict">{slotFeedback[part.verdict].label}</span></p>
+          {part.verdict === 'incorrect' && part.correct_answer && <p className="slot-correction">应填：<MathText text={part.correct_answer} /></p>}
         </div>)}
       </div> : <div className={`recognition-answer ${state}`}>
-        <span className="recognition-label">{serviceIncomplete ? 'AI 识读草稿' : '我的作答'}</span>
-        <p><MathText text={displayedAnswer} original={originalMath} /></p>
-        {serviceIncomplete && <small>这段文字尚未完成核对，可能与照片不同，请以原图为准。</small>}
+        <span className="recognition-label">{serviceIncomplete ? '识别内容' : '我的作答'}</span>
+        <p><MathText text={serviceIncomplete ? row.attempt.answer_text || '暂未读清作答' : answerText(row)} /></p>
       </div>}
-      {hasSolution && !solutionVisible && <div className="recognition-solution-action"><button className="button secondary" type="button" disabled={!workspace || !!workspace.busy || revealing === solutionBinding} onClick={() => void revealSolution()}>{revealing === solutionBinding ? <LoaderCircle className="spin" size={16} /> : <Lightbulb size={16} />}{revealing === solutionBinding ? '正在打开答案' : '查看答案与解法'}</button><small>需要时再打开，学伴会记下这次帮助。</small>{solutionError && <p className="inline-error" role="alert">{solutionError} 答案尚未打开，可以重试。</p>}</div>}
-      {solutionVisible && decision.correct_answer && <div className="recognition-correct-answer">
+      {state === 'incorrect' && usable && <div className="recognition-correct-answer">
         <span className="recognition-label">正确答案</span>
-        <p><MathText text={originalMath ? decision?.correct_answer || displayedCorrect : displayedCorrect} original={originalMath} /></p>
+        <p><MathText text={decision?.correct_answer?.trim() || '暂未生成正确答案，请重新识别或请老师核对。'} /></p>
       </div>}
-      {(!compactService || points.length > 0) && <div className="recognition-learning">
-        {!row.question.subject && !serviceIncomplete && subjects.length > 0 && <div className="recognition-subject-picker">
+      <div className="recognition-learning">
+        {!row.question.subject && subjects.length > 0 && <div className="recognition-subject-picker">
           <span className="recognition-label">无法确定学科</span>
           <div><select aria-label="选择题目学科" disabled={!!workspace?.busy} defaultValue="" onChange={event => { if (event.target.value) onSelectSubject(event.target.value) }}>
             <option value="">请选择本题学科</option>
@@ -172,24 +135,53 @@ export function QuestionCard({ row, index, open, onToggle, subjects = [], onSele
           </select><small>仅显示当前年级已配置且官方目录匹配的最新版教材。</small></div>
         </div>}
         <div className="recognition-learning-row"><span>知识点</span><div className="knowledge-tags">{points.length ? points.map(point => <span key={point}>{point}</span>) : <em>暂未识别</em>}</div></div>
-        {solutionVisible && method && <div className="recognition-learning-row correction-method"><span><Lightbulb size={15} />改正方法</span><p>{method}</p></div>}
-      </div>}
-      {!compactService && uncertainties.length > 0 && <p className="recognition-uncertainty">{state === 'uncertain' ? casePresentation(row).note : state === 'processing' ? '正在检查这道题的作答，可以先继续其他题。' : controlledServiceMessage ?? '* AI 对这道题的识别或判断存在不确定，请结合原图核对。'}</p>}
-      {workspace && onCorrection && <QuestionDetail row={row} workspace={workspace} embedded onCorrection={() => onCorrection(true)} onUpload={() => onCorrection(false)} onContinue={onContinue} />}
-      {onVariant && usable && decision && ['incorrect', 'partially_correct'].includes(decision.verdict) && <div className="recognition-variant-action"><button type="button" className="button secondary" disabled={variantBusy || !!workspace?.busy} onClick={onVariant}>{variantBusy ? <LoaderCircle className="spin" size={16} /> : <Shuffle size={16} />}{variantBusy ? '正在提交生成请求' : '选做一道同题型'}</button><span className="muted small">AI 生成并核验一道，想试试时再开始。</span></div>}
+        {solutionSteps?.trim() && usable && decision && ['incorrect', 'partially_correct', 'unanswered'].includes(decision.verdict) && <div className="recognition-learning-row correction-method"><span><Lightbulb size={15} />正确解题步骤</span><p className="recognition-solution-steps"><MathText text={solutionSteps} /></p></div>}
+      </div>
+      {state !== 'unanswered' && (uncertainties.length > 0 || serviceIncomplete) && <p className="recognition-uncertainty">{serviceIncomplete ? '核对尚未完成，原图已保留。' : controlledServiceMessage ?? '* AI 对这道题的识别或判断存在不确定，请结合原图核对。'}</p>}
     </div>}
   </article>
 }
 
-export function RecognitionResults({ rows, workspace, onNext, onSelectSubject, selectedCaseId, onSelect, onCorrection, onVariant, variantBusy }: RecognitionResultsProps) {
-  const [openId, setOpenId] = useState<string | null>(selectedCaseId)
-  useEffect(() => { setOpenId(selectedCaseId) }, [selectedCaseId])
-  const subjects = workspace.studentCurriculum?.subjects.filter(subject => subject.catalog_status === 'available') ?? []
-  const select = (row: CaseDetail) => { setOpenId(row.case.id); onSelect(row) }
+export function RecognitionResults({ rows, workspace, onNext, onSelectSubject, subjects: suppliedSubjects, onSelect }: RecognitionResultsProps) {
+  const [opened, setOpened] = useState<string | null>(null)
+  const [opening, setOpening] = useState<string | null>(null)
+  const [openError, setOpenError] = useState<{ binding: string; message: string } | null>(null)
+  const sequence = useRef(0), mounted = useRef(true)
+  const scope = workspace.client?.evidenceScope
+  const latest = useRef({ rows, scope }); latest.current = { rows, scope }
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; sequence.current++ } }, [])
+  useEffect(() => {
+    const bindings = new Set(rows.map(row => resultCardBinding(row, scope)))
+    // Rechecking and switching accounts permanently revoke the old expansion;
+    // returning to the previous state must not reopen an answer on its own.
+    if (opened && !bindings.has(opened)) setOpened(null)
+    if (opening && !bindings.has(opening)) { sequence.current++; setOpening(null) }
+    if (openError && !bindings.has(openError.binding)) setOpenError(null)
+  }, [rows, scope, opened, opening, openError])
+  const toggle = async (row: CaseDetail) => {
+    const binding = resultCardBinding(row, scope), request = ++sequence.current
+    setOpenError(null)
+    if (opened === binding || opening === binding) { setOpened(null); setOpening(null); return }
+    setOpened(null); setOpening(binding)
+    const stillCurrent = () => mounted.current && sequence.current === request
+      && workspace.client?.evidenceScope === scope && latest.current.scope === scope
+      && latest.current.rows.some(current => resultCardBinding(current, scope) === binding)
+    try {
+      if (await prepareResultCardOpen(row, current => workspace.client.recordSolutionViewed(current), stillCurrent)) {
+        setOpened(binding); onSelect?.(row)
+      }
+    } catch (error) {
+      if (stillCurrent()) { setOpenError({ binding, message: safeError(error).message }); workspace.report(error) }
+    } finally { if (mounted.current && sequence.current === request) setOpening(null) }
+  }
+  const subjects = (suppliedSubjects ?? workspace.studentCurriculum?.subjects ?? []).filter(subject => subject.catalog_status === 'available')
   return <div className="recognition-results">
     <ResultsSummary rows={rows} detail={null} compact />
-    <p className="recognition-legend">点击题目，对照原图核对作答。AI 初判带 * 时仍有不确定之处；你可以先订正清楚的题，原作答会保留。</p>
-    <div className="recognition-card-list" aria-label="本次识别的题目">{rows.map((row, index) => <QuestionCard key={row.case.id} row={row} index={index} workspace={workspace} subjects={subjects} onVariant={onVariant ? () => onVariant(row) : undefined} variantBusy={!!variantBusy} onSelectSubject={subject => onSelectSubject(row, subject)} open={openId === row.case.id} onToggle={() => { onSelect(row); setOpenId(openId === row.case.id ? null : row.case.id) }} onCorrection={camera => onCorrection(row, camera)} onContinue={rows.length > 1 ? () => select(rows[(index + 1) % rows.length]) : undefined} />)}</div>
-    <div className="next-capture-wrap"><button className="button primary next-capture" type="button" disabled={!!workspace.busy} onClick={onNext}><Camera size={18} />拍下一份作业</button></div>
+    <p className="recognition-legend">按照片中的位置排列，序号连续显示。点击题目查看作答、正确答案、知识点和正确解题步骤，正确/错误右上角的 * 表示 AI 识别存在不确定。</p>
+    <div className="recognition-card-list" aria-label="本次识别的题目">{rows.map((row, index) => {
+      const binding = resultCardBinding(row, scope)
+      return <QuestionCard key={row.case.id} row={row} index={index} workspace={workspace} subjects={subjects} onSelectSubject={subject => onSelectSubject(row, subject)} open={opened === binding} opening={opening === binding} openError={openError?.binding === binding ? openError.message : undefined} onToggle={() => void toggle(row)} />
+    })}</div>
+    <div className="next-capture-wrap"><button className="button primary next-capture" type="button" disabled={!!workspace.busy} onClick={onNext}><Camera size={18} />拍下一题</button></div>
   </div>
 }

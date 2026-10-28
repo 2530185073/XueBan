@@ -401,6 +401,8 @@ def test_structured_photo_answers_use_current_options_and_fields(photo, kind, va
             item.options = [{"label": "B", "text": "6"}, {"label": "E", "text": "7"}]
         else:
             item.question_type, item.answer_kind, item.answer_values = "fill_blank", "text", []
+            item.stem_text = "3 + 4 = ____。\n4 + 4 = ____。"
+            item.solution_text = "第一空：3+4=7；第二空：4+4=8。"
             item.answer_fields = [{"id": "blank_a", "label": "第一空"}, {"id": "blank_b", "label": "第二空"}]
             item.field_answers = [{"field_id": key, "answer_kind": "number", "answer_values": [value]}
                                   for key, value in [("blank_a", "7"), ("blank_b", "8")]]
@@ -410,7 +412,9 @@ def test_structured_photo_answers_use_current_options_and_fields(photo, kind, va
     else:
         output["answers"] = [{"field_id": "blank_a", "answer_text": "14/2"},
                              {"field_id": "blank_b" if valid else "old_blank", "answer_text": "8"}]
-    identifier = submit(photo).json()["assessment_id"]
+    queued = submit(photo)
+    assert queued.status_code == 202, queued.text
+    identifier = queued.json()["assessment_id"]
     client = Client(output)
     result = assess(photo, identifier, client)
     assert result["status"] == ("completed" if valid else "failed")

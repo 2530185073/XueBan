@@ -26,7 +26,7 @@ from xueban_backend.providers.user_original import correction_pipeline, prompts
 from xueban_backend.worker import CorrectionWorker
 
 
-VERSION = "photo-correction.v20-grade-level-solutions"
+VERSION = "photo-correction.v22-fast-verified-check"
 GRADES = (5, 6, 7, 8, None)
 # stem, original student writing, final answer, student-facing worked solution
 EXAMPLES = {

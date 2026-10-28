@@ -58,3 +58,21 @@ class LoginLimit(Base):
     window_started: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     count: Mapped[int] = mapped_column(Integer, nullable=False)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class RegistrationCounter(Base):
+    """Global account namespace; deletion must not recycle an issued number."""
+    __tablename__ = 'registration_counters'
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    last_number: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class StudentRegistration(Base):
+    """Anonymous-request recovery without retaining a plaintext password."""
+    __tablename__ = 'student_registrations'
+    key_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    request_salt: Mapped[str] = mapped_column(String(32), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    username: Mapped[str] = mapped_column(ForeignKey('password_accounts.username', ondelete='CASCADE'), nullable=False, unique=True)
+    grade: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

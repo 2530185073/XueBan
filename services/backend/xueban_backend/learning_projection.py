@@ -75,7 +75,11 @@ def register_periodic(interval: timedelta):
 
 def published_graph(session, student_id=None) -> CurriculumGraph | None:
     from .curriculum_binding import resolve_graph
-    return resolve_graph(session, student_id)
+    from .curriculum_catalog import graph_is_usable
+    graph = resolve_graph(session, student_id)
+    # The legacy resolver can return the published but unreviewed pilot.
+    # Student evidence/practice must not bind to it just because it exists.
+    return None if student_id is not None and not graph_is_usable(graph) else graph
 
 
 OptionalKey = Annotated[str | None, Header(alias="Idempotency-Key", min_length=8, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")]
@@ -114,7 +118,8 @@ def fingerprints(session, student_ids=None) -> dict[str, str]:
         events = events.where(Homework.student_id.in_(student_ids))
     for student_id, count, latest in session.execute(events):
         parts[student_id].append(f"e{count}:{latest}")
-    # Practice never changes knowledge state, but report drafts summarize it, so it must trigger the followups.
+    # Practice has separate provisional feedback; it does not prove mastery.
+    # Report drafts summarize it, so it must also trigger the followups.
     sources = [(QuestionKnowledgeLink, QuestionKnowledgeLink.created_at), (AttemptCondition, AttemptCondition.created_at),
                (KnowledgeDiagnosis, KnowledgeDiagnosis.created_at), (PracticeResponse, PracticeResponse.occurred_at),
                (PracticeSession, func.coalesce(PracticeSession.ended_at, PracticeSession.started_at))]
@@ -170,6 +175,18 @@ def project_student(session: Session, tenant_id: str, student_id: str) -> dict:
         return {"status": "skipped"}
     graph = published_graph(session, student_id)
     if graph is None:
+        # A missing reviewed textbook is not a running projection. Acknowledge
+        # the inputs so every worker scan does not enqueue the same no-op job.
+        # No graph, nodes, evidence or mastery states are manufactured here.
+        session.scalar(select(Student).where(Student.id == student_id).with_for_update())
+        digest = fingerprints(session, [student_id]).get(student_id, _digest([None, RULE_VERSION]))
+        projection = session.get(LearningProjection, student_id)
+        if projection is None:
+            projection = LearningProjection(student_id=student_id, tenant_id=tenant_id,
+                source_fingerprint=digest, evidence_revision=0, state_version=0, projected_at=now())
+            session.add(projection)
+        else:
+            projection.source_fingerprint, projection.projected_at = digest, now()
         return {"status": "no_published_graph"}
     session.scalar(select(Student).where(Student.id == student_id).with_for_update())
     # The correction worker's immediate hook historically handled wrong

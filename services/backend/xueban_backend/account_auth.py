@@ -19,7 +19,7 @@ from .device_auth import signing_key, utc
 from .device_models import DeviceSession
 from .errors import Problem
 from .models import Campus, Principal, PrincipalRole, Student, StudentGrant
-from .passwords import DUMMY_HASH, hash_password, validate_password, verify_password
+from .passwords import DUMMY_HASH, hash_password, validate_login_password, validate_password, validate_student_password, verify_password
 
 KEY = Header(alias='Idempotency-Key', min_length=8, max_length=128, pattern=r'^[A-Za-z0-9._:-]+$')
 ID_PATTERN = r'^[a-z][a-z0-9_-]{2,63}$'
@@ -27,17 +27,21 @@ ID_PATTERN = r'^[a-z][a-z0-9_-]{2,63}$'
 
 def username(value):
     normalized = value.strip().lower()
-    if not re.fullmatch(r'[a-z0-9][a-z0-9._-]{2,63}', normalized):
-        raise Problem(422, 'validation', 'invalid_request', '用户名须为3至64位英文字母、数字、点、下划线或连字符。')
+    if not (re.fullmatch(r'[a-z0-9][a-z0-9._-]{2,63}', normalized)
+            or re.fullmatch(r'荣耀学员[0-9]{3,60}', normalized)):
+        raise Problem(422, 'validation', 'invalid_request', '请输入有效账号，例如荣耀学员001，或3至64位英文字母、数字、点、下划线或连字符。')
     return normalized
 
 
-def password(value: SecretStr):
+def password(value: SecretStr, *, validator=validate_password):
     value = value.get_secret_value()
     try:
-        validate_password(value)
+        validator(value)
     except ValueError:
-        raise Problem(422, 'validation', 'invalid_request', '密码须为15至128个字符，UTF-8编码不超过512字节。') from None
+        detail = ('新密码须为3至15位英文字母或数字，可以是纯数字或纯字母。' if validator is validate_student_password
+                  else '密码须为3至128个字符，UTF-8编码不超过512字节。' if validator is validate_login_password
+                  else '密码须为15至128个字符，UTF-8编码不超过512字节。')
+        raise Problem(422, 'validation', 'invalid_request', detail) from None
     return value
 
 
@@ -212,6 +216,8 @@ def grant_campus(session, principal_id, campus_id):
 
 
 def install_account_auth(app, engine, cfg):
+    from .student_registration import install_student_registration
+    install_student_registration(app, engine, cfg)
     verifier = TokenVerifier(cfg)
 
     def bearer(authorization):
@@ -247,7 +253,7 @@ def install_account_auth(app, engine, cfg):
 
     @app.post('/v1/auth/login')
     def login(payload: Login, request: Request, idempotency_key: str = KEY):
-        key = signing_key(cfg); secret = mac_key(key); name = username(payload.username); supplied = password(payload.password)
+        key = signing_key(cfg); secret = mac_key(key); name = username(payload.username); supplied = password(payload.password, validator=validate_login_password)
         body = {'username': name, 'password': supplied}; now = datetime.now(timezone.utc).replace(microsecond=0)
         error = None; result = None
         with Session(engine) as session, session.begin():
@@ -287,7 +293,9 @@ def install_account_auth(app, engine, cfg):
 
     @app.post('/v1/auth/change-password')
     def change_password(payload: ChangePassword, authorization: str | None = Header(default=None), idempotency_key: str = KEY):
-        key = signing_key(cfg); secret = mac_key(key); current = password(payload.current_password); new = password(payload.new_password)
+        key = signing_key(cfg); secret = mac_key(key)
+        current = password(payload.current_password, validator=validate_login_password)
+        new = password(payload.new_password, validator=validate_login_password)
         body = {'current_password': current, 'new_password': new}; now = datetime.now(timezone.utc).replace(microsecond=0)
         error = None; result = None
         with Session(engine) as session, session.begin():
@@ -304,9 +312,11 @@ def install_account_auth(app, engine, cfg):
                 if account.locked_until: account.failed_attempts = 0; account.locked_until = None
                 account_failure(account, now); error = denied()
             else:
+                validator = validate_student_password if account.student_id else validate_password
+                new = password(payload.new_password, validator=validator)
                 if hmac.compare_digest(current.encode('utf-8'), new.encode('utf-8')):
                     raise Problem(422, 'validation', 'invalid_request', '新密码必须与当前密码不同。')
-                account.password_hash = hash_password(new); account.password_version += 1; account.must_change_password = False
+                account.password_hash = hash_password(new, validator=validator); account.password_version += 1; account.must_change_password = False
                 account.failed_attempts = 0; account.locked_until = None; account.updated_at = now
                 revoke_sessions(session, principal.id); device = mint(session, cfg, principal, now)
                 record_operation(session, principal.id, 'change-password', idempotency_key, body, secret, session_id=device.id, previous_session_id=previous.id, credential_version=account.password_version)

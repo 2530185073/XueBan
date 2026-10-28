@@ -1,0 +1,8 @@
+.auth-card .registration-status{margin-top:14px;color:var(--muted);font-size:11px;line-height:1.8}
+.registration-status p{color:inherit}.registration-status .text-button,.auth-card .registration-entry{min-height:36px}
+.registration-card .registration-account{display:grid;gap:7px;margin-top:20px;padding:15px 16px;border:1px solid var(--line);border-radius:7px;background:var(--paper-soft,#eff1e8)}
+.registration-account>span,.registration-account>small{color:var(--muted);font-size:11px;line-height:1.8}
+.registration-account>strong{font-family:var(--serif);font-size:23px;color:var(--ink);overflow-wrap:anywhere;user-select:all}
+.auth-card.registration-card select{width:100%;min-height:49px;margin-bottom:18px;padding:0 13px;font-size:13px}
+.registration-card .password-guidance{margin-top:-8px}.registration-card>h2:focus{outline-offset:5px}
+.registration-card>.button.full{margin-top:20px}.registration-card .form-issue{line-height:1.8}

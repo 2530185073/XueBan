@@ -99,6 +99,7 @@ def assert_rejected(solution, *, status, code=None, url=URL):
       "options": [{"label": "A", "text": "4"}, {"label": "B", "text": "-4"}, {"label": "E", "text": "-4.0"}],
       "answer_values": ["E", "B"]}, "B、E"),
     ({"question_kind": "fill_blank", "question_type": "fill_blank", "answer_kind": "text", "answer_values": [],
+      "stem_text": "(-24) ÷ 6 的商是____，商的符号是____。",
       "answer_fields": [{"id": "result", "label": "商"}, {"id": "sign", "label": "符号"}],
       "field_answers": [{"field_id": "sign", "answer_kind": "text", "answer_values": ["负", "负数"]},
                         {"field_id": "result", "answer_kind": "number", "answer_values": ["-4", "-4.0"]}]},
@@ -206,17 +207,28 @@ def test_unknown_session_and_other_tenant_actor(solution):
     {"answer_values": []}, {"answer_values": ["   "]}, {"solution_text": " \n "},
     {"question_kind": "choice", "answer_kind": "choice", "answer_values": ["Z"],
      "options": [{"label": "A", "text": "4"}, {"label": "B", "text": "-4"}]},
-    {"question_kind": "fill_blank", "answer_fields": [], "field_answers": []},
-    {"question_kind": "fill_blank", "answer_fields": [{"id": "one", "label": "第一空"}], "field_answers": []},
-    {"question_kind": "fill_blank", "answer_fields": [{"id": "one", "label": "第一空"}],
-     "field_answers": [{"field_id": "one", "answer_values": []}]},
-    {"question_kind": "fill_blank", "answer_fields": [{"id": "one", "label": "第一空"}],
-     "field_answers": [{"field_id": "other", "answer_values": ["-4"]}]},
 ], ids=["candidate", "rejected", "retired", "unverified", "failed-verification", "missing-answer", "blank-answer",
-        "missing-steps", "invalid-choice", "missing-fields", "missing-blank", "empty-blank", "wrong-field"])
+        "missing-steps", "invalid-choice"])
 def test_missing_or_unverified_reference_is_not_revealed_or_counted_as_help(solution, edits):
     change(solution, item=edits)
     assert_rejected(solution, status=404)
+
+
+@pytest.mark.parametrize("edits", [
+    {"answer_fields": [], "field_answers": []},
+    {"field_answers": []},
+    {"field_answers": [{"field_id": "one", "answer_kind": "number", "answer_values": []}]},
+    {"field_answers": [{"field_id": "other", "answer_kind": "number", "answer_values": ["-4"]}]},
+], ids=["missing-fields", "missing-blank", "empty-blank", "wrong-field"])
+def test_invalid_blank_reference_is_not_revealed_or_counted_as_help(solution, edits):
+    # Keep the stem and top-level answer contract valid so each case exercises
+    # its intended field defect, not a leftover calculation fixture.
+    change(solution, item={"question_kind": "fill_blank", "question_type": "fill_blank",
+        "stem_text": "(-24) ÷ 6 = ____。", "answer_kind": "text", "answer_values": [],
+        "answer_fields": [{"id": "one", "label": "第一空"}],
+        "field_answers": [{"field_id": "one", "answer_kind": "number", "answer_values": ["-4"]}],
+        **edits})
+    assert_rejected(solution, status=409, code="verification_failed")
 
 
 def test_existing_hint_is_not_duplicated_and_next_response_tracks_help(solution):

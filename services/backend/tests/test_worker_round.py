@@ -231,7 +231,8 @@ def stub_main(monkeypatch):
     def install(runners, *, once=False):
         engine = SimpleNamespace(dispose=Mock())
         pipeline = SimpleNamespace(client=object())
-        settings = SimpleNamespace(database_url="unused", allow_sqlite_for_tests=True, asset_storage_dir=None)
+        settings = SimpleNamespace(database_url="unused", allow_sqlite_for_tests=True, asset_storage_dir=None,
+                                   worker_check_concurrency=1)
         monkeypatch.setattr(worker.Settings, "from_environment", lambda: settings)
         monkeypatch.setattr(worker, "create_database_engine", lambda *args, **kwargs: engine)
         monkeypatch.setattr(worker.CorrectionPipeline, "from_env", lambda: nullcontext(pipeline))

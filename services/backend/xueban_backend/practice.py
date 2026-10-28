@@ -42,6 +42,7 @@ from .learning_projection import (OptionalKey, enqueue, fingerprints, new_id, pr
 from .learning_reports import SHANGHAI, local_day, register_report_section
 from .models import Homework, Student
 from .providers.prompts import Role
+from .providers.variant_arithmetic import item_arithmetic_issues
 
 MAX_ITEMS = 3
 NEEDS_PRACTICE = ("needs_help_now", "consolidating")
@@ -403,6 +404,7 @@ def session_dict(session, row: PracticeSession, *, staff=False):
         if item_id not in items:
             raise Problem(409, "conflict", "revision_conflict", "历史练习的题目与教材版本不一致，请核对原始记录。")
         item, response = items[item_id], responses.get(item_id)
+        invalid_reference = bool(item_arithmetic_issues(item))
         entry = {**item_dict(item, staff=staff), "has_hint": bool(item.hint_text) and row.purpose == "variant"}
         if item_id in assessments:
             from .practice_generation import assessment_dict
@@ -411,7 +413,12 @@ def session_dict(session, row: PracticeSession, *, staff=False):
             entry["response"] = {"answer_text": response.answer_text, "result": response.result, "hint_used": response.hint_used,
                                  **({k: v for k, v in response.details.items() if k in ("selected_options", "answers", "feedback")}
                                     if response.details else {})}
-            entry["solution_text"] = item.solution_text
+            if invalid_reference:
+                # Preserve the historical response in storage, but do not keep
+                # presenting a demonstrably wrong reference as a student error.
+                entry["response"].update(result="unscorable", feedback="参考答案未通过计算核验，本次不计对错，请重新生成。")
+            else:
+                entry["solution_text"] = item.solution_text
         entries.append(entry)
     body = {"id": row.id, "student_id": row.student_id, "purpose": row.purpose, "knowledge_ids": row.knowledge_ids,
             "graph_version": row.graph_version,
@@ -431,6 +438,26 @@ def _generated_variant(row):
     return row.purpose == "variant" and bool(row.gate.get("generation_job_id"))
 
 
+def require_valid_reference(item):
+    if item is not None and item_arithmetic_issues(item):
+        raise Problem(409, "conflict", "verification_failed", "这道练习的参考答案未通过计算核验，请重新生成；本次不计对错。")
+
+
+def require_owned_generated_reference(session, tenant_id, student_id, generation_id, *, item_ids=None):
+    """Validate owned live records before returning an older idempotent body."""
+    generation = session.scalar(select(VariantGeneration).where(
+        VariantGeneration.id == generation_id, VariantGeneration.tenant_id == tenant_id,
+        VariantGeneration.student_id == student_id))
+    if generation is None:
+        raise Problem(404, "not_found", "not_found", "任务不存在或不可访问。")
+    item = session.scalar(select(PracticeItem).where(
+        PracticeItem.id == generation.item_id, PracticeItem.tenant_id == tenant_id,
+        PracticeItem.owner_student_id == student_id))
+    if item is None or (item_ids is not None and item_ids != [item.id]):
+        raise Problem(409, "conflict", "stale_source", "本次练习记录与来源不一致。")
+    require_valid_reference(item)
+
+
 def _expire(row: PracticeSession, at):
     before = (row.status, row.ended_at, row.gate)
     if _generated_variant(row):
@@ -446,10 +473,20 @@ def _expire(row: PracticeSession, at):
 
 @register_report_section
 def optional_section(session, student, window_start, window_end):
-    rows = [r for r in session.scalars(select(PracticeSession).where(PracticeSession.student_id == student.id))
+    rows = [r for r in session.scalars(select(PracticeSession).where(
+            PracticeSession.student_id == student.id, PracticeSession.tenant_id == student.tenant_id))
             if window_start <= utc(r.started_at) < window_end]
-    responses = [r for r in session.scalars(select(PracticeResponse).where(PracticeResponse.student_id == student.id))
+    responses = [r for r in session.scalars(select(PracticeResponse).where(
+                 PracticeResponse.student_id == student.id, PracticeResponse.tenant_id == student.tenant_id))
                  if window_start <= utc(r.occurred_at) < window_end]
+    valid_items = {item.id for item in session.scalars(select(PracticeItem).where(
+        PracticeItem.id.in_({response.item_id for response in responses}),
+        PracticeItem.tenant_id == student.tenant_id,
+        PracticeItem.owner_student_id.is_(None) | (PracticeItem.owner_student_id == student.id)))
+        if not item_arithmetic_issues(item)}
+    # Keep historical responses intact; an invalid reference supplies neither
+    # a completed-answer count nor a correct-answer count in today's report.
+    responses = [response for response in responses if response.item_id in valid_items]
     minutes = sum(max(0, ((utc(r.ended_at) if r.ended_at else utc(r.budget_ends_at)) - utc(r.started_at)).total_seconds()) for r in rows) / 60
     if not rows:
         summary = "本期没有安排额外活动。学校任务之外默认不加题，这不影响任何判断。"
@@ -804,6 +841,8 @@ def install_practice(app, engine, cfg, database_session, current_actor):
         if "student" not in actor.roles:
             raise Problem(403, "authorization", "forbidden", "额外活动只能由孩子本人选择开始。")
         session.scalar(select(Student).where(Student.id == student_id).with_for_update())
+        if payload.generation_job_id:
+            require_owned_generated_reference(session, student.tenant_id, student.id, payload.generation_job_id)
         if (replay := replay_idempotent(session, actor, student_id, operation, idempotency_key, payload.model_dump(mode="json"))) is not None:
             return replay
         if payload.generation_job_id:
@@ -917,6 +956,10 @@ def install_practice(app, engine, cfg, database_session, current_actor):
             raise Problem(403, "authorization", "forbidden", "由孩子本人选择重新作答。")
         session.scalar(select(Student).where(Student.id == row.student_id).with_for_update())
         row = load_session(session, actor, session_id, lock=True)
+        if not _generated_variant(row):
+            raise Problem(409, "conflict", "retry_not_available", "只有已核验的举一反三错题可以重新作答。")
+        require_owned_generated_reference(session, row.tenant_id, row.student_id,
+                                          row.gate["generation_job_id"], item_ids=row.item_ids)
         operation = f"POST /v1/practice-sessions/{session_id}/retry"
         body = payload.model_dump(mode="json")
         if (replay := replay_idempotent(session, actor, row.student_id, operation, idempotency_key, body)) is not None:
@@ -936,6 +979,7 @@ def install_practice(app, engine, cfg, database_session, current_actor):
         if row.purpose != "variant":
             raise Problem(409, "conflict", "hints_disabled", "小测进行中不提供提示；可以随时结束。")
         item = session.get(PracticeItem, item_id)
+        require_valid_reference(item)
         if item is None or item.graph_version != row.graph_version:
             raise Problem(409, "conflict", "revision_conflict", "题目与本次活动的教材版本不一致。")
         if not item.hint_text:
@@ -953,6 +997,7 @@ def install_practice(app, engine, cfg, database_session, current_actor):
         if item_id not in row.item_ids:
             raise Problem(409, "conflict", "revision_conflict", "题目不在本次活动中。")
         item = load_item(session, actor, item_id, lock=True)
+        require_valid_reference(item)
         if (item.graph_version != row.graph_version or item.owner_student_id not in (None, row.student_id)
                 or (item.status == "ai_verified" and item.owner_student_id != row.student_id)):
             raise Problem(409, "conflict", "revision_conflict", "题目与本次活动的学员或教材版本不一致。")
@@ -981,6 +1026,8 @@ def install_practice(app, engine, cfg, database_session, current_actor):
     @app.post("/v1/practice-sessions/{session_id}/responses", status_code=201, operation_id="answerPracticeItem")
     def answer(session_id: str, payload: AnswerInput, actor: ActorDep, session: SessionDep, idempotency_key: OptionalKey = None):
         row = load_session(session, actor, session_id, lock=True)
+        if payload.item_id in row.item_ids:
+            require_valid_reference(session.get(PracticeItem, payload.item_id))
         operation = f"POST /v1/practice-sessions/{session_id}/responses"
         if (replay := replay_idempotent(session, actor, row.student_id, operation, idempotency_key, payload.model_dump(mode="json"))) is not None:
             return JSONResponse(replay, status_code=202) if replay.get("result") == "pending" else replay

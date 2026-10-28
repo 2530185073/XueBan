@@ -37,8 +37,8 @@ describe('whole-page correction experience', () => {
     const row = sample('candidate', 'correct')
     row.checkJob = { ...fixture<Job>('successful_check_job'), status: 'running' }
     const html = renderToStaticMarkup(<ResultsSummary rows={[row]} detail={null} compact />)
-    expect(html).toContain('本次读到 1 题')
-    expect(html).toContain('AI 初判正确 0 道')
+    expect(html).toContain('本次作答 1 题 · 正确 0 道 · 错误 0 道')
+    expect(html).not.toMatch(/AI 初判|老师确认/)
     expect(html).toContain('处理中 1 道')
   })
   it('summarises mixed results separately and leaves correction available before all questions are confirmed', () => {

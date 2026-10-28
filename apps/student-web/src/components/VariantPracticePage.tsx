@@ -5,7 +5,14 @@ import type { Workspace } from '../useStudentWorkspace'
 import { RESUME_NOTICE, practiceMessage, statusLabels } from '../learning'
 
 export const generationPending = (job: VariantGeneration) => ['queued', 'generating', 'verifying'].includes(job.status)
+export const generationNeedsReplacement = (job?: VariantGeneration | null) => job?.status === 'superseded' && job.failure_code === 'verification_failed'
+export function generationFailureNotice(job: VariantGeneration | null): string | null {
+  if (job && generationNeedsReplacement(job)) return job.notice.trim() || '这道练习的参考答案未通过计算核验，请重新生成；原作答保留，但不计入练习反馈。'
+  if (job?.status !== 'failed' || !['source_structure_invalid', 'candidate_structure_invalid', 'reference_structure_invalid'].includes(job.failure_code ?? '')) return null
+  return job.notice.trim() || null
+}
 export function generationCopy(job: VariantGeneration): string {
+  if (generationNeedsReplacement(job)) return generationFailureNotice(job)!
   if (job.session_id) return '这道题已经开始过，作答记录已保留。'
   switch (job.status) {
     case 'queued': return '已收到你的选择，正在等待生成。'
@@ -13,13 +20,15 @@ export function generationCopy(job: VariantGeneration): string {
     case 'verifying': return '题目已生成，AI 正在独立核对题意、答案和题型。'
     case 'ready': return '题目已通过 AI 核验，可以开始。'
     case 'superseded': return '原题或教材记录已更新，请从最新的错题重新选择。'
-    case 'failed': return job.failure_code === 'verification_failed' ? '这次生成的题目未通过核验，暂不提供作答。' : job.failure_code === 'unsupported_source_type' ? '这道原题的题型暂时还不能可靠识别，可以先回到作业。' : '这次还没能准备好题目，可以稍后重试。'
+    case 'failed': return generationFailureNotice(job) ?? (job.failure_code === 'verification_failed' ? '这次生成的题目未通过核验，暂不提供作答。' : job.failure_code === 'unsupported_source_type' ? '这道原题的题型暂时还不能可靠识别，可以先回到作业。' : '这次还没能准备好题目，可以稍后重试。')
   }
 }
 
-export function VariantGenerationCard({ job, sourceText, busy, disabled, onOpen, onRetry }: { job: VariantGeneration; sourceText?: string; busy: boolean; disabled: boolean; onOpen: () => void; onRetry: () => void }) {
+export function VariantGenerationCard({ job: currentJob, sourceText, busy, disabled, generating = false, onOpen, onRetry }: { job: VariantGeneration; sourceText?: string; busy: boolean; disabled: boolean; generating?: boolean; onOpen: () => void; onRetry: () => void }) {
+  const job: VariantGeneration = generating ? { ...currentJob, status: 'generating', session_id: null, failure_code: null } : currentJob
   const pending = generationPending(job)
-  const retryable = job.status === 'failed' && !['unsupported_source_type', 'stale_source', 'source_not_eligible', 'curriculum_mismatch'].includes(job.failure_code ?? '')
+  const replaceInvalid = generationNeedsReplacement(job)
+  const retryable = replaceInvalid || job.status === 'failed' && !['unsupported_source_type', 'stale_source', 'source_not_eligible', 'curriculum_mismatch'].includes(job.failure_code ?? '')
   return <article className="variant-generation" aria-label="变式题准备情况">
     <div className="variant-generation-heading"><span className="eyebrow">你选择的一道题</span>{pending && <LoaderCircle className="spin" size={17} />}</div>
     {sourceText && <p className="variant-generation-source">原题：{sourceText}</p>}
@@ -27,18 +36,19 @@ export function VariantGenerationCard({ job, sourceText, busy, disabled, onOpen,
     {pending && <p className="muted small">等待不占用作答时间，可以先去做自己的作业。刷新后也能找回。</p>}
     {job.status === 'ready' && !job.session_id && <p className="muted small">AI 核验供参考；想试试时再开始，也可以先休息。</p>}
     <div className="hint-actions">
-      {(job.status === 'ready' || job.session_id) && <button className="button primary" disabled={busy || (disabled && !job.session_id)} onClick={onOpen}>{busy ? <LoaderCircle className="spin" size={17} /> : <ChevronRight size={17} />}{job.session_id ? '查看这次作答' : '开始这道题'}</button>}
-      {retryable && <button className="button secondary" disabled={disabled || busy} onClick={onRetry}><RefreshCw size={16} /> 再生成一次</button>}
+      {!replaceInvalid && (job.status === 'ready' || job.session_id) && <button className="button primary" disabled={busy || (disabled && !job.session_id)} onClick={onOpen}>{busy ? <LoaderCircle className="spin" size={17} /> : <ChevronRight size={17} />}{job.session_id ? '查看这次作答' : '开始这道题'}</button>}
+      {retryable && <button className="button secondary" disabled={disabled || busy} onClick={onRetry}><RefreshCw size={16} /> {replaceInvalid ? '重新生成' : '再生成一次'}</button>}
     </div>
   </article>
 }
 
-export function VariantGroupCard({ group, disabled, busy, generation, onStart }: { group: VariantErrorGroup; disabled: boolean; busy: boolean; generation?: VariantGeneration; onStart: (group: VariantErrorGroup) => void }) {
+export function VariantGroupCard({ group, disabled, busy, generation, generating = false, onStart }: { group: VariantErrorGroup; disabled: boolean; busy: boolean; generation?: VariantGeneration; generating?: boolean; onStart: (group: VariantErrorGroup) => void }) {
   const status = statusLabels[group.learning_status]
   const historical = group.curriculum_status === 'historical_unmatched'
-  const pending = generation && generationPending(generation)
+  const pending = generating || generation && generationPending(generation)
   const prepared = generation?.status === 'ready' && !generation.session_id
-  const availability = historical ? '保留原教材作答记录' : pending ? generationCopy(generation) : prepared ? '同题型题已准备好' : '想再试试时，由 AI 生成并核验一道'
+  const replaceInvalid = generationNeedsReplacement(generation)
+  const availability = historical ? '保留原教材作答记录' : generating ? 'AI 正在围绕原题，生成一道同题型题。' : (pending || replaceInvalid) && generation ? generationCopy(generation) : prepared ? '同题型题已准备好' : '想再试试时，由 AI 生成并核验一道'
   return <article className="variant-card">
     <div className="variant-card-head"><div><span className="eyebrow">错题归纳</span><h2>{group.name}</h2></div><span className={'status-pill ' + status.tone}>{status.label}</span></div>
     <div className="variant-card-summary"><strong>有 {group.error_count} 道题可以再看看</strong><span>{availability}</span></div>
@@ -47,7 +57,7 @@ export function VariantGroupCard({ group, disabled, busy, generation, onStart }:
     {historical ? <p className="muted small">这道题的教材与当前选择不同，暂不用于当前教材的练习。</p> : group.graph_version === null && <p className="muted small">知识点关联仍在整理，未确认的关联不会计入知识图谱。</p>}
     <button className="button primary full" disabled={disabled || busy || historical || !!pending} onClick={() => onStart(group)}>
       {busy || pending ? <LoaderCircle className="spin" size={17} /> : <Shuffle size={17} />}
-      {historical ? '原教材错题' : pending ? '准备中，可先做自己的作业' : prepared ? '开始已准备好的题' : generation?.session_id ? '查看这次作答' : '生成一道同题型'}
+      {historical ? '原教材错题' : pending ? '准备中，可先做自己的作业' : replaceInvalid ? '重新生成' : prepared ? '开始已准备好的题' : generation?.session_id ? '查看这次作答' : '生成一道同题型'}
       {!historical && !pending && <ChevronRight size={16} />}
     </button>
   </article>
@@ -59,8 +69,10 @@ export function VariantPracticePage({ workspace, onStarted, initialGeneration }:
   const [active, setActive] = useState<PracticeSession | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
+  const [generating, setGenerating] = useState('')
   const [error, setError] = useState('')
   const mounted = useRef(false), busyRef = useRef(false), loadVersion = useRef(0)
+  const replacementTokens = useRef(new Map<string, string>())
   const { client, studentId, recordVersion } = workspace
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; loadVersion.current++ } }, [])
   const load = useCallback(async (clearError = true) => {
@@ -111,17 +123,28 @@ export function VariantPracticePage({ workspace, onStarted, initialGeneration }:
     if (mounted.current) onStarted(session)
   })
   const generate = (caseId: string, knowledgeId?: string) => act(caseId, async () => {
-    const job = await client.generateVariant({ willing: true, source_case_id: caseId, count: 1, ...(knowledgeId ? { knowledge_id: knowledgeId } : {}) })
-    if (mounted.current) {
-      // An older poll must not erase the newly accepted task and stop its polling.
-      loadVersion.current++
-      setJobs(old => [job, ...old.filter(item => item.job_id !== job.job_id && item.source_case_id !== job.source_case_id)])
+    if (jobs.some(job => job.source_case_id === caseId && generationPending(job))) return
+    const previous = jobs.find(job => job.source_case_id === caseId)
+    let regenerateToken: string | undefined
+    if (previous && generationNeedsReplacement(previous)) {
+      // Allocate only on explicit retry; retain it if the receipt is lost.
+      regenerateToken = replacementTokens.current.get(previous.job_id) ?? crypto.randomUUID()
+      replacementTokens.current.set(previous.job_id, regenerateToken)
     }
+    setGenerating(caseId); loadVersion.current++
+    try {
+      const job = await client.generateVariant({ willing: true, source_case_id: caseId, count: 1, ...(knowledgeId ? { knowledge_id: knowledgeId } : {}), ...(regenerateToken ? { regenerate_token: regenerateToken } : {}) })
+      if (mounted.current) {
+        // An older poll must not erase the newly accepted task and stop its polling.
+        loadVersion.current++
+        setJobs(old => [job, ...old.filter(item => item.job_id !== job.job_id && item.source_case_id !== job.source_case_id)])
+      }
+    } finally { if (mounted.current) setGenerating('') }
   })
   const jobFor = (group: VariantErrorGroup) => jobs.find(job => job.source_case_id === group.source_case_id)
   const start = (group: VariantErrorGroup) => {
     const job = jobFor(group)
-    if (job && (job.status === 'ready' || job.session_id)) void open(job)
+    if (job && !generationNeedsReplacement(job) && (job.status === 'ready' || job.session_id)) void open(job)
     else void generate(group.source_case_id, group.graph_version === null ? undefined : group.knowledge_id)
   }
   // The API sorts newest first. Keep one current task per original question; no generation on reads.
@@ -134,9 +157,9 @@ export function VariantPracticePage({ workspace, onStarted, initialGeneration }:
     {overview && !overview.projection.pending && <div className="variant-sync ready" role="status"><Sparkles size={17} /><span>可核验的错题记录已归纳，知识点关联会保留自己的依据。</span></div>}
     {active && <div className="continue-banner"><div><strong>上次的活动还没有结束</strong><p className="muted">可以继续上次的{active.purpose === 'variant' ? '举一反三' : '预习'}，也可以随时结束。</p></div><button className="button primary" onClick={() => onStarted(active, RESUME_NOTICE)}>继续上次活动 <ChevronRight size={17} /></button></div>}
     {error && <div className="inline-error" role="alert"><p>{error}</p><button className="text-button" disabled={!!busy || loading} onClick={() => void load()}><RefreshCw size={15} /> 刷新状态</button></div>}
-    {recentJobs.length > 0 && <section className="variant-generations" aria-label="我选择的变式题">{recentJobs.map(job => <VariantGenerationCard key={job.job_id} job={job} sourceText={sourceText(job)} busy={busy === job.source_case_id} disabled={!!active || !!busy || !!workspace.busy} onOpen={() => void open(job)} onRetry={() => void generate(job.source_case_id, job.knowledge_id ?? undefined)} />)}</section>}
+    {recentJobs.length > 0 && <section className="variant-generations" aria-label="我选择的变式题">{recentJobs.map(job => <VariantGenerationCard key={job.job_id} job={job} sourceText={sourceText(job)} busy={busy === job.source_case_id} generating={generating === job.source_case_id} disabled={!!active || !!busy || !!workspace.busy} onOpen={() => void open(job)} onRetry={() => void generate(job.source_case_id, job.knowledge_id ?? undefined)} />)}</section>}
     {loading ? <div className="variant-empty" role="status"><LoaderCircle className="spin" size={27} /><p>正在整理你的错题类型…</p></div>
-      : overview && overview.groups.length ? <><div className="variant-grid">{overview.groups.map(group => <VariantGroupCard key={group.knowledge_id} group={group} generation={jobFor(group)} disabled={!!active || !!busy || !!workspace.busy} busy={busy === group.source_case_id} onStart={start} />)}</div>{overview.pending_count > 0 && <p className="muted small variant-pending-note">还有 {overview.pending_count} 道题目前识别不确定，暂不纳入错题归纳。</p>}</>
+      : overview && overview.groups.length ? <><div className="variant-grid">{overview.groups.map(group => <VariantGroupCard key={group.knowledge_id} group={group} generation={jobFor(group)} disabled={!!active || !!busy || !!workspace.busy} busy={busy === group.source_case_id} generating={generating === group.source_case_id} onStart={start} />)}</div>{overview.pending_count > 0 && <p className="muted small variant-pending-note">还有 {overview.pending_count} 道题目前识别不确定，暂不纳入错题归纳。</p>}</>
       : overview && overview.pending_count > 0 ? <div className="variant-empty"><span className="ready-symbol"><LoaderCircle size={23} /></span><h2>还有题目需要确认</h2><p>已识别到 {overview.pending_count} 道题，但 AI 目前还不能可靠判断对错。</p></div>
       : error && !overview ? <div className="variant-empty"><h2>错题归纳暂时没有加载</h2><p>可以重试，也可以先回到自己的作业。</p></div>
       : <div className="variant-empty"><span className="ready-symbol"><Sparkles size={23} /></span><h2>还没有可归纳的错题</h2><p>完成作业后，AI 判定为错误或部分正确的题会自动出现在这里。</p></div>}

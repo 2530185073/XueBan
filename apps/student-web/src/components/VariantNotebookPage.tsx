@@ -6,6 +6,7 @@ import { normalizePhoto } from '../core/photo'
 import { applyPracticeAnswer, applyPracticeAssessment, assessmentPending } from '../practice-state'
 import { buildPracticeSubmission, practiceSubmissionReady, restoredPracticeInput, type PracticeInputValue } from './PracticeRunner'
 import { MathText } from './MathText'
+import { generationFailureNotice, generationNeedsReplacement } from './VariantPracticePage'
 import { useObjectUrl } from './useObjectUrl'
 import '../variant-notebook.css'
 
@@ -27,6 +28,7 @@ export interface NotebookEntry {
   input: PracticeInputValue; photo: NormalizedPhoto | null; regenerateToken: string | null
   busy: boolean; error: string; storageError: string; unconfirmed: boolean; loaded: boolean
   generationRequest?: boolean
+  generationAttempted?: boolean
   solutionRevision?: number
 }
 export interface NotebookSnapshot { items: NotebookItem[]; loading: boolean; error: string; activeCase: string | null; entries: Record<string, NotebookEntry> }
@@ -116,7 +118,7 @@ export class VariantNotebookController {
     let entry = this.entry(row.case_id)
     const newerGeneration = entry && row.generation_id && row.generation_id !== entry.row.generation_id && row.generation_id !== entry.generationId
     const newerSession = entry && row.session_id && row.session_id !== entry.row.session_id && row.session_id !== entry.session?.id
-    if (!entry || !entry.regenerateToken && (newerGeneration || newerSession)) {
+    if (!entry || !entry.busy && !entry.regenerateToken && (newerGeneration || newerSession)) {
       entry = { row, job: null, generationId: row.generation_id, session: null, input: blankInput(), photo: null, regenerateToken: null,
         busy: false, error: '', storageError: '', unconfirmed: false, loaded: false }
       this.snapshot.entries[row.case_id] = entry
@@ -151,10 +153,11 @@ export class VariantNotebookController {
   private acceptJob(entry: NotebookEntry, job: VariantGeneration) {
     if (job.student_id !== this.studentId || job.source_case_id !== entry.row.case_id) throw ownedError()
     entry.job = job; entry.generationId = job.job_id
+    if (generationNeedsReplacement(job)) entry.session = null
   }
   private async finishGeneration(entry: NotebookEntry, current: () => boolean) {
     const job = entry.job
-    if (!job || !current()) return
+    if (!job || !current() || generationNeedsReplacement(job)) return
     if (job.session_id || job.status === 'ready') {
       const session = job.session_id ? await this.client.practiceSession(job.session_id)
         : await this.client.startPractice({ purpose: 'variant', willing: true, generation_job_id: job.job_id, count: 1 })
@@ -163,7 +166,25 @@ export class VariantNotebookController {
       this.saveDraft(entry.row.case_id); void this.refresh()
     }
   }
-  async prepare(caseId: string) {
+  prepare(caseId: string) { return this.prepareEntry(caseId, false) }
+  retryGeneration(caseId: string) { return generationNeedsReplacement(this.entry(caseId)?.job) ? this.regenerate(caseId) : this.prepareEntry(caseId, true) }
+  private async requestGeneration(entry: NotebookEntry, current: () => boolean) {
+    entry.generationAttempted = true; entry.generationRequest = true
+    // Neither an older list response nor its cached failure may undo this retry.
+    this.readVersion++; this.publish()
+    // A saved intent also prevents reopening after a lost POST receipt from retrying silently.
+    await this.save(entry)
+    if (!current()) return
+    const job = await this.client.generateVariant({ willing: true, count: 1, source_case_id: entry.row.case_id,
+      ...(entry.regenerateToken ? { regenerate_token: entry.regenerateToken } : {}) })
+    if (!current()) return
+    this.acceptJob(entry, job); entry.generationRequest = false
+    this.readVersion++
+    this.publish({ items: this.snapshot.items.map(row => row.case_id === entry.row.case_id
+      ? { ...row, generation_id: job.job_id, generation_status: job.status, session_id: job.session_id ?? null } : row) })
+    this.saveDraft(entry.row.case_id)
+  }
+  private async prepareEntry(caseId: string, retryGeneration: boolean) {
     const entry = this.entry(caseId)
     if (!entry) return
     await this.act(entry, async current => {
@@ -174,46 +195,48 @@ export class VariantNotebookController {
         if (draft && (sameGeneration || draft.regenerate_token)) { entry.input = draft.input; entry.photo = draft.photo; entry.regenerateToken = draft.regenerate_token }
         const generationId = draft?.regenerate_token ? draft.generation_id : entry.row.generation_id ?? draft?.generation_id
         const sessionId = draft?.regenerate_token ? null : entry.row.session_id ?? (sameGeneration ? draft?.session_id : null)
+        entry.generationAttempted = !!draft || !!generationId || !!sessionId
         entry.generationId = generationId ?? null
+        // A saved session can refer to an invalidated reference answer. Check the job first.
+        if (generationId) {
+          const job = await this.client.variantGeneration(generationId)
+          if (!current()) return
+          this.acceptJob(entry, job)
+          if (generationNeedsReplacement(job)) { entry.loaded = true; return }
+        }
         if (sessionId) {
           const session = await this.client.practiceSession(sessionId)
           if (!current()) return
           this.acceptSession(entry, session); entry.loaded = true; this.saveDraft(caseId); return
         }
-        if (generationId) {
-          const job = await this.client.variantGeneration(generationId)
-          if (!current()) return
-          this.acceptJob(entry, job)
-        }
         entry.loaded = true
       }
       if (entry.session) {
+        if (entry.generationId) {
+          const job = await this.client.variantGeneration(entry.generationId)
+          if (!current()) return
+          this.acceptJob(entry, job)
+          if (generationNeedsReplacement(job)) return
+        }
         const session = await this.client.practiceSession(entry.session.id)
         if (!current()) return
         this.acceptSession(entry, session); void this.refresh(); return
       }
-      if (!entry.job || ['failed', 'superseded'].includes(entry.job.status)) {
-        entry.generationRequest = true; this.publish()
-        const job = await this.client.generateVariant({ willing: true, count: 1, source_case_id: caseId,
-          ...(entry.regenerateToken ? { regenerate_token: entry.regenerateToken } : {}) })
-        if (!current()) return
-        this.acceptJob(entry, job); entry.generationRequest = false; this.saveDraft(caseId)
+      // Only the first open may generate automatically; later attempts require the retry control.
+      if ((!entry.generationAttempted && !entry.job) || (retryGeneration && (!entry.job || ['failed', 'superseded'].includes(entry.job.status)))) {
+        await this.requestGeneration(entry, current)
       }
       await this.finishGeneration(entry, current)
     })
   }
   async regenerate(caseId: string) {
     const entry = this.entry(caseId)
-    if (!entry || entry.busy || !this.valid()) return
+    if (!entry || entry.busy || pendingGeneration(entry.job) || entry.regenerateToken && !entry.session && !generationNeedsReplacement(entry.job) || !this.valid()) return
     await this.act(entry, async current => {
       entry.regenerateToken = crypto.randomUUID(); entry.job = null; entry.generationId = null; entry.session = null
-      entry.generationRequest = true
       entry.input = blankInput(); entry.photo = null; entry.unconfirmed = false; entry.loaded = true
-      this.publish(); await this.save(entry)
-      if (!current()) return
-      const job = await this.client.generateVariant({ willing: true, count: 1, source_case_id: caseId, regenerate_token: entry.regenerateToken! })
-      if (!current()) return
-      this.acceptJob(entry, job); entry.generationRequest = false; this.saveDraft(caseId); await this.finishGeneration(entry, current)
+      await this.requestGeneration(entry, current)
+      await this.finishGeneration(entry, current)
     })
   }
   async choosePhoto(caseId: string, file: File) {
@@ -450,7 +473,8 @@ export function trapNotebookFocus(event: Pick<KeyboardEvent, 'key' | 'shiftKey' 
 
 export function NotebookModal({ entry, controller, client }: { entry: NotebookEntry; controller: VariantNotebookController; client: StudentClient }) {
   const titleId = useId(), descriptionId = useId(), dialog = useRef<HTMLDivElement>(null), camera = useRef<HTMLInputElement>(null), album = useRef<HTMLInputElement>(null)
-  const caseId = entry.row.case_id, item = entry.session?.items[0]
+  const invalidReference = generationNeedsReplacement(entry.job)
+  const caseId = entry.row.case_id, item = invalidReference ? undefined : entry.session?.items[0]
   const imageUrl = useObjectUrl(client, entry.photo?.blob ?? null)
   useEffect(() => {
     const node = dialog.current
@@ -478,18 +502,19 @@ export function NotebookModal({ entry, controller, client }: { entry: NotebookEn
   const submission: PracticeSubmission | null = item ? buildPracticeSubmission(item, entry.input) : null
   const photoChange = (event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void controller.choosePhoto(caseId, file) }
   const retryResponse = item?.response && item.response.result !== 'correct'
-  const generationFailed = entry.job?.status === 'failed' || entry.job?.status === 'superseded'
+  const generationFailed = !entry.generationRequest && (entry.job?.status === 'failed' || entry.job?.status === 'superseded' || !entry.job && entry.generationAttempted && !entry.busy)
+  const retryPreparation = () => invalidReference ? controller.regenerate(caseId) : entry.session || pendingGeneration(entry.job) || !entry.loaded ? controller.prepare(caseId) : controller.retryGeneration(caseId)
   return <div className="notebook-overlay" onClick={event => { if (event.target === event.currentTarget) controller.close() }}>
     <div ref={dialog} className="notebook-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} tabIndex={-1}>
       <header className="notebook-dialog-heading"><div><h2 id={titleId}>举一反三练习</h2><p id={descriptionId}>一次一道，随时退出，下次接着练。</p></div><button className="icon-button notebook-close" aria-label="退出" onClick={() => controller.close()}><X size={21} aria-hidden="true" /></button></header>
       <div className="notebook-dialog-body">
         <details className="notebook-source"><summary>查看原题</summary><p><MathText text={entry.row.question_text || '原题文字暂缺'} /></p></details>
-        {entry.error && <div className="notebook-error" role="alert"><p>{entry.error}</p><button className="text-button" disabled={entry.busy} onClick={() => void controller.prepare(caseId)}><RefreshCw size={15} aria-hidden="true" />{entry.session ? '刷新提交状态' : '重试准备'}</button></div>}
+        {entry.error && <div className="notebook-error" role="alert"><p>{entry.error}</p><button className="text-button" disabled={entry.busy} onClick={() => void retryPreparation()}><RefreshCw size={15} aria-hidden="true" />{invalidReference ? '重新生成' : entry.session ? '刷新提交状态' : '重试准备'}</button></div>}
         {entry.storageError && <div className="notebook-error" role="alert"><p>{entry.storageError}</p><button className="text-button" onClick={() => controller.saveDraft(caseId)}>重试保存草稿</button></div>}
         {!item && <div className="notebook-preparing" role="status" aria-live="polite">
           {!generationFailed && !entry.error && <LoaderCircle size={26} className="spin" aria-hidden="true" />}
-          <p>{generationFailed ? '这次还没准备好题目，可以重试。' : entry.error ? '准备暂时中断，进度会保留。' : entry.job?.status === 'verifying' ? '正在核对题目与答案…' : entry.job?.status === 'generating' ? '正在根据原题准备一道新题…' : '正在准备你的练习…'}</p>
-          {generationFailed && <button className="button secondary" disabled={entry.busy} onClick={() => void controller.prepare(caseId)}>重试准备</button>}
+          <p>{entry.generationRequest ? '正在根据原题准备一道新题…' : generationFailed ? generationFailureNotice(entry.job) ?? '这次还没准备好题目，可以重试。' : entry.error ? '准备暂时中断，进度会保留。' : entry.job?.status === 'verifying' ? '正在核对题目与答案…' : entry.job?.status === 'generating' ? '正在根据原题准备一道新题…' : '正在准备你的练习…'}</p>
+          {generationFailed && !entry.error && <button className="button secondary" disabled={entry.busy} onClick={() => void retryPreparation()}>{invalidReference ? '重新生成' : '重试准备'}</button>}
         </div>}
         {item && <>
           <p className="notebook-practice-stem"><MathText text={item.stem_text} /></p>

@@ -1,7 +1,11 @@
 import { StudentError } from './errors'
+import type { RegistrationGrade } from './types'
 import { valid } from './validation'
 
 const accountErrorStatus: Record<string, number> = { invalid_credentials: 401, login_rate_limited: 429, password_change_required: 403, username_conflict: 409 }
+export const isRegistrationGrade = (value: unknown): value is RegistrationGrade => typeof value === 'number' && [5, 6, 7, 8].includes(value)
+export const isRegistrationUsername = (value: unknown): value is string => typeof value === 'string' && value.length <= 64 && value.trim() === value && /^荣耀学员[0-9]{3,}$/.test(value)
+const exactObject = (value: unknown, keys: string[]): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key))
 // Codes of the later-phase learning endpoints that the phase-one Problem enum does not list.
 export const learningErrorStatus: Record<string, number> = { forbidden: 403, optional_gate_closed: 409, practice_not_needed: 409, course_unknown: 409, curriculum_mismatch: 409, subject_already_recognized: 409, no_reviewed_items: 409, hints_disabled: 409, practice_active: 409, unsupported_source_type: 409, stale_source: 409, source_not_eligible: 409, generation_not_ready: 409, assessment_pending: 409 }
 
@@ -19,7 +23,7 @@ export class StudentApi {
   async request<T>(path: string, shape: string, body?: string, key?: string, publicRequest = false, method?: 'PUT', onUnauthorized: () => void = this.revoked): Promise<T> {
     if (!path.startsWith('/v1/') || path.split('?')[0].includes('..') || path.includes('#') || path.includes('\\')) throw new StudentError('invalid_path', 422)
     const stillCurrent = this.captureSessionFence()
-    const token = this.token(); if (!publicRequest && !token) throw new StudentError('authentication_required', 401)
+    const token = publicRequest ? null : this.token(); if (!publicRequest && !token) throw new StudentError('authentication_required', 401)
     const headers: Record<string, string> = { Accept: 'application/json' }
     if (!publicRequest) headers.Authorization = `Bearer ${token}`
     if (body !== undefined && !key) throw new StudentError('missing_idempotency_key', 422)
@@ -36,7 +40,15 @@ export class StudentApi {
     }
     let value: unknown
     try { value = JSON.parse(new TextDecoder().decode(await this.bounded(response))) } catch { throw new StudentError('invalid_response', 502) }
-    if (shape === 'AuthSession') {
+    if (shape === 'RegistrationOptions') {
+      if (!exactObject(value, ['enabled', 'username_preview', 'grades']) || typeof value.enabled !== 'boolean' || !Array.isArray(value.grades)) throw new StudentError('invalid_response', 502)
+      const grades = value.grades
+      if (value.enabled
+        ? !isRegistrationUsername(value.username_preview) || !grades.length || grades.length > 4 || !grades.every(isRegistrationGrade) || new Set(grades).size !== grades.length
+        : value.username_preview !== null || grades.length !== 0) throw new StudentError('invalid_response', 502)
+    } else if (shape === 'RegistrationResult') {
+      if (!exactObject(value, ['username', 'student_id', 'grade']) || !isRegistrationUsername(value.username) || typeof value.student_id !== 'string' || value.student_id.trim() !== value.student_id || !/^[a-z][a-z0-9_-]{2,63}$/.test(value.student_id) || !isRegistrationGrade(value.grade)) throw new StudentError('invalid_response', 502)
+    } else if (shape === 'AuthSession') {
       const p = value as { access_token?: unknown; expires_at?: unknown; must_change_password?: unknown }
       if (!p || typeof p.access_token !== 'string' || !p.access_token || p.access_token.length > 16384 || typeof p.expires_at !== 'string' || !Number.isFinite(Date.parse(p.expires_at)) || typeof p.must_change_password !== 'boolean') throw new StudentError('invalid_response', 502)
     } else if (shape === 'Account') {

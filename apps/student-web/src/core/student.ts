@@ -1,7 +1,8 @@
 import { detailFromSnapshot, type HomeworkDetailRead } from './homeworkDetail'
 import { isRecognitionProgress, type RecognitionProgress } from './recognitionProgress'
 import type { Account, AdminRequestOptions, AuthSession, Accepted, RecognitionRecoveryStatus, RecognitionRecheckAccepted, AssetAccess, AttemptRead, CaseDetail, CaseRecord, CheckRun, CorrectionCase, CreateCorrection, CreateHelp, DecisionRead, DraftSummary, DraftView, HelpRequest, Hint, HomeworkDetail, HomeworkPage, HomeworkSession, HomeworkSummary, IdentityContext, ImageAsset, InputVersions, Job, JournalEntry, NormalizedPhoto, QuestionRead, RequestHint, Review, StoredDraft, StoredPage, UploadTicket } from './types'
-import { StudentApi } from './api'
+import { isRegistrationGrade, isRegistrationUsername, StudentApi } from './api'
+import type { RegistrationOptions, RegistrationResult } from './types'
 import { StudentError, safeError } from './errors'
 import { DRAFT_FORMAT, DraftStore, LEGACY_PAGE_ID, LOCAL_TTL_MS, type PurgeReport } from './store'
 import { editPhoto, imageDimensions, normalizePhoto } from './photo'
@@ -54,7 +55,7 @@ export function decisionLabel(row: CaseDetail): string {
 }
 interface Context { scope: string; student: string; epoch: number; detailSession?: Session }
 interface Session { access_token: string; expires_at: string; kind: 'account' }
-interface PendingAuth { body: string; key: string }
+interface PendingAuth { body: string; key: string; flight?: Promise<unknown> }
 export interface ClientOptions { detailSnapshotEnabled?: boolean; origin?: string; transport?: typeof fetch; storage?: Storage; store?: DraftStore; normalize?: (file: Blob, maxBytes?: number) => Promise<NormalizedPhoto>; edit?: (source: NormalizedPhoto, edit: PageEdit, maxBytes?: number) => Promise<NormalizedPhoto>; sleep?: (ms: number) => Promise<void>; now?: () => number }
 export class StudentClient {
   private session: Session | null = null
@@ -216,12 +217,28 @@ export class StudentClient {
     try { return await this.readyAccount() }
     catch (error) { if (this.currentSession(epoch, session)) { this.currentAccount = null; this.currentIdentity = null; this.student = null; this.dropMedia(); this.changed() } throw error }
   }
-  private async authWrite<T>(path: string, payload: unknown, shape: string, publicRequest = false): Promise<T> {
+  private async authWrite<T>(path: string, payload: unknown, shape: string, publicRequest = false, accepts?: (value: T) => boolean): Promise<T> {
     const body = JSON.stringify(payload), previous = this.pendingAuth.get(path)
-    if (previous && previous.body !== body) throw new StudentError('auth_request_unknown', 409, '上次操作的结果还未确认，请用刚才相同的内容重试；也可以刷新后重新登录。')
+    if (previous && previous.body !== body) throw new StudentError('auth_request_unknown', 409, path === '/v1/auth/register' ? '上次注册的结果还未确认，请用刚才相同的密码、确认密码和年级重试，避免重复创建账号。' : '上次操作的结果还未确认，请用刚才相同的内容重试；也可以刷新后重新登录。')
     const pending = previous ?? { body, key: crypto.randomUUID() }; this.pendingAuth.set(path, pending)
-    try { const result = await this.api.request<T>(path, shape, pending.body, pending.key, publicRequest); this.pendingAuth.delete(path); return result }
-    catch (error) { if (error instanceof StudentError && [400, 401, 403, 422, 429].includes(error.status)) this.pendingAuth.delete(path); throw error }
+    if (pending.flight) return pending.flight as Promise<T>
+    // Share simultaneous retries and never let an old completion clear a newer request.
+    const clear = () => { if (this.pendingAuth.get(path) === pending) this.pendingAuth.delete(path) }
+    pending.flight = Promise.resolve().then(async () => {
+      try {
+        const result = await this.api.request<T>(path, shape, pending.body, pending.key, publicRequest)
+        if (accepts && !accepts(result)) throw new StudentError('invalid_response', 502)
+        clear(); return result
+      } catch (error) {
+        // A committed registration can become temporarily inaccessible or rate limited
+        // during replay. Keep its original key so recovery cannot create another account.
+        const retainRegistration = path === '/v1/auth/register' && error instanceof StudentError && [403, 429].includes(error.status)
+        if (error instanceof StudentError && [400, 401, 403, 422, 429].includes(error.status) && !retainRegistration) clear()
+        throw error
+      }
+      finally { pending.flight = undefined }
+    })
+    return pending.flight as Promise<T>
   }
   private acceptSession(value: AuthSession) {
     if (Date.parse(value.expires_at) <= Date.now()) throw new StudentError('authentication_required', 401)
@@ -230,16 +247,36 @@ export class StudentClient {
   }
   async login(username: string, password: string): Promise<IdentityContext | null> {
     const normalized = username.trim().toLowerCase()
-    if (!/^[a-z0-9][a-z0-9._-]{2,63}$/.test(normalized) || !password || [...password].length > 128 || new TextEncoder().encode(password).length > 512) throw new StudentError('invalid_login', 422, '请填写正确的账号和密码。')
+    if (!(isRegistrationUsername(normalized) || /^[a-z0-9][a-z0-9._-]{2,63}$/.test(normalized)) || [...password].length < 3 || [...password].length > 128 || new TextEncoder().encode(password).length > 512) throw new StudentError('invalid_login', 422, '请填写正确的账号和密码。')
     this.clearSession(false); const epoch = this.epoch
     const result = await this.authWrite<AuthSession>('/v1/auth/login', { username: normalized, password }, 'AuthSession', true)
     if (epoch !== this.epoch) throw new StudentError('session_changed', 401)
     this.acceptSession(result)
     return this.readyAccount()
   }
+  registrationOptions(): Promise<RegistrationOptions> {
+    return this.api.request('/v1/auth/registration', 'RegistrationOptions', undefined, undefined, true)
+  }
+  /** Registration creates an account only; it never installs or clears a login session. */
+  async register(password: string, confirmPassword: string, grade: number): Promise<RegistrationResult> {
+    if (typeof password !== 'string' || password.length < 3 || password.length > 15 || /[^A-Za-z0-9]/.test(password)) throw new StudentError('invalid_password', 422, '密码需要3–15位英文字母或数字，可以是纯数字或纯字母。')
+    if (confirmPassword !== password) throw new StudentError('password_mismatch', 422, '两次输入的密码不一致，请重新确认。')
+    if (!isRegistrationGrade(grade)) throw new StudentError('invalid_grade', 422, '请选择五、六、七或八年级。')
+    try {
+      return await this.authWrite<RegistrationResult>('/v1/auth/register', { password, confirm_password: confirmPassword, grade }, 'RegistrationResult', true, result => result.grade === grade)
+    } catch (error) {
+      if (error instanceof StudentError && error.status === 403 && error.code === 'access_denied') throw new StudentError(error.code, error.status, '临时注册暂未开放或注册校区不可用，请联系老师；恢复后请用原内容重试。')
+      if (error instanceof StudentError && error.status === 429) throw new StudentError(error.code, error.status, '注册尝试次数较多，请稍后用相同的密码、确认密码和年级重试。')
+      throw error
+    }
+  }
   async changePassword(currentPassword: string | null, newPassword: string): Promise<IdentityContext | null> {
     if (!this.session) throw new StudentError('authentication_required', 401)
-    if ([...newPassword].length < 15 || [...newPassword].length > 128 || new TextEncoder().encode(newPassword).length > 512 || !currentPassword || [...currentPassword].length > 128 || new TextEncoder().encode(currentPassword).length > 512) throw new StudentError('invalid_password', 422, '请填写初始或当前密码；新密码需要15–128个字符。')
+    const studentPassword = !!this.currentAccount?.student_id
+    const validNew = studentPassword
+      ? newPassword.length >= 3 && newPassword.length <= 15 && !/[^A-Za-z0-9]/.test(newPassword)
+      : [...newPassword].length >= 15 && [...newPassword].length <= 128 && new TextEncoder().encode(newPassword).length <= 512
+    if (!validNew || !currentPassword || [...currentPassword].length < 3 || [...currentPassword].length > 128 || new TextEncoder().encode(currentPassword).length > 512) throw new StudentError('invalid_password', 422, studentPassword ? '请填写初始或当前密码；新密码需要3–15位英文字母或数字，可以是纯数字或纯字母。' : '请填写初始或当前密码；新密码需要15–128个字符。')
     const epoch = this.epoch
     const payload = { current_password: currentPassword, new_password: newPassword }
     const result = await this.authWrite<AuthSession>('/v1/auth/change-password', payload, 'AuthSession')
@@ -714,13 +751,17 @@ export class StudentClient {
     return value
   }
 
-  private async pollJobs(ctx: Context, ids: string[], draft?: StoredDraft): Promise<Job[]> {
+  private async pollJobs(ctx: Context, ids: string[], draft?: StoredDraft, onProgress?: () => Promise<void>): Promise<Job[]> {
     const latest = new Map<string, Job>(), uniqueIds = unique(ids)
     for (let count = 0; count < JOB_POLL_ROUNDS; count++) {
       const pending = uniqueIds.filter(id => !latest.has(id) || active(latest.get(id)!))
       if (!pending.length) return [...latest.values()]
       const current = await Promise.all(pending.map(id => this.read<Job>(ctx, `/v1/jobs/${encoded(id)}`, 'Job')))
+      const progressed = current.some(job => { const previous = latest.get(job.id); return !previous || previous.revision !== job.revision || previous.status !== job.status })
       current.forEach(job => latest.set(job.id, job))
+      // Coalesce changes into one awaited refresh per round. Unchanged polls
+      // keep their backoff; the caller owns the final refresh after all settle.
+      if (onProgress && progressed && [...latest.values()].some(active)) { await onProgress(); this.check(ctx) }
       if (draft) {
         const before = JSON.stringify(draft.observation)
         this.observeJobs(draft, [...latest.values()])
@@ -746,7 +787,7 @@ export class StudentClient {
     const key = `${this.epoch}:${id}`; const existing = this.runs.get(key)
     // Explicit input changes must not inherit an older background run.
     if (existing) return options.forceCheckCaseIds?.length || options.retryFailed || options.rerecognize ? existing.then(() => this.runDraft(id, options)) : existing
-    const run = async () => { const ctx = await this.authorize(); if (typeof navigator !== 'undefined' && navigator.locks) return navigator.locks.request(`xueban:${ctx.scope}:${id}`, () => this.process(ctx, id, options)); return this.process(ctx, id, options) }
+    const run = async () => { const ctx = { ...await this.authorize(), detailSession: this.session! }; if (typeof navigator !== 'undefined' && navigator.locks) return navigator.locks.request(`xueban:${ctx.scope}:${id}`, () => this.process(ctx, id, options)); return this.process(ctx, id, options) }
     const result = run().finally(() => { this.runs.delete(key) }); this.runs.set(key, result); return result
   }
   private async process(ctx: Context, id: string, options: { retryFailed?: boolean; rerecognize?: boolean; forceCheckCaseIds?: string[]; forceCheckToken?: string }): Promise<DraftView> {
@@ -894,7 +935,11 @@ export class StudentClient {
         }
         d.checkJobs[caseId] = job.id; checkJobs.set(caseId, job); await this.save(ctx, d)
       }
-      const polled = await this.pollJobs(ctx, [...checkJobs.values()].map(job => job.id), d)
+      const polled = await this.pollJobs(ctx, [...checkJobs.values()].map(job => job.id), d, async () => {
+        // Reuse the full ownership/input-version validation and let pollJobs
+        // save and notify subscribers before waiting for the remaining jobs.
+        d.detail = await this.detail(ctx, d.homeworkId!)
+      })
       d.detail = await this.detail(ctx, d.homeworkId)
       const rows = d.detail.cases.filter(row => !d.correction || row.case.id === d.correction.caseId)
       const currentJobs = rows.flatMap(row => row.checkJob ? [row.checkJob] : [])

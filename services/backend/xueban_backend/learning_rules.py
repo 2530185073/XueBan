@@ -92,6 +92,16 @@ def hints_seen_before(attempt: dict, hints: list[dict]) -> list[dict]:
     return [h for h in hints if h.get("first_shown_at") and parse(h["first_shown_at"]) <= occurred]
 
 
+def practice_feedback_kind(*, hint_used: bool, repeated: bool) -> str:
+    """Describe an observation, not verified independence or mastery.
+
+    Use the help snapshot saved at submission, never the session's mutable
+    hints_used list: viewing the solution afterwards cannot change history.
+    A repeated item is never a fresh independent success, even without hints.
+    """
+    return "retry" if repeated else "assisted" if hint_used else "first_unassisted"
+
+
 def assistance(attempt: dict, hints: list[dict], condition: str | None) -> str:
     if condition:
         return condition

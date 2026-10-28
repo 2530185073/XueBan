@@ -13,13 +13,155 @@ from .curriculum_catalog import (canonical_subject, curriculum_matches_scope, gr
                                  node_matches_scope, scope_payload, scopes_for_profile)
 from .learning_link_scope import select_current_links
 from .learning_mapping import MAPPING_VERSION, model_input_binding
-from .learning_models import KnowledgeNode, LearningOutbox, QuestionKnowledgeLink, StudentLearningProfile
+from .learning_models import (KnowledgeNode, LearningOutbox, PracticeItem, PracticeResponse, PracticeSession,
+                              QuestionKnowledgeLink, StudentLearningProfile, VariantGeneration)
 from .learning_projection import published_graph
-from .learning_rules import authoritative_decision
+from .learning_rules import authoritative_decision, practice_feedback_kind
 from .models import Homework
+from .providers.variant_arithmetic import item_arithmetic_issues
 
 NOTICE = ("只统计当前所选教材范围内、当前作答仍判错或部分正确的题目；其他学科和旧版教材作业不在此范围。"
           "未关联表示归类信息不足，不表示新增薄弱点，也不需要为此额外做题。")
+
+
+def subject_feedback(session, student, scopes):
+    """Current homework samples and separately submitted verified variants.
+
+    Works without a graph. No mapping or node is inferred from a generated
+    question, and absent help is not treated as staff-verified independence.
+    The API must authorize the student before invoking this read-only helper.
+    """
+    result = {subject: {"correct_count": 0, "incorrect_count": 0, "partial_count": 0,
+        "scorable_count": 0, "homework_feedback": {"model_count": 0, "staff_count": 0, "pending_count": 0},
+        "practice_feedback": {"total": 0, "first_unassisted_count": 0, "first_unassisted_correct": 0,
+            "first_unassisted_incorrect": 0, "assisted_count": 0, "retry_count": 0,
+            "items": [], "truncated": False}} for subject in scopes}
+    homeworks = {row.id: row for row in session.scalars(select(Homework).where(
+        Homework.student_id == student.id, Homework.tenant_id == student.tenant_id,
+        Homework.processing_blocked.is_(False)))}
+    if not student.active or not homeworks or not scopes:
+        return result
+    entities = list(session.scalars(select(Entity).where(Entity.homework_id.in_(homeworks),
+        Entity.kind.in_(("case", "question", "attempt", "decision")))))
+    by_id = {row.id: row for row in entities}
+    decisions = defaultdict(list)
+    for row in entities:
+        if row.kind == "decision":
+            decisions[row.document.get("case_id")].append(row.document)
+    scoped_cases = {}
+    for case in entities:
+        c = case.document
+        if case.kind != "case" or c.get("lifecycle") != "active":
+            continue
+        question = by_id.get(c.get("question_id"))
+        if (question is None or question.kind != "question" or question.homework_id != case.homework_id
+                or question.document.get("lifecycle", "active") != "active"):
+            continue
+        q = question.document
+        subject = canonical_subject((question.annotations or {}).get("subject_override") or q.get("subject"))
+        if subject not in scopes or not curriculum_matches_scope(homeworks[case.homework_id].curriculum or {}, scopes[subject]):
+            continue
+        scoped_cases[case.id] = (case, question, subject)
+        counts = result[subject]
+        feedback = counts["homework_feedback"]
+        attempt = by_id.get(c.get("current_attempt_id"))
+        decision = authoritative_decision(attempt.id, decisions[case.id], {}) if attempt else None
+        decision_row = by_id.get(decision.get("id")) if decision else None
+        versions = decision.get("input_versions", {}) if decision else {}
+        if (attempt is None or attempt.kind != "attempt" or attempt.homework_id != case.homework_id
+                or decision is None or decision != c.get("current_decision")
+                or decision_row is None or decision_row.homework_id != case.homework_id
+                or decision.get("revision") != decision_row.revision
+                or q.get("question_id") != question.id or q.get("revision") != question.revision
+                or c.get("current_question_revision") != question.revision
+                or attempt.document.get("case_id") != case.id or attempt.document.get("question_id") != question.id
+                or versions.get("question_id") != question.id or versions.get("question_revision") != question.revision
+                or versions.get("attempt_recognition_revision") != attempt.document.get("recognition_revision")
+                or decision.get("verdict") not in {"correct", "incorrect", "partially_correct"}
+                or decision["origin"] == "model" and (
+                    attempt.document.get("recognition_status") != "ready" or attempt.document.get("answer_status") != "present"
+                    or not (attempt.document.get("answer_text") or "").strip()
+                    or attempt.document.get("recognition_uncertainties") or q.get("recognition_uncertainties"))):
+            feedback["pending_count"] += 1
+            continue
+        counts["scorable_count"] += 1
+        counts["correct_count" if decision["verdict"] == "correct" else "incorrect_count"] += 1
+        counts["partial_count"] += decision["verdict"] == "partially_correct"
+        feedback["model_count" if decision["origin"] == "model" else "staff_count"] += 1
+
+    # Join all ownership boundaries, not merely a session or item id supplied
+    # by a stored row. Failed generation/assessment without a response counts
+    # neither as practice nor as a wrong answer.
+    responses = list(session.scalars(select(PracticeResponse).where(
+        PracticeResponse.student_id == student.id, PracticeResponse.tenant_id == student.tenant_id)
+        .order_by(PracticeResponse.occurred_at, PracticeResponse.id)))
+    activities = {row.id: row for row in session.scalars(select(PracticeSession).where(
+        PracticeSession.student_id == student.id, PracticeSession.tenant_id == student.tenant_id))}
+    generations = {row.id: row for row in session.scalars(select(VariantGeneration).where(
+        VariantGeneration.student_id == student.id, VariantGeneration.tenant_id == student.tenant_id))}
+    items = {row.id: row for row in session.scalars(select(PracticeItem).where(
+        PracticeItem.owner_student_id == student.id, PracticeItem.tenant_id == student.tenant_id))}
+    def is_retry(response):
+        activity = activities.get(response.session_id)
+        return bool(activity and (activity.gate or {}).get("retry_of_session_id"))
+
+    # A retry can share a timestamp with its parent (e.g. imported records).
+    # Preserve the initial observation instead of ordering by random UUIDs.
+    responses.sort(key=lambda row: (row.occurred_at, is_retry(row), row.id))
+    seen = set()
+    for response in responses:
+        repeated = response.item_id in seen
+        seen.add(response.item_id)
+        activity, item = activities.get(response.session_id), items.get(response.item_id)
+        gate = (activity.gate or {}) if activity else {}
+        generation = generations.get(gate.get("generation_job_id"))
+        if (activity is None or item is None or generation is None
+                or activity.purpose != "variant" or response.event_type != "optional_variant"
+                or response.result not in {"correct", "incorrect"}
+                or activity.item_ids != [item.id] or generation.item_id != item.id
+                or activity.source_case_id != generation.source_case_id
+                or activity.knowledge_ids != ([item.knowledge_id] if item.knowledge_id else [])
+                or response.graph_version != activity.graph_version or item.graph_version != activity.graph_version
+                or generation.graph_version != item.graph_version or response.knowledge_id != item.knowledge_id
+                or generation.knowledge_id != item.knowledge_id
+                or generation.status not in {"ready", "superseded"}
+                or item.status != "ai_verified" or (item.verification or {}).get("status") != "verified"
+                or (item.verification or {}).get("source") != "ai"
+                or (item.generation or {}).get("job_id") != generation.id
+                or (item.generation or {}).get("source_fingerprint") != generation.source_fingerprint):
+            continue
+        # Older rows can claim AI verification despite malformed blank
+        # mappings or a numerically false reference. Use the same persisted
+        # item guard as grading; never rewrite history or regrade here.
+        if item_arithmetic_issues(item):
+            continue
+        source = scoped_cases.get(generation.source_case_id)
+        if source is None:
+            continue
+        case, question, subject = source
+        snapshot = generation.snapshot
+        if (snapshot.get("student_id") != student.id or snapshot.get("tenant_id") != student.tenant_id
+                or snapshot.get("source_case_id") != case.id
+                or snapshot.get("homework_id") != case.homework_id or snapshot.get("question_id") != question.id
+                or snapshot.get("question_revision") != question.revision
+                or not curriculum_matches_scope(snapshot.get("source_curriculum") or {}, scopes[subject])):
+            continue
+        kind = practice_feedback_kind(hint_used=response.hint_used,
+            repeated=repeated or is_retry(response))
+        feedback = result[subject]["practice_feedback"]
+        feedback["total"] += 1
+        feedback[f"{kind}_count"] += 1
+        if kind == "first_unassisted":
+            feedback[f"first_unassisted_{response.result}"] += 1
+        feedback["items"].append({"response_id": response.id, "session_id": activity.id, "item_id": item.id,
+            "case_id": case.id, "homework_id": case.homework_id, "result": response.result,
+            "kind": kind, "hint_used": response.hint_used, "occurred_at": response.occurred_at.isoformat(),
+            "stem_preview": item.stem_text[:180]})
+    for counts in result.values():
+        feedback = counts["practice_feedback"]
+        feedback["truncated"] = feedback["total"] > 20
+        feedback["items"] = list(reversed(feedback["items"]))[:20]
+    return result
 
 
 def _moment(value):

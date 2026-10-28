@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createStudentClient, remoteDraftId, safeError, type EditChange } from './core'
 import { shouldObserveDraft, type CorrectionTarget } from './presentation'
-import type { Account, CaseDetail, CreateHelp, DraftSummary, DraftView, Hint, HomeworkDetail, HomeworkSession, HomeworkSummary, IdentityContext } from './core/types'
+import type { Account, CaseDetail, CreateHelp, DraftSummary, DraftView, Hint, HomeworkDetail, HomeworkSession, HomeworkSummary, IdentityContext, RegistrationResult } from './core/types'
 import type { CurriculumBooks, StudentCurriculum } from './core/learning'
 import { checkHomeworkSetup } from './core/homeworkSetup'
 import type { CurriculumContext } from './core/student'
@@ -189,6 +189,11 @@ export function useStudentWorkspace() {
     /** Learning panels handle their own errors; one that signed the account out is shown like any other. */
     report: (failure: unknown) => { if (!client.identity) fail(failure) },
     login: (username: string, password: string) => sessionAction('正在登录', async () => { clearWork(); await client.login(username, password); await sync(); await deviceNotice(); await refreshCurriculum(); await resumeActive() }),
+    register: async (password: string, confirmPassword: string, grade: number): Promise<RegistrationResult | null> => {
+      let result: RegistrationResult | null = null
+      await action('正在注册', async () => { result = await client.register(password, confirmPassword, grade) })
+      return result
+    },
     changePassword: (currentPassword: string, newPassword: string) => sessionAction('正在保存新密码', async () => { await client.changePassword(currentPassword, newPassword); await sync(); await refreshCurriculum(); setNotice('密码已更新，以后用新密码登录同一个作业本。') }),
     reconnect: () => sessionAction('正在恢复连接', async () => { await client.restore(); await sync(); await deviceNotice() }),
     logout: () => action('正在退出登录', async () => { remember(null); try { await client.logout() } finally { clearWork() } await sync(); setError(null); setNotice(null) }),

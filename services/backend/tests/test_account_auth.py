@@ -24,6 +24,7 @@ from xueban_backend.models import Campus, Homework, Principal, PrincipalRole, St
 PASSWORD = 'original synthetic password'
 NEW_PASSWORD = 'changed synthetic password'
 RESET_PASSWORD = 'reset synthetic password'
+STUDENT_PASSWORD = 'Stu123'
 
 
 @pytest.fixture
@@ -59,7 +60,7 @@ def bearer(token):
 
 def permanent(client):
     old = login(client).json()['access_token']
-    response = post(client, '/v1/auth/change-password', {'current_password': PASSWORD, 'new_password': NEW_PASSWORD}, old)
+    response = post(client, '/v1/auth/change-password', {'current_password': PASSWORD, 'new_password': STUDENT_PASSWORD}, old)
     assert response.status_code == 200, response.text
     return response.json()['access_token']
 
@@ -79,7 +80,7 @@ def test_forced_change_preserves_identity_and_revokes_old_token(accounts, databa
         with pytest.raises(ValueError, match='pairing is disabled'):
             issue_pairing(session, cfg, 'actor_a')
     key = 'change-once-unknown-response'
-    body = {'current_password': PASSWORD, 'new_password': NEW_PASSWORD}
+    body = {'current_password': PASSWORD, 'new_password': STUDENT_PASSWORD}
     changed = post(client, '/v1/auth/change-password', body, token, key)
     assert changed.status_code == 200, changed.text
     new = changed.json()
@@ -92,10 +93,103 @@ def test_forced_change_preserves_identity_and_revokes_old_token(accounts, databa
     assert identity['actor_id'] == 'actor_a'
     assert [s['student_id'] for s in identity['authorized_students']] == ['student_a']
     assert login(client, password=PASSWORD).status_code == 401
-    assert login(client, password=NEW_PASSWORD).json()['must_change_password'] is False
+    assert login(client, password=STUDENT_PASSWORD).json()['must_change_password'] is False
     created = post(client, '/v1/students/student_a/homeworks', payload, new['access_token'])
     assert created.status_code == 201, created.text
     assert created.json()['scope']['student_id'] == 'student_a'
+
+
+@pytest.mark.parametrize('new_password', ['abc', '123', 'aB3', 'aB3' * 5])
+def test_student_short_password_login_and_subsequent_change(accounts, new_password):
+    client, _, _ = accounts
+    initial = login(client).json()['access_token']
+    changed = post(client, '/v1/auth/change-password', {'current_password': PASSWORD, 'new_password': new_password}, initial)
+    assert changed.status_code == 200, changed.text
+    assert changed.json()['must_change_password'] is False
+    signed_in = login(client, password=new_password)
+    assert signed_in.status_code == 200, signed_in.text
+    token = signed_in.json()['access_token']
+    assert client.get('/v1/me', headers=bearer(token)).status_code == 200
+    same = post(client, '/v1/auth/change-password', {'current_password': new_password, 'new_password': new_password}, token)
+    assert same.status_code == 422
+    changed_again = post(client, '/v1/auth/change-password', {'current_password': new_password, 'new_password': STUDENT_PASSWORD}, token)
+    assert changed_again.status_code == 200, changed_again.text
+    assert client.get('/v1/me', headers=bearer(token)).status_code == 401
+    assert login(client, password=new_password).status_code == 401
+    assert login(client, password=STUDENT_PASSWORD).status_code == 200
+
+
+@pytest.mark.parametrize('new_password', [
+    '', 'xy', 'a' * 16, 'abc!', 'ab c', 'abc\n', 'é12', '１２３', NEW_PASSWORD,
+])
+def test_student_change_rejects_invalid_new_password_without_revoking_session(accounts, new_password):
+    client, _, _ = accounts
+    token = login(client).json()['access_token']
+    response = post(client, '/v1/auth/change-password', {'current_password': PASSWORD, 'new_password': new_password}, token)
+    assert response.status_code == 422, response.text
+    assert PASSWORD not in response.text
+    if new_password:
+        assert new_password not in response.text
+    account = client.get('/v1/auth/account', headers=bearer(token))
+    assert account.status_code == 200
+    assert account.json()['must_change_password'] is True
+    assert login(client).status_code == 200
+
+
+def test_forced_student_change_still_requires_valid_current_password(accounts):
+    client, _, _ = accounts
+    token = login(client).json()['access_token']
+    body = {'new_password': STUDENT_PASSWORD}
+    assert post(client, '/v1/auth/change-password', body, token).status_code == 422
+    for current in (None, '', 'ab', 'a' * 129):
+        response = post(client, '/v1/auth/change-password', {**body, 'current_password': current}, token)
+        assert response.status_code == 422, response.text
+    wrong = post(client, '/v1/auth/change-password', {**body, 'current_password': 'bad'}, token)
+    assert wrong.status_code == 401 and wrong.json()['code'] == 'invalid_credentials'
+    assert client.get('/v1/auth/account', headers=bearer(token)).json()['must_change_password'] is True
+    changed = post(client, '/v1/auth/change-password', {**body, 'current_password': PASSWORD}, token)
+    assert changed.status_code == 200, changed.text
+
+
+@pytest.mark.parametrize('legacy_password', ['a' * 128, '😀' * 128, '  合成旧密码 Unicode secret  '])
+def test_student_legacy_long_unicode_password_can_login_and_change(accounts, database, legacy_password):
+    client, cfg, _ = accounts
+    with Session(database.engine) as session, session.begin():
+        set_password_account(session, cfg, principal_id='actor_a', student_id='student_a', username_value='student.alpha', password_value=legacy_password, must_change=False)
+    signed_in = login(client, password=legacy_password)
+    assert signed_in.status_code == 200, signed_in.text
+    assert signed_in.json()['must_change_password'] is False
+    token = signed_in.json()['access_token']
+    if legacy_password != legacy_password.strip():
+        assert login(client, password=legacy_password.strip()).status_code == 401
+        wrong = post(client, '/v1/auth/change-password', {'current_password': legacy_password.strip(), 'new_password': STUDENT_PASSWORD}, token)
+        assert wrong.status_code == 401
+    changed = post(client, '/v1/auth/change-password', {'current_password': legacy_password, 'new_password': STUDENT_PASSWORD}, token)
+    assert changed.status_code == 200, changed.text
+    assert login(client, password=legacy_password).status_code == 401
+    assert login(client, password=STUDENT_PASSWORD).status_code == 200
+
+
+def test_admin_self_change_keeps_strong_password_policy(accounts):
+    client, _, _ = accounts
+    token = login(client, 'admin.alpha').json()['access_token']
+    for new_password in (STUDENT_PASSWORD, 'a' * 14):
+        response = post(client, '/v1/auth/change-password', {'current_password': PASSWORD, 'new_password': new_password}, token)
+        assert response.status_code == 422, response.text
+    changed = post(client, '/v1/auth/change-password', {'current_password': PASSWORD, 'new_password': NEW_PASSWORD}, token)
+    assert changed.status_code == 200, changed.text
+    assert login(client, 'admin.alpha', NEW_PASSWORD).status_code == 200
+
+
+def test_admin_create_and_reset_keep_strong_temporary_password_policy(accounts):
+    client, _, _ = accounts
+    admin = login(client, 'admin.alpha').json()['access_token']
+    for password in (STUDENT_PASSWORD, 'a' * 14):
+        created = post(client, '/v1/admin/student-accounts', {'username': 'weak.student', 'student_name': '合成学生', 'campus_id': 'campus_a', 'initial_password': password}, admin)
+        assert created.status_code == 422, created.text
+        reset = post(client, '/v1/admin/student-accounts/student_a/reset-password', {'new_password': password}, admin)
+        assert reset.status_code == 422, reset.text
+    assert login(client).status_code == 200
 
 
 def test_login_idempotency_persistence_and_no_credential_storage(accounts, database, caplog):
@@ -138,11 +232,11 @@ def test_disabled_account_or_revoked_student_cannot_use_session(accounts, databa
         session.get(StudentGrant, ('actor_a', 'student_a')).active = False
     assert client.get('/v1/auth/account', headers=bearer(token)).status_code == 401
     assert client.get('/v1/me', headers=bearer(token)).status_code == 403
-    assert login(client, password=NEW_PASSWORD).status_code == 401
+    assert login(client, password=STUDENT_PASSWORD).status_code == 401
     with Session(database.engine) as session, session.begin():
         session.get(StudentGrant, ('actor_a', 'student_a')).active = True
         session.get(PasswordAccount, 'student.alpha').active = False
-    assert login(client, password=NEW_PASSWORD).status_code == 401
+    assert login(client, password=STUDENT_PASSWORD).status_code == 401
     assert client.get('/v1/me', headers=bearer(token)).status_code == 401
 
 
@@ -162,6 +256,35 @@ def test_password_lockout_is_database_persistent(accounts, database):
         assert session.get(PasswordAccount, 'student.alpha').failed_attempts == 0
 
 
+def test_short_password_login_and_wrong_current_share_lockout(accounts, database):
+    client, _, _ = accounts
+    token = permanent(client)
+    change_body = {'current_password': STUDENT_PASSWORD, 'new_password': 'Next123'}
+    for attempt in range(5):
+        if attempt % 2 == 0:
+            response = login(client, password='bad')
+        else:
+            response = post(client, '/v1/auth/change-password', {**change_body, 'current_password': 'bad'}, token)
+        assert response.status_code == 401, response.text
+        assert response.json()['code'] == 'invalid_credentials'
+    for response in (login(client, password=STUDENT_PASSWORD),
+                     post(client, '/v1/auth/change-password', change_body, token)):
+        assert response.status_code == 429, response.text
+        assert response.json()['code'] == 'login_rate_limited'
+    with Session(database.engine) as session, session.begin():
+        account = session.get(PasswordAccount, 'student.alpha')
+        assert account.failed_attempts == 5
+        assert account.locked_until is not None
+        account.locked_until = datetime.now(timezone.utc) - timedelta(seconds=1)
+    recovered = login(client, password=STUDENT_PASSWORD)
+    assert recovered.status_code == 200, recovered.text
+    assert recovered.json()['must_change_password'] is False
+    with Session(database.engine) as session:
+        account = session.get(PasswordAccount, 'student.alpha')
+        assert account.failed_attempts == 0
+        assert account.locked_until is None
+
+
 def test_unknown_username_has_generic_error_and_persistent_throttle(accounts):
     client, cfg, _ = accounts
     for _ in range(5):
@@ -177,7 +300,7 @@ def test_logout_invalidates_session_and_replays(accounts):
     assert post(client, '/v1/auth/logout', {}, token, 'logout-request-one').json() == {'logged_out': True}
     assert post(client, '/v1/auth/logout', {}, token, 'logout-request-one').json() == {'logged_out': True}
     for ended in (client.get('/v1/auth/account', headers=bearer(token)),
-                  post(client, '/v1/auth/change-password', {'current_password': PASSWORD, 'new_password': NEW_PASSWORD}, token)):
+                  post(client, '/v1/auth/change-password', {'current_password': PASSWORD, 'new_password': STUDENT_PASSWORD}, token)):
         assert ended.status_code == 401 and ended.json()['code'] == 'authentication_required'
 
 
@@ -235,10 +358,10 @@ def test_admin_reset_revokes_sessions_replays_and_preserves_history(accounts, da
     assert post(client, path, body, admin, 'reset-original-key').json() == reset.json()
     assert client.get('/v1/auth/account', headers=bearer(token)).status_code == 401
     assert client.get('/v1/me', headers=bearer(token)).status_code == 401
-    assert login(client, password=NEW_PASSWORD).status_code == 401
+    assert login(client, password=STUDENT_PASSWORD).status_code == 401
     interim = login(client, password=RESET_PASSWORD).json()['access_token']
     assert client.get('/v1/me', headers=bearer(interim)).json()['code'] == 'password_change_required'
-    changed = post(client, '/v1/auth/change-password', {'current_password': RESET_PASSWORD, 'new_password': NEW_PASSWORD}, interim).json()['access_token']
+    changed = post(client, '/v1/auth/change-password', {'current_password': RESET_PASSWORD, 'new_password': STUDENT_PASSWORD}, interim).json()['access_token']
     assert client.get('/v1/homeworks/' + homework['id'], headers=bearer(changed)).json()['id'] == homework['id']
     assert post(client, path, body, admin, 'reset-original-key').json()['code'] == 'stale_input'
     with Session(database.engine) as session:
@@ -249,7 +372,7 @@ def test_admin_reset_revokes_sessions_replays_and_preserves_history(accounts, da
 @pytest.mark.parametrize('body', [
     {'username': 'ab', 'password': PASSWORD},
     {'username': 'bad!name', 'password': PASSWORD},
-    {'username': 'student.alpha', 'password': 'short'},
+    {'username': 'student.alpha', 'password': 'xy'},
     {'username': 'student.alpha', 'password': 'a'*129},
     {'username': 'student.alpha', 'password': PASSWORD, 'role': 'campus_admin'},
 ])

@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom'
 import { ArrowLeft, ArrowUpRight, BookOpen, ChevronRight, CircleDot, Clock3, Compass, Leaf, List, LoaderCircle, Map as MapIcon, Presentation, RefreshCw, X } from 'lucide-react'
 import { safeError } from '../core'
 import { CurriculumBookPicker } from './CurriculumBookPicker'
-import type { EvidenceSources, KnowledgeDetail, KnowledgeMap, MappingCoverage } from '../core/learning'
+import type { CurriculumSubject, EvidenceSources, KnowledgeDetail, KnowledgeMap, MappingCoverage } from '../core/learning'
 import type { Workspace } from '../useStudentWorkspace'
 import { sourceLabel, assistanceLabel, dayLabel, eventLabel, knowledgeChapters, knowledgeNodes, PENDING_NOTICE, reasonText, resultLabels, statusLabels } from '../learning'
 import { isKnowledgeDemoEnabled } from '../dev/knowledgeDemoGate'
@@ -16,6 +16,69 @@ const KnowledgeDemoPage = import.meta.env.DEV ? lazy(() => import('../dev/Knowle
 type OpenHomework = (homeworkId: string, caseId: string, evidence?: EvidenceTarget) => void
 
 const mappingStateText = { no_direct_match: '暂未找到直接对应的教材知识点', mapping_pending: '知识点归类尚未完成', not_linked: '尚未形成有效的知识点关联' }
+
+type PracticeFeedbackItem = {
+  response_id: string; session_id: string; item_id: string; case_id: string; homework_id: string
+  kind: 'first_unassisted' | 'assisted' | 'retry'; result: 'correct' | 'incorrect'
+  hint_used: boolean; occurred_at: string; stem_preview: string
+}
+type SubjectFeedback = {
+  homework_feedback: { model_count: number; staff_count: number; pending_count: number }
+  practice_feedback: {
+    total: number; first_unassisted_count: number; first_unassisted_correct: number; first_unassisted_incorrect: number
+    assisted_count: number; retry_count: number; items: PracticeFeedbackItem[]; truncated: boolean
+  }
+}
+
+// Optional additive API fields are validated at this consumer. Older maps
+// retain their existing subject statistics without inventing practice data.
+function subjectFeedback(subject: CurriculumSubject): SubjectFeedback | null {
+  const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
+  const count = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0
+  const h: unknown = 'homework_feedback' in subject ? subject.homework_feedback : null
+  const p: unknown = 'practice_feedback' in subject ? subject.practice_feedback : null
+  if (!record(h) || !record(p) || !['model_count', 'staff_count', 'pending_count'].every(key => count(h[key]))
+    || !['total', 'first_unassisted_count', 'first_unassisted_correct', 'first_unassisted_incorrect', 'assisted_count', 'retry_count'].every(key => count(p[key]))
+    || !Array.isArray(p.items) || p.items.length > 20 || typeof p.truncated !== 'boolean') return null
+  if (!p.items.every((item: unknown) => record(item)
+    && ['response_id', 'session_id', 'item_id', 'case_id', 'homework_id'].every(key => typeof item[key] === 'string' && !!item[key] && item[key].length <= 200)
+    && ['first_unassisted', 'assisted', 'retry'].includes(String(item.kind)) && ['correct', 'incorrect'].includes(String(item.result))
+    && typeof item.hint_used === 'boolean' && typeof item.occurred_at === 'string' && Number.isFinite(Date.parse(item.occurred_at))
+    && typeof item.stem_preview === 'string' && item.stem_preview.length <= 180)) return null
+  const feedback = { homework_feedback: h, practice_feedback: p } as SubjectFeedback
+  const practice = feedback.practice_feedback, homework = feedback.homework_feedback
+  if (homework.model_count + homework.staff_count !== subject.scorable_count
+    || practice.total !== practice.first_unassisted_count + practice.assisted_count + practice.retry_count
+    || practice.first_unassisted_count !== practice.first_unassisted_correct + practice.first_unassisted_incorrect
+    || practice.items.length !== Math.min(practice.total, 20) || practice.truncated !== (practice.total > 20)
+    || new Set(practice.items.map(item => item.response_id)).size !== practice.items.length) return null
+  return feedback
+}
+
+export function SubjectFeedbackNote({ subjects, onOpenHomework }: { subjects?: CurriculumSubject[]; onOpenHomework?: OpenHomework }) {
+  const rows = (subjects ?? []).map(subject => ({ subject, feedback: subjectFeedback(subject) }))
+    .filter(({ subject, feedback }) => subject.scorable_count || feedback?.homework_feedback.pending_count || feedback?.practice_feedback.total)
+  if (!rows.length) return null
+  return <section className="knowledge-mapping-gap" aria-label="作答与练习参考记录">
+    <div><span className="eyebrow">已经留下的学习足迹</span><h3>作业和练习，都有记录</h3>
+      <p>以下是当前教材范围内的作答样本。AI 判定可能需要复核，样本参考分不代表知识掌握率。</p></div>
+    {rows.map(({ subject, feedback }) => <article key={subject.subject}>
+      <h3>{subject.subject} · {subject.publisher_name}</h3>
+      <p>作业：{subject.scorable_count} 道有可用判定，正确 {subject.correct_count} 道，部分正确 {subject.partial_count} 道，错误 {Math.max(0, subject.incorrect_count - subject.partial_count)} 道。
+        {subject.score_percent !== null && <>样本参考分 {subject.score_percent}。</>}</p>
+      {feedback && <p className="small muted">其中 AI 初判 {feedback.homework_feedback.model_count} 道，老师核实 {feedback.homework_feedback.staff_count} 道；另有 {feedback.homework_feedback.pending_count} 道待核实，暂不计入参考分。</p>}
+      {!subject.graph_ready && <p>对应教材的知识点目录尚未完成审核；这些作答先保留为参考记录，知识点关联与掌握状态待确认。</p>}
+      {!!feedback?.practice_feedback.total && <>
+        <p>已核验变式作答 {feedback.practice_feedback.total} 次：首次且未记录提示或答案帮助 {feedback.practice_feedback.first_unassisted_count} 次（正确 {feedback.practice_feedback.first_unassisted_correct} 次，错误 {feedback.practice_feedback.first_unassisted_incorrect} 次）；帮助后首次作答 {feedback.practice_feedback.assisted_count} 次；同题重做 {feedback.practice_feedback.retry_count} 次。</p>
+        <details><summary>查看练习记录</summary><ul>{feedback.practice_feedback.items.map(item => <li key={item.response_id}>
+          <span><span className="mapping-question">{item.stem_preview}</span><small>{dayLabel(item.occurred_at)} · {item.kind === 'retry' ? '同题重做' : item.kind === 'assisted' ? '提示或答案后作答' : '首次作答，未记录应用内帮助'} · {item.result === 'correct' ? '本次做对' : '本次仍需练习'}</small></span>
+          {onOpenHomework && <button className="text-button" onClick={() => onOpenHomework(item.homework_id, item.case_id)}>回看来源原题 <ArrowUpRight size={15} /></button>}
+        </li>)}</ul>{feedback.practice_feedback.truncated && <p className="small muted">这里展示最近 20 次，统计包含全部符合范围的作答。</p>}</details>
+        <p className="small muted">题目与答案已通过 AI 核验，尚未经老师核实。未记录帮助不等于已确认独立完成；看答案后做对或同题重做，不直接升级为掌握。</p>
+      </>}
+    </article>)}
+  </section>
+}
 
 export function MappingCoverageNote({ coverage, onOpenHomework }: { coverage?: MappingCoverage; onOpenHomework?: OpenHomework }) {
   if (!coverage?.unlinked) return null
@@ -95,10 +158,17 @@ export function KnowledgeDetailView({ detail, onBack, pending = false, onOpenNod
   </section>
 }
 
-function MapEmpty({ pending, hasScope }: { pending: boolean; hasScope: boolean }) {
+const graphUnavailableText = {
+  missing_grade: '还未登记当前年级，请先选择年级，才能核对对应教材范围。',
+  catalog_unavailable: '当前教材目录来源尚未核对完整，暂不能提供知识点图谱。已有作答会保留为参考记录。',
+  no_reviewed_graph: '当前年级与教材范围内没有已完成审核的知识图谱。已有作答会保留为参考记录，暂不生成知识点或掌握状态。',
+  no_matching_nodes: '已发布图谱中没有与当前教材范围匹配的知识点。已有作答会保留为参考记录，待教材范围核对完成。',
+}
+
+function MapEmpty({ pending, hasScope, reason }: { pending: boolean; hasScope: boolean; reason?: keyof typeof graphUnavailableText }) {
   return <div className="knowledge-empty"><div className="knowledge-empty-symbol"><BookOpen size={35} strokeWidth={1.3} /><span><Leaf size={17} /></span></div><span className="eyebrow">每个人，都有自己的节奏</span>
     <h2>{pending ? '正在整理你的学习足迹' : hasScope ? '这张地图，还在慢慢准备' : '从自己的学校作业开始'}</h2>
-    <p>{pending ? '新的作答正在进入地图。完成前，先不展示旧判断。' : hasScope ? '对应教材的知识点目录尚未就绪。拍照检查可以继续，目录校对完成后再呈现真实知识关系。' : '选好当前年级。以后每次有效的作答和订正，都会成为了解自己的依据。'}</p>
+    <p>{reason ? graphUnavailableText[reason] : pending ? '新的作答正在进入地图。完成前，先不展示旧判断。' : hasScope ? '对应教材的知识点目录尚未就绪。拍照检查可以继续，目录校对完成后再呈现真实知识关系。' : '选好当前年级。以后每次有效的作答和订正，都会成为了解自己的依据。'}</p>
     <small>没有记录，不等于不会；也不需要为填满地图额外做题。</small></div>
 }
 
@@ -115,11 +185,14 @@ export function KnowledgeMapView({ map, onOpen, selectedId, onOpenHomework, deta
   const activeSubject = subjects.includes(subject) ? subject : 'all'
   const scoped = nodes.filter(node => activeSubject === 'all' || node.subject === activeSubject)
   const chapters = knowledgeChapters(scoped), activeChapter = chapters.find(chapter => chapter.id === chapterId)
-  const visible = activeChapter?.nodes ?? scoped, recorded = nodes.filter(node => node.valid_evidence_count > 0).length, pending = map.projection.pending
+  const visible = activeChapter?.nodes ?? scoped, recorded = nodes.filter(node => node.valid_evidence_count > 0).length, pending = !!nodes.length && map.projection.pending
+  const unavailable = 'graph_unavailable_reason' in map ? map.graph_unavailable_reason : undefined
+  const reason = typeof unavailable === 'string' && Object.hasOwn(graphUnavailableText, unavailable) ? unavailable as keyof typeof graphUnavailableText : undefined
   return <div className="knowledge-map-overview">
+    <SubjectFeedbackNote subjects={map.subjects} onOpenHomework={onOpenHomework} />
     <MappingCoverageNote coverage={map.mapping_coverage} onOpenHomework={onOpenHomework} />
     {pending && <p className="knowledge-pending" role="status"><RefreshCw size={17} /> {PENDING_NOTICE}</p>}
-    {!nodes.length ? <MapEmpty pending={pending} hasScope={!!map.grade} /> : <>
+    {!nodes.length ? <MapEmpty pending={pending} hasScope={!!map.grade} reason={reason} /> : <>
       <div className="knowledge-map-intro"><div><span className="knowledge-folio"><Leaf size={16} /> 我的学习足迹</span><h2>看见一点点，走稳每一步。</h2><p>选择一个知识点，看看它和哪次作答有关。</p></div><div className="knowledge-map-tally">{pending ? <><Clock3 size={24} /><span>更新中</span></> : <><strong>{recorded}<small> / {nodes.length}</small></strong><span>个知识点有作答记录</span></>}</div></div>
       {subjects.length > 1 && <div className="knowledge-subject-tabs" aria-label="按学科查看"><button aria-pressed={activeSubject === 'all'} onClick={() => { setSubject('all'); setChapterId('all') }}>全部学科</button>{subjects.map(name => <button key={name} aria-pressed={activeSubject === name} onClick={() => { setSubject(name); setChapterId('all') }}>{name}</button>)}</div>}
       <div className={`knowledge-browser ${view === 'map' ? 'star' : ''}`}><nav className="knowledge-chapters" aria-label="知识地图章节"><span className="eyebrow">章节索引</span>

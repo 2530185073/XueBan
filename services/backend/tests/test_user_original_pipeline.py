@@ -69,6 +69,19 @@ def request_task(request):
     return json.loads(content[0]["text"])["task_input"]
 
 
+def source_reading(page):
+    sources = {"present": "handwritten", "blank": "empty", "unclear": "unreadable"}
+    return {"readings": [{
+        "target": index, "page": item["page"], "label": item["label"],
+        "stem_text": item["stem_text"], "question_type": item.get("question_type", "unknown"),
+        "options": item.get("options", []), "blank_count": item.get("blank_count", 0),
+        "answer_text": item["answer_text"], "source": sources[item["answer_status"]],
+        "answer_slots": [{"index": slot["index"], "prompt": slot["prompt"],
+                          "answer_text": slot["answer_text"], "source": sources[slot["answer_status"]]}
+                         for slot in item["answer_slots"]], "uncertainties": item["uncertainties"],
+    } for index, item in enumerate(page["items"])]}
+
+
 def test_public_types_and_original_policy_are_worker_compatible():
     for name in ("ArkSettings", "ProviderError", "CandidateResult", "Metadata", "Attempt", "Usage", "OutputDiagnostic"):
         assert getattr(user_original, name) is getattr(public_ark, name)
@@ -81,7 +94,7 @@ def test_public_types_and_original_policy_are_worker_compatible():
     assert type(result.metadata) is public_ark.Metadata
     assert type(result.metadata.attempts[0]) is public_ark.Attempt
     assert result.host_call_journal is None and result.metadata.attempts[0].transport is None
-    assert result.prompt_version == original_pipeline.PROMPT_VERSION == "photo-correction.v20-grade-level-solutions"
+    assert result.prompt_version == original_pipeline.PROMPT_VERSION == "photo-correction.v22-fast-verified-check"
     with pipeline([]) as flow, pytest.raises(public_ark.ProviderError, match="^invalid_input$"):
         flow.recognize(images=())
 
@@ -161,7 +174,8 @@ def test_whole_page_then_each_question_uses_ds_and_only_needed_astra(monkeypatch
     page["items"].append({**deepcopy(page["items"][0]), "label": "2", "answer_text": "4"})
     wrong = checked(correction_method="负数平方后结果为正。")
     right = checked(verdict="correct", correct_answer=None, correction_method=None)
-    flow, requests = isolated_factory(monkeypatch, [page, wrong, right], [right])
+    right["readback"]["answer_text"] = "4"
+    flow, requests = isolated_factory(monkeypatch, [page, wrong, right], [source_reading(page), right])
     with flow:
         recognized = flow.recognize(images=(picture(),))
         results = []
@@ -173,12 +187,14 @@ def test_whole_page_then_each_question_uses_ds_and_only_needed_astra(monkeypatch
     assert [item.data["verdict"] for item in results] == ["incorrect", "correct"]
     assert [len(item.metadata.attempts) for item in results] == [1, 2]
     assert [item.metadata.usage.total_tokens for item in results] == [130, 260]
-    assert [request.url.path for request in requests] == ["/api/v3/chat/completions"] * 3 + ["/v1/responses"]
-    assert [request.headers["authorization"] for request in requests] == ["Bearer " + SECRET] * 3 + ["Bearer " + ASTRA_SECRET]
-    assert request_task(requests[1])["provisional_transcription"]["answer_text"] == "-4"
-    assert request_task(requests[2])["provisional_transcription"]["answer_text"] == "4"
-    assert request_task(requests[3])["primary_candidate_for_independent_review"]["verdict"] == "correct"
-    assert json.loads(requests[3].content)["stream"] is False
+    assert [request.url.path for request in requests] == ["/api/v3/chat/completions", "/v1/responses",
+                                                         "/api/v3/chat/completions", "/api/v3/chat/completions", "/v1/responses"]
+    assert [request.headers["authorization"] for request in requests] == ["Bearer " + key for key in
+                                                                          (SECRET, ASTRA_SECRET, SECRET, SECRET, ASTRA_SECRET)]
+    assert request_task(requests[2])["provisional_transcription"]["answer_text"] == "-4"
+    assert request_task(requests[3])["provisional_transcription"]["answer_text"] == "4"
+    assert request_task(requests[4])["primary_candidate_for_independent_review"]["verdict"] == "correct"
+    assert json.loads(requests[4].content)["stream"] is False
     assert [a.number for a in results[-1].metadata.attempts] == [1, 2]
     for request in requests:
         body = json.loads(request.content)
@@ -189,12 +205,12 @@ def test_whole_page_then_each_question_uses_ds_and_only_needed_astra(monkeypatch
 
 
 def test_actual_responses_fallback_recovers_recognition_outage_once(monkeypatch):
-    flow, requests = isolated_factory(monkeypatch, [httpx.Response(503)], [recognition()])
+    flow, requests = isolated_factory(monkeypatch, [httpx.Response(503)], [recognition(), source_reading(recognition())])
     with flow:
         result = flow.recognize(images=(picture(),))
-    assert len(requests) == 2
+    assert len(requests) == 3
     assert result.data["items"][0]["answer_text"] == "-4"
-    assert [a.code for a in result.metadata.attempts] == ["upstream_unavailable", "ok"]
+    assert [a.code for a in result.metadata.attempts] == ["upstream_unavailable", "ok", "ok"]
     assert requests[-1].headers["authorization"] == "Bearer " + ASTRA_SECRET
 
 
@@ -226,16 +242,17 @@ def test_handwriting_review_uses_original_full_page_and_preserves_written_wrong_
     page["items"][0].update(blank_count=1, answer_slots=[
         {"index": 1, "prompt": "用____法", "answer_text": "乘", "answer_status": "present"},
     ])
-    reviewed = {"readings": [{"target": 0, "answer_text": "减", "answer_status": "present", "uncertainties": []}]}
-    flow, requests = isolated_factory(monkeypatch, [page, reviewed], [])
+    reviewed = source_reading(page)
+    reviewed["readings"][0]["answer_slots"][0]["answer_text"] = "减"
+    flow, requests = isolated_factory(monkeypatch, [page], [reviewed])
     with flow:
         result = flow.recognize(images=(picture(),))
     assert len(requests) == 2
     assert result.data["items"][0]["answer_slots"][0]["answer_text"] == "减"
-    assert result.data["handwriting_review"][0]["before"]["answer_text"] == "乘"
+    assert result.data["source_reading_audit"][0]["before"]["answer_slots"][0]["answer_text"] == "乘"
     target = request_task(requests[1])["targets"][0]
     assert "answer_text" not in target and "correct_answer" not in target
-    assert json.loads(requests[1].content)["messages"][1]["content"][1]["image_url"]["url"] == PNG
+    assert json.loads(requests[1].content)["input"][0]["content"][1]["image_url"] == PNG
 
 
 def region(asset="asset_original", **changes):
@@ -545,7 +562,7 @@ def test_check_is_candidate_and_can_be_converted_to_contract_decision():
     assert requests[0]["max_tokens"] == 8192
     # Worker adds persistent identity/audit fields; internal readback stays out
     # of the public Decision shape rather than silently extending the contract.
-    del data["uncertainties"], data["readback"], data["evidence_verified"]
+    del data["uncertainties"], data["readback"], data["evidence_verified"], data["fast_check_audit"]
     data.update(id="decision_one", revision=1, case_id="case_one", check_id="check_one",
                 replaces_decision_id=None, invalidated_by_event_id=None, created_at="2026-10-17T00:00:00Z")
     root = Path(__file__).resolve().parents[3] / "contracts" / "phase1"
@@ -598,7 +615,7 @@ def test_printed_visible_answers_are_readable_without_asserting_authentic_studen
     with pipeline(recognition_run(), requests) as flow:
         result = flow.recognize(images=(picture(),))
     assert result.data["items"][0]["recognition_status"] == "ready"
-    assert result.prompt_version == "photo-correction.v20-grade-level-solutions"
+    assert result.prompt_version == "photo-correction.v22-fast-verified-check"
     prompt = requests[0]["messages"][0]["content"]
     assert "印刷或手写、材料来源或合成属性、作者和学生身份不可验证，不是数学不确定性" in prompt
 
@@ -661,14 +678,14 @@ def test_recognition_provider_outage_escalates_to_astra():
     requests = []
     primary = pipeline([httpx.Response(503)], requests, model="deepseek-v4-1-flash-260910")
     fallback_requests = []
-    fallback = pipeline([recognition()], fallback_requests, model="gpt-6-astra")
+    fallback = pipeline([recognition(), source_reading(recognition())], fallback_requests, model="gpt-6-astra")
     flow = CorrectionPipeline(primary.client, fallback.client)
     with flow:
         result = flow.recognize(images=(picture(),))
     assert result.data["items"][0]["recognition_status"] == "ready"
-    assert [attempt.code for attempt in result.metadata.attempts] == ["upstream_unavailable", "ok"]
-    assert [attempt.model for attempt in result.metadata.attempts] == [None, "gpt-6-astra"]
-    assert len(requests) == 1 and len(fallback_requests) == 1
+    assert [attempt.code for attempt in result.metadata.attempts] == ["upstream_unavailable", "ok", "ok"]
+    assert [attempt.model for attempt in result.metadata.attempts] == [None, "gpt-6-astra", "gpt-6-astra"]
+    assert len(requests) == 1 and len(fallback_requests) == 2
 
 
 def test_primary_correct_check_requires_independent_astra_validation():
@@ -748,9 +765,9 @@ def test_second_pass_uses_first_pass_recognition_without_competing_readback(role
     assert result.data["readback"]["stem_text"] == ctx["question"]["stem_text"]
     assert result.data["readback"]["answer_text"] == "4"
     system = requests[0]["messages"][0]["content"]
-    assert "这是第二轮判题" in system
-    assert "不要重新抄写题干、选项或手写答案" in system
-    assert "不要输出 readback 或 recognition_consistent 字段" in system
+    assert "这是判题阶段" in system
+    assert "必须允许原图证据推翻候选" in system
+    assert "不要在判题阶段悄悄更换学生作答" in system
 
 
 def test_repeated_choice_options_do_not_turn_a_judgeable_check_into_a_conflict():
@@ -772,13 +789,13 @@ def test_repeated_choice_options_do_not_turn_a_judgeable_check_into_a_conflict()
     assert "甲说法" in sent and "乙说法" in sent
 
 
-def test_legacy_readback_mismatch_cannot_override_first_pass_judgment():
+def test_readback_mismatch_blocks_judgment_without_mutating_saved_transcript():
     output = checked(verdict="incorrect", basis_summary="第一轮识别的学生答案与正确答案不一致。")
     output["readback"].update(stem_text="另一道题", answer_text="另一个答案")
     with pipeline([output]) as flow:
         result = flow.check(**context())
-    assert result.data["verdict"] == "incorrect"
-    assert result.data["validity"] == "candidate"
+    assert result.data["verdict"] == "unable_to_judge"
+    assert result.data["validity"] == "needs_review"
     assert result.data["readback"] == {
         "stem_text": context()["question"]["stem_text"],
         "answer_text": context()["attempt"]["answer_text"],

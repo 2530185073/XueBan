@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { IDBFactory } from 'fake-indexeddb'
-import { StudentClient, decisionLabel, NO_PROGRESS_TIMEOUT_MS } from './student'
+import { StudentClient, decisionLabel, effectiveDecision, NO_PROGRESS_TIMEOUT_MS } from './student'
 import { DraftStore } from './store'
 import { StudentApi } from './api'
 import { imageDimensions } from './photo'
 import { valid } from './validation'
 import examples from '../../../../contracts/phase1/examples.json'
-import type { Attempt, CapturedQuestionRevision, CaseDetail, CheckRun, CorrectionCase, Decision, Hint, HomeworkSession, ImageAsset, Job, NormalizedPhoto } from './types'
+import type { Attempt, CapturedQuestionRevision, CaseDetail, CheckRun, CorrectionCase, Decision, DraftView, Hint, HomeworkSession, ImageAsset, Job, NormalizedPhoto, StoredDraft } from './types'
 
 class MemorySession implements Storage {
   private values = new Map<string, string>()
@@ -150,6 +150,12 @@ function wholePageSetup(states: (Pick<Decision, 'validity' | 'verdict'> | null)[
     return { job, check, finish }
   }
   s.route((path, init) => {
+    if (path === `/v1/homeworks/${s.hw.id}/detail`) return json({
+      protocol: 'homework-detail.v1', homework: s.hw, case_records: rows.map(row => row.case),
+      questions: rows.map(row => ({ record: row.question, current_revision: row.question.revision, currently_effective: true })),
+      attempts: rows.map(row => ({ record: row.attempt, current_revision: row.attempt.revision, currently_effective: true })),
+      checks: [...checks.values()], jobs: s.hw.job_ids.map(id => id === s.job.id ? s.job : jobs.get(id)),
+    })
     if (path === `/v1/homeworks/${s.hw.id}/recognitions`) { s.hw.case_ids = rows.map(row => row.case.id); s.hw.question_ids = rows.map(row => row.question.question_id) }
     for (const row of rows) {
       if (path === `/v1/cases/${row.case.id}`) return json(row.case)
@@ -344,6 +350,100 @@ describe('recognition followed by per-question checks', () => {
     saved.correction = { caseId: row.case.id, parentAttemptId: row.attempt.id, reportedHelp: 'unknown' }
     await s.store.saveDraft(saved)
   }
+
+  it.each([false, true])('publishes settled questions and the next running check without refreshing unchanged rounds (snapshot=%s)', async detailSnapshotEnabled => {
+    const s = wholePageSetup([null, null]), first = s.addCheck(s.rows[0], 'running'), second = s.addCheck(s.rows[1], 'queued')
+    s.hw.asset_ids = ['asset_one', 'asset_original', 'asset_correction']
+    const progress: DraftView[] = [], delays: number[] = [], detailReads: number[] = []
+    let id = ''
+    const client = new StudentClient({ ...s.options, detailSnapshotEnabled, sleep: async ms => {
+      delays.push(ms); progress.push(await client.getDraft(id))
+      detailReads.push(s.calls.filter(call => call.path === `/v1/homeworks/${s.hw.id}` || call.path === `/v1/homeworks/${s.hw.id}/detail`).length)
+      if (progress.length === 1) { first.finish(); second.job.status = 'running'; second.job.revision++ }
+      if (progress.length === 3) second.finish()
+    } })
+    id = await openRecognized(s, client)
+    const notified: Promise<StoredDraft>[] = []
+    const unsubscribe = client.subscribe(() => { notified.push(s.store.draft(scope, id)) })
+    const result = await client.runDraft(id); unsubscribe()
+    expect(result.stage).toBe('complete'); expect(result.error).toBeNull()
+    expect(progress).toHaveLength(3)
+    expect(progress[1].detail?.cases.map(row => row.checkJob?.status)).toEqual(['succeeded', 'running'])
+    expect(progress[1].detail?.cases.map(row => effectiveDecision(row)?.verdict ?? null)).toEqual(['correct', null])
+    expect((await Promise.all(notified)).some(d => d.detail?.cases[0].case.current_decision && !d.detail.cases[1].case.current_decision)).toBe(true)
+    expect(detailReads[2]).toBe(detailReads[1])
+    expect(delays).toEqual([2000, 2000, 2000]); expect(posts(s)).toHaveLength(0)
+  })
+
+  it('does not attach a settled old-input check to a newer recognition revision during progress', async () => {
+    const s = wholePageSetup([null, null]), first = s.addCheck(s.rows[0], 'running'), second = s.addCheck(s.rows[1], 'queued')
+    const progress: DraftView[] = []
+    let id = ''
+    const client = new StudentClient({ ...s.options, sleep: async () => {
+      progress.push(await client.getDraft(id))
+      if (progress.length === 1) {
+        first.finish(); s.rows[0].attempt.recognition_revision++; s.rows[0].attempt.revision++
+        s.rows[0].attempt.answer_text = 'newly read answer'; s.rows[0].case.revision++
+      } else second.finish()
+    } })
+    id = await openRecognized(s, client)
+    const result = await client.runDraft(id)
+    expect(result.error).toBeNull(); expect(result.stage).toBe('checking')
+    const updated = progress[1].detail!.cases[0]
+    expect(updated.attempt.answer_text).toBe('newly read answer')
+    expect(updated.checkJob).toBeUndefined(); expect(effectiveDecision(updated)).toBeNull()
+    expect(posts(s)).toHaveLength(0)
+  })
+
+  it.each(['failed', 'superseded', 'cancelled'] as const)('publishes a settled %s check while the next question is still queued', async status => {
+    const s = wholePageSetup([null, null]), first = s.addCheck(s.rows[0], 'running'), second = s.addCheck(s.rows[1], 'queued')
+    const progress: DraftView[] = []
+    let id = ''
+    const client = new StudentClient({ ...s.options, sleep: async () => {
+      progress.push(await client.getDraft(id))
+      if (progress.length === 1) {
+        first.job.status = status; first.job.revision++
+        if (status === 'failed') first.job.failure = { code: 'provider_unavailable', message: '合成失败', retryable: false }
+      } else second.finish()
+    } })
+    id = await openRecognized(s, client)
+    const result = await client.runDraft(id)
+    expect(progress[1].detail?.cases.map(row => row.checkJob?.status)).toEqual([status, 'queued'])
+    expect(progress[1].detail?.cases[0].case.current_decision).toBeNull()
+    expect(result).toMatchObject({ stage: 'failed', error: { code: `job_${status}` } })
+    expect(posts(s)).toHaveLength(0)
+  })
+
+  it.each(['disconnect', 'login', 'restore'] as const)('rejects an incremental refresh crossing %s without overwriting the newer cache', async transition => {
+    const s = wholePageSetup([null, null]), first = s.addCheck(s.rows[0], 'running'), second = s.addCheck(s.rows[1], 'queued')
+    let enter!: () => void, release!: () => void, refresh = false
+    const entered = new Promise<void>(resolve => { enter = resolve }), gate = new Promise<void>(resolve => { release = resolve })
+    const client = new StudentClient({ ...s.options,
+      sleep: async () => { first.finish(); refresh = true },
+      transport: async (input, init) => {
+        const response = await s.options.transport(input, init)
+        if (refresh && new URL(String(input)).pathname === `/v1/attempts/${s.rows[0].attempt.id}`) {
+          refresh = false; enter(); await gate
+        }
+        return response
+      },
+    })
+    const id = await openRecognized(s, client), run = client.runDraft(id).catch(error => error)
+    await entered
+    let saved: StoredDraft
+    try {
+      if (transition === 'disconnect') client.disconnect()
+      else {
+        if (transition === 'restore') await client.restore()
+        else await client.login('synthetic.student', 'synthetic password only')
+        second.finish(); await client.openHomework(s.hw.id)
+      }
+      saved = await s.store.draft(scope, id)
+    } finally { release() }
+    expect(await run).toMatchObject({ code: 'session_changed' })
+    expect(await s.store.draft(scope, id)).toEqual(saved)
+    expect(posts(s)).toHaveLength(0)
+  })
 
   it.each(['ready', 'needs_revision'] as const)('checks a %s answer after recognition and leaves completed unresolved results alone', async status => {
     const s = wholePageSetup([null, { validity: 'needs_review', verdict: 'unable_to_judge' }])

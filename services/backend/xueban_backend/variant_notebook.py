@@ -15,8 +15,9 @@ from sqlalchemy.orm import Session
 from .auth import Actor
 from .correction_models import Entity, CorrectionEvent as Event
 from .correction_history import prior_attempts
-from .learning_models import LearningOutbox, PracticeAssessment, PracticeResponse, PracticeSession, VariantGeneration
+from .learning_models import LearningOutbox, PracticeAssessment, PracticeResponse, PracticeSession, VariantGeneration, PracticeItem
 from .models import Homework
+from .providers.variant_arithmetic import item_arithmetic_issues
 
 
 def _utc(value):
@@ -151,6 +152,11 @@ def notebook_document(session, student):
         PracticeSession.student_id == student.id, PracticeSession.tenant_id == student.tenant_id,
         PracticeSession.purpose == "variant")
     activities = list(session.scalars(session_query.order_by(PracticeSession.started_at.desc(), PracticeSession.id.desc())))
+    item_ids = {item_id for activity in activities for item_id in activity.item_ids}
+    item_ids.update(row.item_id for row in generations.values() if row.item_id)
+    invalid_items = {item.id for item in session.scalars(select(PracticeItem).where(
+        PracticeItem.tenant_id == student.tenant_id, PracticeItem.id.in_(item_ids)))
+        if item_arithmetic_issues(item)}
     by_session = {row.id: row for row in activities}
     by_case = defaultdict(list)
     for row in activities:
@@ -202,6 +208,9 @@ def notebook_document(session, student):
                     if previous_status == "needs_practice":
                         status = previous_status
                     break
+        invalid_generation = bool(generation and generation.item_id in invalid_items)
+        if activity and any(item_id in invalid_items for item_id in activity.item_ids):
+            status = "check_failed"
         items.append({
             "case_id": case.id, "question_id": case.document["question_id"],
             "question_text": question.document.get("stem_text") if question else None,
@@ -209,7 +218,7 @@ def notebook_document(session, student):
             "occurred_at": occurred_at.isoformat().replace("+00:00", "Z"),
             "status": status, "practiced": practiced,
             "generation_id": generation.id if generation else None,
-            "generation_status": _generation_status(generation, generation_jobs),
+            "generation_status": "superseded" if invalid_generation else _generation_status(generation, generation_jobs),
             "session_id": activity.id if activity else None,
             **({"original_status": original_status} if original_status else {}),
         })

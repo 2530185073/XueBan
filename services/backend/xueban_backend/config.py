@@ -26,6 +26,7 @@ class Settings:
     public_base_url: str = ""
     upload_ticket_ttl_seconds: int = 900
     worker_lease_seconds: int = 300
+    worker_check_concurrency: int = 3
     auto_check_after_recognition: bool = True
     correction_mode: str = ""
     allow_sqlite_for_tests: bool = False
@@ -33,6 +34,9 @@ class Settings:
     student_web_dist: Path | None = None
     deletion_ledger_path: Path | None = None
     device_cache_retention_seconds: int = 604800
+    self_registration_enabled: bool = False
+    self_registration_tenant_id: str = ""
+    self_registration_campus_id: str = ""
     contracts_dir: Path = Path(__file__).resolve().parents[3] / "contracts" / "phase1"
 
     @classmethod
@@ -52,6 +56,7 @@ class Settings:
             "public_base_url": os.environ.get("PUBLIC_BASE_URL", ""),
             "upload_ticket_ttl_seconds": int(os.environ.get("UPLOAD_TICKET_TTL_SECONDS", "900")),
             "worker_lease_seconds": int(os.environ.get("WORKER_LEASE_SECONDS", "300")),
+            "worker_check_concurrency": int(os.environ.get("WORKER_CHECK_CONCURRENCY", "3")),
             "auto_check_after_recognition": os.environ.get("AUTO_CHECK_AFTER_RECOGNITION", "1") == "1",
             "correction_mode": os.environ.get("CORRECTION_MODE", ""),
             "allow_sqlite_for_tests": os.environ.get("ALLOW_SQLITE_FOR_TESTS") == "1",
@@ -59,6 +64,9 @@ class Settings:
             "student_web_dist": Path(os.environ["STUDENT_WEB_DIST"]) if os.environ.get("STUDENT_WEB_DIST") else None,
             "deletion_ledger_path": Path(os.environ["DELETION_LEDGER_PATH"]) if os.environ.get("DELETION_LEDGER_PATH") else None,
             "device_cache_retention_seconds": int(os.environ.get("DEVICE_CACHE_RETENTION_SECONDS", "604800")),
+            "self_registration_enabled": os.environ.get("SELF_REGISTRATION_ENABLED") == "1",
+            "self_registration_tenant_id": os.environ.get("SELF_REGISTRATION_TENANT_ID", ""),
+            "self_registration_campus_id": os.environ.get("SELF_REGISTRATION_CAMPUS_ID", ""),
         }
         if os.environ.get("CONTRACTS_DIR"):
             options["contracts_dir"] = Path(os.environ["CONTRACTS_DIR"])

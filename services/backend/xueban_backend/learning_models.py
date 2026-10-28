@@ -355,7 +355,11 @@ class PracticeSession(Base):
 
 
 class PracticeResponse(Base):
-    """A rule-graded voluntary answer; recorded separately and never counted toward knowledge state."""
+    """A voluntary answer, used as provisional feedback separately from mastery.
+
+    hint_used records help at submission. Later solution views must not rewrite
+    it; repeat submissions of an item are not new independent observations.
+    """
     __tablename__ = "practice_responses"
     __table_args__ = (student_fk(), Index("ix_practice_responses_item", "session_id", "item_id", unique=True),
                       Index("ix_practice_responses_student", "student_id", "knowledge_id"),

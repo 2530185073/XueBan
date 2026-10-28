@@ -58,4 +58,10 @@ export interface JournalEntry { scope: string; id: string; key: string; path: st
 
 export interface Account { username: string; must_change_password: boolean; student_id: string | null }
 export interface AuthSession { access_token: string; expires_at: string; must_change_password: boolean }
+export type RegistrationGrade = 5 | 6 | 7 | 8
+/** The preview is advisory; only a successful registration allocates a username. */
+export type RegistrationOptions =
+  | { enabled: true; username_preview: string; grades: RegistrationGrade[] }
+  | { enabled: false; username_preview: null; grades: [] }
+export interface RegistrationResult { username: string; student_id: string; grade: RegistrationGrade }
 export interface AdminRequestOptions { method?: 'GET' | 'POST'; body?: unknown; idempotencyKey?: string }

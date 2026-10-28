@@ -13,7 +13,7 @@ from copy import deepcopy
 from dataclasses import asdict
 from datetime import timedelta
 import time
-from threading import Event, Thread
+from threading import Event, RLock, Thread
 
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session
@@ -60,11 +60,21 @@ class CorrectionWorker:
         self.pipeline = pipeline
         self.contracts = Contracts(settings.contracts_dir)
         self.store = LocalAssetStore(settings.asset_storage_dir)
+        # Only provider work overlaps. SQLite has no row locks: serialize this
+        # worker's short sessions (including lease renewals and projections).
+        self._database_lock = RLock()
 
-    def claim(self):
+    @contextmanager
+    def _session(self, **options):
+        with self._database_lock, Session(self.engine, **options) as session:
+            yield session
+
+    def claim(self, *, checks_only=False):
         timestamp = now()
         eligible = or_(and_(Task.status.in_(["queued", "retryable_failed"]), Task.available_at <= timestamp), and_(Task.status == "running", Task.lease_expires_at <= timestamp))
-        with Session(self.engine, expire_on_commit=False) as session:
+        if checks_only:
+            eligible = and_(eligible, Task.kind == "check")
+        with self._session(expire_on_commit=False) as session:
             task = session.scalar(select(Task).where(eligible).order_by(Task.available_at, Task.id).with_for_update(skip_locked=True).limit(1))
             if task is None:
                 return None
@@ -105,8 +115,14 @@ class CorrectionWorker:
             session.commit()
             return task.id, token
 
+    def is_parallel_check(self, identifier, token):
+        with self._session() as session:
+            task = session.get(Task, identifier)
+            return bool(task and task.kind == "check" and task.status == "running"
+                        and task.lease_token == token)
+
     def _load(self, identifier, token):
-        with Session(self.engine, expire_on_commit=False) as session:
+        with self._session(expire_on_commit=False) as session:
             task = session.get(Task, identifier)
             if task is None or task.lease_token != token or task.status != "running":
                 return None
@@ -182,6 +198,10 @@ class CorrectionWorker:
                 if (attempt.annotations and attempt.annotations.get("slots_recognition_revision") == attempt.document["recognition_revision"]
                         and attempt.annotations.get("slots_question_revision") == question.revision):
                     attempt_input["answer_slots"] = deepcopy(attempt.annotations.get("answer_slots", []))
+                    # Server-only source receipt. A manual edit, new attempt or
+                    # stale revision cannot inherit the fast-path permission.
+                    if attempt.annotations.get("source_evidence"):
+                        attempt_input["_source_evidence"] = deepcopy(attempt.annotations["source_evidence"])
                 question_input = deepcopy(question.document)
                 if getattr(self.pipeline, "supports_target_unit", False):
                     annotations = question.annotations or {}
@@ -263,8 +283,8 @@ class CorrectionWorker:
 
     def renew_lease(self, identifier, token):
         """Extend only a live lease owned by this execution, never revive an old one."""
-        timestamp = now()
-        with Session(self.engine) as session:
+        with self._session() as session:
+            timestamp = now()
             updated = session.execute(update(Task).where(
                 Task.id == identifier, Task.status == "running", Task.lease_token == token,
                 Task.lease_expires_at > timestamp,
@@ -301,7 +321,10 @@ class CorrectionWorker:
         claim = self.claim()
         if claim is None:
             return False
-        identifier, token = claim
+        return self.run_claimed(*claim)
+
+    def run_claimed(self, identifier, token):
+        """Execute a single committed claim; never claim again on failure."""
         result = None
         journal = None
         try:
@@ -347,7 +370,7 @@ class CorrectionWorker:
 
     def _dispatch_original_recheck(self, identifier, token):
         """Reserve the one external execution durably before making any call."""
-        with Session(self.engine) as session:
+        with self._session() as session:
             scope = lock_task_student(session, identifier)
             task = session.scalar(select(Task).where(Task.id == identifier).with_for_update()
                                   .execution_options(populate_existing=True))
@@ -406,7 +429,7 @@ class CorrectionWorker:
         return False
 
     def finish(self, identifier, token, *, result=None, error=None, host_call_journal=None):
-        with Session(self.engine) as session:
+        with self._session() as session:
             scope = lock_task_student(session, identifier)
             task = session.scalar(select(Task).where(Task.id == identifier).with_for_update()
                                   .execution_options(populate_existing=True))
@@ -602,6 +625,8 @@ class CorrectionWorker:
             if same_question:
                 attempt.annotations.update(answer_slots=deepcopy(item.get("answer_slots", [])),
                                            slots_recognition_revision=doc["recognition_revision"], slots_question_revision=question.revision)
+                if item.get("source_evidence"):
+                    attempt.annotations["source_evidence"] = deepcopy(item["source_evidence"])
             update_case(session, self.contracts, case, progress="paused" if case.document["progress"] == "paused" else "pending")
             if same_question:
                 self._apply_page_assessment(session, task, homework, result, item, question, attempt, case)
@@ -703,6 +728,8 @@ class CorrectionWorker:
         attempt_row = save_entity(session, self.contracts, homework.id, "attempt", attempt)
         attempt_row.annotations = {"answer_status": item["answer_status"], "answer_slots": deepcopy(item.get("answer_slots", [])),
                                    "slots_recognition_revision": 1, "slots_question_revision": 1}
+        if item.get("source_evidence"):
+            attempt_row.annotations["source_evidence"] = deepcopy(item["source_evidence"])
         case = {"id": case_id, "revision": 1, "scope": {"tenant_id": homework.tenant_id, "campus_id": homework.campus_id, "student_id": homework.student_id}, "homework_id": homework.id, "question_id": question_id, "current_question_revision": 1, "root_attempt_id": attempt_id, "current_attempt_id": attempt_id, "progress": "pending", "current_decision": None, "attempt_ids": [attempt_id], "check_ids": [], "hint_ids": [], "help_request_ids": [], "review_ids": [], "created_at": timestamp, "updated_at": timestamp, "lifecycle": "active", "replacement_case_ids": []}
         case_row = save_entity(session, self.contracts, homework.id, "case", case)
         return question_row, attempt_row, case_row
@@ -844,13 +871,15 @@ def main():
     try:
         from .governance import DeletionExecutor
         from .learning_jobs import LearningWorker
+        from .worker_concurrency import BoundedCheckRunner
         deletions = DeletionExecutor(engine, settings)
         with CorrectionPipeline.from_env() as pipeline:
             worker = CorrectionWorker(engine, settings, pipeline)
             learning = LearningWorker(engine, client=pipeline.client,
                                       asset_store=LocalAssetStore(settings.asset_storage_dir),
                                       fallback_client=getattr(pipeline, "fallback_client", None))
-            runner = RoundRunner(deletions.run_once, worker.run_once, learning.run_once)
+            correction = BoundedCheckRunner(worker, settings.worker_check_concurrency)
+            runner = RoundRunner(deletions.run_once, worker.run_once if args.once else correction.run_once, learning.run_once)
             while True:
                 worked = runner.run_round()
                 if args.once:

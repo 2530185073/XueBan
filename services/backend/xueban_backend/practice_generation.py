@@ -30,6 +30,11 @@ from .providers.bounded_chat import BoundedChatClient
 from .providers.correction_pipeline import _contains_credential, _validate
 from .providers.prompts import Role
 from .providers.user_original.ark import ArkClient as UserOriginalArkClient
+from .providers.responses import ResponsesClient
+from .providers.user_original.responses import ResponsesClient as UserOriginalResponsesClient
+from .providers.variant_structure import (blank_answer_issues, blank_candidate_issues,
+                                          normalize_blank_answers, source_blank_contract)
+from .providers.variant_arithmetic import arithmetic_blank_issues, item_arithmetic_issues
 from sqlalchemy.orm import Session
 
 TYPES = ("single_choice", "multiple_choice", "fill_blank", "calculation", "application", "proof")
@@ -53,6 +58,14 @@ GENERATE_PROMPT = """为小学或初中学生生成恰好一道与 source_questi
 选择题支持单选/多选，answer_values 写完整正确选项集合；填空每空用独立稳定id，field_answers逐空给答案；
 解答题写完整参考解答及合理等价形式；纯数值终答可用answer_kind=number，其他终答用text，两者都必须在solution_text写完整必要步骤。非填空的answer_fields/field_answers为空。
 填空时answer_values为空；其他题至少一个answer_values。solution_text用同年级教材的方法，逐步写出简短、完整的必要步骤和正确答案，不能只给终答。
+填空遵守fill_blank_contract.expected_blank_count：题干每个空明确写____，每个空对应一个answer_fields和一个field_answers。
+正负号空与数字空若分别留空，必须分别计数；题号、已印刷的数字或示例不增加空位。answer_fields按题干空位顺序排列，id用blank1、blank2等，label注明第几小题第几空。
+正负号空的answer_kind用text，数值空可用number；每个空单独保留，不把“+”和数字合成一个答案。
+等号后的最终结果空填写带正负号的完整结果；前面的独立符号空不会抵消或替代最终结果的符号。例如____(a÷b)=____，前空填负号时，末空仍须填完整的负数结果，不能只填绝对值。只有某空明确只问绝对值或符号已印在紧邻该空的外侧，才只填数值部分。
+输出前逐空将field_answers代回题干，检查每个等式成立，且逐空答案与solution_text的对应步骤、完整终答一致。
+填空answer_kind用text或number，options=[]、顶层answer_values=[]；所有答案只放在逐空field_answers中，不再复制到顶层。
+若有repair_feedback，按其中stage和errors修正结构或答案；field_id和field_label定位上轮有分歧的空，observed是上轮生成答案，expected是expected_source标注的独立解答，供排查而非保证正确。核对该空含义、正负号和完整结果，并与solution_text对齐；换了数字必须重新计算，不能照搬上轮expected。
+可沿用仅结构或答案有错的题干，不得少空、多空、合并答案或通过删除条件来凑数。修复后仍须完整重新解题。
 题干不泄露答案；hint_text只给方向。答案和步骤单独放在答案字段及solution_text，供学生展开查看。
 遵守requested_question_type/question_kind；只返回schema字段。不需要图片、外部材料或无法展示的图形。"""
 VERIFY_PROMPT = """独立解答这道给小学或初中学生的练习。只看新题、目标类型和年级教材信息，不会看到出题者答案，不猜其结论。
@@ -62,6 +75,8 @@ VERIFY_PROMPT = """独立解答这道给小学或初中学生的练习。只看�
 检查条件是否齐全、答案是否确定、所有选项和每一空。按要求题型、知识目标和年级教材范围判断same_type，超出范围则为false。
 unique_answer对开放证明指结论明确且评分要求确定，允许等价合法解法。无法确定则标false。
 选择题返回完整正确选项；填空逐空返回；解答题给独立结论与完整必要步骤。
+填空严格按answer_fields的id逐空给field_answers，顶层answer_values=[]，不重复或遗漏空位，不把正负号空与数字空合为一个答案。
+等号后的最终结果空须填带正负号的完整结果，不能因为前面的独立空已经填了负号，就把最终负数写成绝对值；仅明确只问绝对值或符号已印在紧邻该空外侧时才只填数值部分。逐空代回原题，确认每个等式成立，且field_answers与solution_text的对应步骤和完整终答一致。
 解答题的数值终答可以标number，其他表述标text；这只是答案表示，不能改变题型或省略solution_text。
 不得输出学生掌握或教师批准。
 只返回schema字段，不依据不存在的图片或外部文章。"""
@@ -248,6 +263,8 @@ def generation_dict(session, row):
     status, failure = row.status, row.failure_code
     if status in ("ready", "queued", "generating", "verifying") and not snapshot_current(session, row):
         status, failure = "superseded", "stale_source"
+    elif status == "ready" and _verified_item(session, row) is None:
+        status, failure = "superseded", "verification_failed"
     elif status == "queued" and row.outbox_id:
         job = session.get(LearningOutbox, row.outbox_id)
         if job and job.status == "running":
@@ -257,15 +274,30 @@ def generation_dict(session, row):
     notices = {"ready": "题目已由 AI 独立解题核验，可自愿练习；不是老师审核或掌握证明。",
                "failed": "本次未生成可用题目，可以稍后重试；不会记错或增加任务。",
                "superseded": "原题、作答或教材已更新，请回到当前错题重新选择。"}
+    failures = {"source_structure_invalid": "原题的填空位置或数量还不清楚，请先核对原题后再生成练习。",
+                "candidate_structure_invalid": "生成题的填空位置或逐空答案没有对齐，本次未保存练习，可以稍后重试。",
+                "reference_structure_invalid": "独立解答的逐空答案没有对齐，本次未保存练习，可以稍后重试。"}
+    notice = failures.get(failure) if status == "failed" else None
+    if status == "superseded" and failure == "verification_failed":
+        notice = "这道练习的参考答案未通过计算核验，请重新生成；原作答保留，但不计入练习反馈。"
+    notice = notice or notices.get(status, "正在生成一道同题型练习并独立核验，完成后由你选择是否开始。")
+    execution = (row.audit.get("executions") or [{}])[-1]
+    if status == "ready" and any(issue["code"] == "source_blank_count_underreported"
+                                 for issue in execution.get("source_structure", {}).get("normalizations", [])):
+        notice += "原题的空数记录有差异，本次按题干可见空位生成；原题仍需核对。"
     return {"job_id": row.id, "student_id": row.student_id, "status": status,
             "source_case_id": row.source_case_id, "graph_version": row.graph_version, "knowledge_id": row.knowledge_id,
             "question_type": row.question_type, "item_id": row.item_id if status == "ready" else None,
             "session_id": row.session_id, "failure_code": failure,
-            "notice": notices.get(status, "正在生成一道同题型练习并独立核验，完成后由你选择是否开始。")}
+            "notice": notice}
 
 
 def bounded_client(client):
     """Share configured credentials/model, not a 200s correction-call budget."""
+    if isinstance(client, (ResponsesClient, UserOriginalResponsesClient)):
+        return type(client)(replace(client.settings, timeout_seconds=CALL_SECONDS, total_timeout_seconds=CALL_SECONDS,
+                                    max_attempts=1, max_tokens=3072, max_concurrency=1),
+                            **({"stream": client.stream} if isinstance(client, ResponsesClient) else {})), True
     if isinstance(client, (ArkClient, UserOriginalArkClient)):
         return BoundedChatClient(replace(client.settings, timeout_seconds=CALL_SECONDS, total_timeout_seconds=CALL_SECONDS,
                                          max_attempts=1, max_tokens=3072, max_concurrency=1)), True
@@ -373,38 +405,50 @@ def _valid_solution_answer(answer):
                and _number(value) is not None for value in values)
 
 
-def _valid_candidate(candidate, snapshot, *, source_subject=None):
+def _candidate_issues(candidate, snapshot, *, source_subject=None):
     from .practice import _normalize
     allow_numeric_changes = _math_source(snapshot, source_subject)
-    if (candidate["question_type"] != snapshot["question_type"] or candidate["question_kind"] != snapshot["question_kind"]
-            or _near_copy_stem(candidate["stem_text"], snapshot["source_question"]["stem_text"],
-                               allow_numeric_changes=allow_numeric_changes)):
-        return False
+    errors = []
+    if candidate["question_type"] != snapshot["question_type"] or candidate["question_kind"] != snapshot["question_kind"]:
+        return [{"code": "question_type_mismatch", "path": "question_type",
+                 "expected": snapshot["question_type"]}]
+    if _near_copy_stem(candidate["stem_text"], snapshot["source_question"]["stem_text"],
+                       allow_numeric_changes=allow_numeric_changes):
+        errors.append({"code": "duplicate_source_question", "path": "stem_text"})
+    if candidate["question_kind"] == "fill_blank":
+        contract = source_blank_contract(snapshot["source_question"])
+        errors.extend(contract["errors"])
+        errors.extend(blank_candidate_issues(candidate, contract["expected_blank_count"]))
+        if any(not _valid_solution_answer(field) for field in candidate["field_answers"]):
+            errors.append({"code": "invalid_field_answer", "path": "field_answers"})
+        return errors
     options = candidate["options"]
     labels = [o["label"] for o in options]
     fields = [f["id"] for f in candidate["answer_fields"]]
     supplied_fields = [f["field_id"] for f in candidate["field_answers"]]
     if len(set(labels)) != len(labels) or len(set(fields)) != len(fields) or len(set(supplied_fields)) != len(supplied_fields):
-        return False
+        return errors + [{"code": "duplicate_identifiers", "path": "options/answer_fields/field_answers"}]
     if candidate["question_kind"] == "choice":
         original_options = snapshot["source_question"].get("options") or []
         if (original_options and sorted(_normalize(o["text"]) for o in options) == sorted(
                 _normalize(o["text"]) for o in original_options)
                 and not (allow_numeric_changes and _numeric_substitution(
                     candidate["stem_text"], snapshot["source_question"]["stem_text"]))):
-            return False
+            errors.append({"code": "duplicate_source_options", "path": "options"})
         answer = candidate["answer_values"]
-        return (candidate["answer_kind"] == "choice" and len(options) >= 2 and not fields and not supplied_fields
+        valid = (candidate["answer_kind"] == "choice" and len(options) >= 2 and not fields and not supplied_fields
                 and bool(answer) and len(set(answer)) == len(answer) and set(answer) <= set(labels)
                 and (candidate["question_type"] != "single_choice" or len(answer) == 1))
-    if options:
-        return False
-    if candidate["question_kind"] == "fill_blank":
-        expected_count = snapshot["source_question"].get("blank_count")
-        return (bool(fields) and set(fields) == set(supplied_fields) and not candidate["answer_values"]
-                and (not expected_count or len(fields) == expected_count))
-    return (_valid_solution_answer(candidate) and not fields and not supplied_fields
-            and bool(candidate["solution_text"].strip()))
+    else:
+        valid = (_valid_solution_answer(candidate) and not options and not fields and not supplied_fields
+                 and bool(candidate["solution_text"].strip()))
+    if not valid:
+        errors.append({"code": "invalid_answer_structure", "path": "answer_values/field_answers/options"})
+    return errors
+
+
+def _valid_candidate(candidate, snapshot, *, source_subject=None):
+    return not _candidate_issues(candidate, snapshot, source_subject=source_subject)
 
 
 def _previous_stems(session, row):
@@ -429,9 +473,9 @@ def _valid_reference(candidate, verified):
                 and len(values) == len(set(values)) and set(values) <= {o["label"] for o in candidate["options"]}
                 and (candidate["question_type"] != "single_choice" or len(values) == 1))
     if candidate["question_kind"] == "fill_blank":
-        fields = [f["field_id"] for f in verified["field_answers"]]
-        return (not verified["answer_values"] and len(fields) == len(set(fields))
-                and set(fields) == {f["id"] for f in candidate["answer_fields"]})
+        return (not blank_answer_issues(verified, candidate["answer_fields"])
+                and not arithmetic_blank_issues(candidate, verified)
+                and all(_valid_solution_answer(field) for field in verified["field_answers"]))
     return (_valid_solution_answer(verified)
             and not verified["field_answers"] and bool(verified["solution_text"].strip()))
 
@@ -467,6 +511,37 @@ def _agrees(candidate, verified):
     return False if False in results else None if None in results else True
 
 
+def _field_disagreement_issues(candidate, verified):
+    """Generator-only repair advice; never a replacement for a new blind solve.
+
+    Only a structurally valid, self-contained independent solution can supply
+    expected values. Text/representation differences remain unconfirmed, not
+    asserted incorrect merely because their spellings differ. Both responses
+    have already passed the schema bounds and credential filter in _call.
+    """
+    if (candidate["question_kind"] != "fill_blank" or not _valid_reference(candidate, verified)
+            or not all(verified[key] for key in ("self_contained", "unique_answer", "same_type"))):
+        return []
+    generated, solved = ({field["field_id"]: field for field in answer["field_answers"]}
+                         for answer in (candidate, verified))
+    issues = []
+    for field in candidate["answer_fields"]:
+        field_id = field["id"]
+        agreement = _answer_agreement(generated[field_id], solved[field_id])
+        if agreement is True:
+            continue
+        issues.append({
+            "code": "field_answer_disagreement" if agreement is False else "field_answer_equivalence_unconfirmed",
+            "path": "field_answers", "field_id": field_id, "field_label": field["label"],
+            "observed": {"answer_kind": generated[field_id]["answer_kind"],
+                         "answer_values": list(generated[field_id]["answer_values"])},
+            "expected": {"answer_kind": solved[field_id]["answer_kind"],
+                         "answer_values": list(solved[field_id]["answer_values"])},
+            "expected_source": "blind_solve",
+        })
+    return issues
+
+
 @register_job_handler("generate_student_variant")
 def generate_student_variant(session, job, worker):
     row = session.get(VariantGeneration, job.payload.get("generation_id"))
@@ -481,11 +556,23 @@ def generate_student_variant(session, job, worker):
         row.audit = {**row.audit, "interrupted_execution": True}
         return {"status": row.status, "failure_code": row.failure_code}
     calls, started = [], time.monotonic()
+    source_structure = None
     client, owned = bounded_client(worker.client) if worker.client else (None, False)
+    fallback, fallback_owned = None, False
+    active_client = client
     try:
         if not snapshot_current(session, row):
             row.status, row.failure_code = "superseded", "stale_source"
             return {"status": row.status}
+        source_question = row.snapshot["source_question"]
+        if row.question_kind == "fill_blank":
+            source_structure = source_blank_contract(source_question)
+            if source_structure["errors"]:
+                row.status, row.failure_code = "failed", "source_structure_invalid"
+                return {"status": row.status, "failure_code": row.failure_code}
+            # A local generation contract only: retain the legacy snapshot,
+            # source document and fingerprint, and audit the original count.
+            source_question = {**source_question, "blank_count": source_structure["expected_blank_count"]}
         if client is None or not client.settings.enabled:
             row.status, row.failure_code = "failed", "provider_disabled"
             return {"status": row.status}
@@ -500,7 +587,8 @@ def generate_student_variant(session, job, worker):
                             "student_grade": profile.document.get("grade") if profile else None,
                             "source_subject": ((question.annotations or {}).get("subject_override")
                                                or question.document.get("subject")) if question else None}
-        rejected_questions = []
+        rejected_questions, repair_feedback = [], None
+        last_failure = "verification_failed"
         for attempt in range(1 + int(max_regens)):
             if time.monotonic() - started > MAX_JOB_SECONDS - 3 * CALL_SECONDS:
                 raise ProviderError("deadline_exceeded")
@@ -508,16 +596,31 @@ def generate_student_variant(session, job, worker):
                 row.status, row.failure_code = "superseded", "stale_source"
                 break
             row.status = "generating"
-            candidate = _call(client, "generate", {"source_question": row.snapshot["source_question"],
+            active_client = client
+            candidate = _call(client, "generate", {"source_question": source_question,
                               **teaching_context,
                               "knowledge": row.snapshot["knowledge"], "requested_question_type": row.question_type,
                               "question_kind": row.question_kind,
-                              "rejected_questions": rejected_questions,
+                              **({"fill_blank_contract": source_structure} if source_structure else {}),
+                              **({"repair_feedback": repair_feedback} if repair_feedback else {}),
+                              "rejected_questions": list(rejected_questions),
                               "previous_questions_to_avoid": _previous_stems(session, row)[:5]},
                               CANDIDATE_SCHEMA, GENERATE_PROMPT, calls)
-            if (not _valid_candidate(candidate, row.snapshot, source_subject=teaching_context["source_subject"])
-                    or not _distinct_candidate(session, row, candidate, source_subject=teaching_context["source_subject"])):
-                rejected_questions.append(candidate["stem_text"])
+            if candidate["question_kind"] == "fill_blank":
+                candidate, normalizations = normalize_blank_answers(candidate, candidate["answer_fields"])
+                calls[-1]["normalizations"] = normalizations
+            errors = _candidate_issues(candidate, row.snapshot, source_subject=teaching_context["source_subject"])
+            if not _distinct_candidate(session, row, candidate, source_subject=teaching_context["source_subject"]):
+                errors.append({"code": "duplicate_previous_question", "path": "stem_text"})
+            if errors:
+                calls[-1]["validation_errors"] = errors
+                last_failure = ("candidate_structure_invalid" if row.question_kind == "fill_blank" and any(
+                    error["code"] not in ("duplicate_source_question", "duplicate_previous_question") for error in errors)
+                    else "verification_failed")
+                repair_feedback = {"stage": "generate", "errors": errors,
+                                   "previous_question": {k: candidate[k] for k in ("stem_text", "answer_fields")}}
+                if any(error["code"].startswith("duplicate_") and error["path"] == "stem_text" for error in errors):
+                    rejected_questions.append(candidate["stem_text"])
                 continue
             row.status = "verifying"
             # Deliberately exclude generated answer, solution, hint and old student answer.
@@ -525,25 +628,55 @@ def generate_student_variant(session, job, worker):
             blind_input.update(teaching_context)
             blind_input["knowledge_target"] = row.snapshot["knowledge"]
             blind_input["requested_question_type"] = row.question_type
-            verified = _call(client, "blind_solve", blind_input, VERIFY_SCHEMA, VERIFY_PROMPT, calls)
+            # A failed first validation may use the already configured second
+            # model, inside the existing two-round budget. It still sees only
+            # the new question, never either model's answers or repair hints.
+            if attempt and getattr(worker, "fallback_client", None) is not None:
+                if fallback is None:
+                    fallback, fallback_owned = bounded_client(worker.fallback_client)
+                active_client = fallback if fallback.settings.enabled else client
+            verified = _call(active_client, "blind_solve", blind_input, VERIFY_SCHEMA, VERIFY_PROMPT, calls)
+            if candidate["question_kind"] == "fill_blank":
+                verified, normalizations = normalize_blank_answers(verified, candidate["answer_fields"])
+                calls[-1]["normalizations"] = normalizations
             reference_valid = _valid_reference(candidate, verified)
+            errors = []
+            if not reference_valid:
+                errors = (blank_answer_issues(verified, candidate["answer_fields"])
+                          if candidate["question_kind"] == "fill_blank" else [])
+                errors.extend(arithmetic_blank_issues(candidate, verified))
+                if not errors:
+                    errors = [{"code": "invalid_reference_answer", "path": "answer_values/field_answers"}]
+            errors.extend({"code": f"{key}_false", "path": key}
+                          for key in ("self_contained", "unique_answer", "same_type") if not verified[key])
             agrees = _agrees(candidate, verified) if reference_valid and all(
                 verified[k] for k in ("self_contained", "unique_answer", "same_type")) else False
             if agrees is None:
                 is_solution = candidate["question_kind"] == "solution"
-                agreement = _call(client, "answer_equivalence", {"question": blind_input, "answer_a": {
+                agreement = _call(active_client, "answer_equivalence", {"question": blind_input, "answer_a": {
                     k: candidate[k] for k in ANSWER_SCHEMA}, "answer_b": {k: verified[k] for k in ANSWER_SCHEMA}},
                     SOLUTION_REVIEW_SCHEMA if is_solution else EQUIVALENCE_SCHEMA,
                     SOLUTION_REVIEW_PROMPT if is_solution else EQUIVALENCE_PROMPT, calls)
                 agrees = agreement["equivalent"] and (not is_solution or (
                     agreement["answer_a_steps_valid"] and agreement["answer_b_steps_valid"]))
             if not agrees:
+                errors = errors or _field_disagreement_issues(candidate, verified)
+                errors = errors or [{"code": "answer_disagreement", "path": "field_answers/answer_values/solution_text"}]
+                calls[-1]["validation_errors"] = errors
+                last_failure = ("reference_structure_invalid" if row.question_kind == "fill_blank" and not reference_valid
+                                and not any(error["code"].startswith("arithmetic_") for error in errors)
+                                else "verification_failed")
+                repair_feedback = {"stage": calls[-1]["stage"], "errors": errors,
+                                   "previous_question": {k: candidate[k] for k in ("stem_text", "answer_fields")}}
                 continue
             lock_source(session, row)
             if not snapshot_current(session, row):
                 row.status, row.failure_code = "superseded", "stale_source"
                 break
             if not _distinct_candidate(session, row, candidate, source_subject=teaching_context["source_subject"]):
+                last_failure = "verification_failed"
+                repair_feedback = {"stage": "publish", "errors": [{"code": "duplicate_previous_question", "path": "stem_text"}]}
+                rejected_questions.append(candidate["stem_text"])
                 continue
             # Persist independently solved reference; generated hint is direction only.
             models = [call["metadata"].get("model") for call in calls if call["stage"] in ("generate", "blind_solve")][-2:]
@@ -561,15 +694,18 @@ def generate_student_variant(session, job, worker):
             row.item_id, row.status, row.failure_code = item_id, "ready", None
             break
         if row.status not in ("ready", "superseded"):
-            row.status, row.failure_code = "failed", "verification_failed"
+            row.status, row.failure_code = "failed", last_failure
     except ProviderError as error:
         row.status, row.failure_code = "failed", "provider_unavailable"
-        calls.append(_failure_audit(error, client))
+        calls.append(_failure_audit(error, active_client))
     finally:
         if owned:
             client.close()
+        if fallback_owned:
+            fallback.close()
         row.audit = {**row.audit, "executions": [*row.audit.get("executions", []),
-                     {"calls": calls, "status": row.status, "source_help_after": _current_help_context(session, row)}][-5:]}
+                     {"calls": calls, "status": row.status, "source_help_after": _current_help_context(session, row),
+                      **({"source_structure": source_structure} if source_structure else {})}][-5:]}
         row.updated_at = _now()
     return {"status": row.status, "failure_code": row.failure_code}
 
@@ -679,6 +815,8 @@ def _verified_item(session, row):
             or item.status != "ai_verified" or (item.verification or {}).get("status") != "verified"
             or (item.generation or {}).get("job_id") != row.id
             or (item.generation or {}).get("source_fingerprint") != row.source_fingerprint):
+        return None
+    if item_arithmetic_issues(item):
         return None
     return item
 
@@ -791,6 +929,8 @@ def retry_generated(session, actor, activity):
 
 def grade_generated(item, payload, client=None, *, rule_only=False):
     """Rule-grade safe scalar/option values; use AI for semantics, never string inequality."""
+    if item_arithmetic_issues(item):
+        raise _problem("verification_failed", "这道练习的参考答案未通过计算核验，请重新生成；本次不计对错。")
     from .practice import _number
     data = payload.model_dump(mode="json")
     text = payload.answer_text or ""
@@ -870,10 +1010,14 @@ def assessment_dict(session, row):
         elif job and job.status == "dead":
             status = "failed"
     item = session.get(PracticeItem, row.item_id)
+    invalid_reference = item is not None and bool(item_arithmetic_issues(item))
+    if invalid_reference:
+        status = "superseded"
     result = row.result if status == "completed" else "unscorable" if status in ("failed", "superseded") else None
     return {"assessment_id": row.id, "student_id": row.student_id, "session_id": row.session_id, "item_id": row.item_id,
             "submission": {k: row.submission.get(k) for k in ("answer_text", "selected_options", "answers")},
-            "status": status, "result": result, "feedback": row.feedback or (
+            "status": status, "result": result, "feedback": (
+                "这道练习的参考答案未通过计算核验，请重新生成；本次不计对错。" if invalid_reference else row.feedback) or (
                 "本次暂未完成核验，请稍后重试。" if status == "failed" else "正在核验本次作答。"),
             "solution_text": item.solution_text if item and status == "completed" else None,
             "retryable": status == "failed"}
@@ -914,7 +1058,7 @@ def _assessment_context(session, row, *, lock=False):
             or activity.tenant_id != row.tenant_id or activity.student_id != row.student_id
             or activity.status != "active" or row.item_id not in activity.item_ids
             or item.tenant_id != row.tenant_id or item.owner_student_id != row.student_id or item.status != "ai_verified"
-            or item.graph_version != row.graph_version or item.revision != row.item_revision
+            or item.graph_version != row.graph_version or item.revision != row.item_revision or item_arithmetic_issues(item)
             or activity.graph_version != row.graph_version or _item_digest(item) != row.item_digest
             or session.scalar(select(PracticeResponse.id).where(PracticeResponse.session_id == activity.id,
                                                                PracticeResponse.item_id == item.id))):

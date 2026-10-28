@@ -53,7 +53,16 @@ def original_transport(monkeypatch):
         task = request_task(request)
         host = request.url.host
         assert host in {"ds.example.invalid", "astra.example.invalid"}
-        if "question_label" not in task:
+        if "targets" in task:
+            assert host == "astra.example.invalid"
+            output = {"readings": [
+                {"target": index, "page": 1, "label": label, "stem_text": stem,
+                 "answer_text": "3", "source": "handwritten", "answer_slots": [],
+                 "uncertainties": [], "question_type": "calculation", "options": [], "blank_count": 0}
+                for index, (label, stem) in enumerate(STEMS.items())
+            ]}
+            stage = "source_read"
+        elif "question_label" not in task:
             assert host == "ds.example.invalid" and not requests
             output = {"items": [
                 {"page": 1, "label": label, "subject": "数学", "stem_text": stem,
@@ -130,7 +139,7 @@ def test_original_page_checks_learning_and_error_source_are_idempotent(flow, ori
                               original_transport.pipeline)
     with Session(flow.database.engine) as session:
         schema_before = session.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-    assert schema_before == "0015_observation_bindings"
+    assert schema_before == "0016_student_registration"
 
     asset, recognition_job = flow.recognize()
     assert worker.run_once()
@@ -151,7 +160,7 @@ def test_original_page_checks_learning_and_error_source_are_idempotent(flow, ori
                                                     Task.kind == "check")).all()
         check_jobs = {task.id for task in checks}
         assert len(check_jobs) == 2 and all(task.status == "queued" for task in checks)
-    assert len(original_transport.requests) == 1
+    assert len(original_transport.requests) == 2
 
     assert worker.run_once()
     assert worker.run_once()
@@ -186,6 +195,7 @@ def test_original_page_checks_learning_and_error_source_are_idempotent(flow, ori
     assert Counter((request["host"], request["stage"], request["task"].get("question_label"))
                    for request in original_transport.requests) == Counter({
         ("ds.example.invalid", "recognize", None): 1,
+        ("astra.example.invalid", "source_read", None): 1,
         ("ds.example.invalid", "check", "1"): 1,
         ("ds.example.invalid", "check", "2"): 1,
         ("astra.example.invalid", "check", "2"): 1,
@@ -256,7 +266,7 @@ def test_original_page_checks_learning_and_error_source_are_idempotent(flow, ori
     assert not CorrectionWorker(flow.database.engine, worker.settings, original_transport.pipeline).run_once()
     learning.drain()
     LearningWorker(flow.database.engine, client=mapper).drain()
-    assert len(mapper.calls) == 1 and len(original_transport.requests) == 4
+    assert len(mapper.calls) == 1 and len(original_transport.requests) == 5
     assert learning_records(flow.database.engine) == records
     assert get(flow, "/v1/students/student_a/variant-practice")["groups"] == sources["groups"]
     with Session(flow.database.engine) as session:

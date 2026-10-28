@@ -10,14 +10,21 @@ function sample():CaseDetail{
  const d=fixture<Decision>('model_candidate');Object.assign(d,{verdict:'incorrect',validity:'candidate',origin:'model',answer_checks:[],correct_answer:'-2/7',input_versions:{...d.input_versions,question_id:row.case.question_id,question_revision:row.case.current_question_revision,attempt_id:row.case.current_attempt_id,attempt_recognition_revision:row.attempt.recognition_revision}})
  row.case.current_decision=d;row.question.stem_text='计算：(-5)^4';row.question.options=[];row.attempt.answer_text='2/7';row.attempt.answer_status='present';row.attempt.recognition_status='ready';return row
 }
-const card=(row:CaseDetail,open=true)=>renderToStaticMarkup(<QuestionCard row={row} index={0} open={open} onToggle={()=>{}}/>)
-it('only expanded body has math and a single toggle; raw header and source remain unchanged',()=>{
+const card=(row:CaseDetail,open=true)=>{
+ const before=structuredClone(row),decision=row.case.current_decision
+ const html=renderToStaticMarkup(<QuestionCard row={row} index={0} open={open} onToggle={()=>{}}/>)
+ expect(row).toEqual(before);expect(row.case.current_decision).toBe(decision)
+ expect(html).not.toMatch(/math-view-tools|查看原文|查看公式排版|复制本题原文|查看答案与解法/)
+ expect(html.match(/<button\b/g)).toHaveLength(1)
+ return html
+}
+it('automatically formats the expanded question and answers without display controls or source mutation',()=>{
  const row=sample(),before=structuredClone(row),html=card(row)
- expect(html).toContain('<sup>4</sup>');expect(html.match(/class="math-fraction"/g)).toHaveLength(1)
- expect(html.match(/>查看原文</g)).toHaveLength(1);expect(html.match(/>复制本题原文</g)).toHaveLength(1)
+ expect(html).toContain('<sup>4</sup>');expect(html.match(/class="math-fraction"/g)).toHaveLength(2)
+ expect(html).toContain('正确答案</span>');expect(html).toContain('aria-label="-2/7"');expect(html).toContain('aria-label="2/7"')
  const header=html.slice(html.indexOf('<button class="recognition-card-head"'),html.indexOf('</button>'))
  expect(header).toContain('(-5)^4');expect(header).not.toContain('<sup>');expect(header).not.toContain('查看原文')
- expect(card(row,false)).not.toContain('math-view-tools');expect(row).toEqual(before)
+ expect(card(row,false)).not.toMatch(/math-view-tools|math-readout|recognition-card-body/);expect(row).toEqual(before)
 })
 it('original mode preserves whitespace and ambiguous text exactly',()=>{
  expect(renderToStaticMarkup(<MathText text={'  -2/7\n'} original/>)).toBe('  -2/7\n')
@@ -29,11 +36,18 @@ it('plain or ambiguous-only cards get no toolbar',()=>{
 })
 it('position prompts/answers/corrections preserve source and result labels',()=>{
  const row=sample();row.question.blank_count=2;row.case.current_decision!.answer_checks=[{index:1,prompt:'(-2)^3',student_answer:'2/7',verdict:'incorrect',correct_answer:'-2/7',explanation:'原说明'},{index:2,prompt:'x^(2n+1)',student_answer:'2^3',verdict:'correct',correct_answer:null,explanation:'原说明'}] as unknown as NonNullable<Decision['answer_checks']>
- const before=structuredClone(row),html=card(row);expect(html).toContain('逐空判定');expect(html).toContain('<sup>2n+1</sup>');expect(html).toContain('✕ 错误');expect(html).toContain('✓ 正确');expect(row).toEqual(before)
+ const before=structuredClone(row),html=card(row);expect(html).toContain('逐空判定');expect(html).toContain('<sup>2n+1</sup>');expect(html).toContain('✕ 错误');expect(html).toContain('✓ 正确');expect(html).toContain('class="slot-correction">应填：<span class="math-readout" role="math" aria-label="-2/7"');expect(row).toEqual(before)
 })
-it('AI incomplete remains a draft and exposes no correct answer or new subject control',()=>{
+it('automatically formats solution steps while keeping the original decision intact',()=>{
+ const row=sample();row.case.current_decision!.correction_method='2^3=8'
+ const html=card(row)
+ expect(html).toContain('正确解题步骤</span>')
+ expect(html).toContain('<p class="recognition-solution-steps"><span class="math-readout" role="math" aria-label="2^3=8">')
+ expect(html).toContain('<sup>3</sup>')
+})
+it('AI incomplete stays unjudged and exposes no correct answer or solution steps',()=>{
  const row=sample(),d=row.case.current_decision!;d.verdict='unable_to_judge';d.validity='needs_review';d.verification={mode:'two_model',status:'degraded',independent_readback:false,reason_codes:['provider_unavailable']};row.question.subject=null;row.attempt.recognition_status='needs_revision'
- const html=card(row);expect(html).toContain('AI 识读草稿');expect(html).toContain('AI 核对暂未完成');expect(html).toContain('可能与照片不同');expect(html).not.toContain('正确答案</span>');expect(html).not.toContain('选择题目学科')
+ const html=card(row);expect(html).toContain('class="recognition-status uncertain"');expect(html).toContain('class="recognition-answer uncertain"');expect(html).not.toMatch(/正确答案<|正确解题步骤|class="recognition-answer (correct|incorrect)"|✓ 正确|✕ 错误/)
 })
 it('script-shaped text is escaped and commands stay literal',()=>{
  const html=renderToStaticMarkup(<MathText text={'<img src=x onerror="globalThis.bad=1"> 2^3'}/>);expect(html).toContain('&lt;img');expect(html).not.toContain('<img');expect(html).not.toContain('<script')
